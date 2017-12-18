@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 module Surveyor.Events ( Events(..) ) where
 
@@ -11,6 +12,7 @@ import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult )
 
 data Events where
   ErrorLoadingELFHeader :: Int64 -> String -> Events
-  ErrorLoadingELF :: [E.ElfParseError n] -> Events
+  ErrorLoadingELF :: (Eq (E.ElfWordType n), Num (E.ElfWordType n), Show (E.ElfWordType n))
+                  => [E.ElfParseError n] -> Events
   AnalysisFailure :: X.SomeException -> Events
   AnalysisFinished :: BinaryAnalysisResult -> [R.Diagnostic] -> Events
