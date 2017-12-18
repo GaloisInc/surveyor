@@ -1,6 +1,8 @@
 module Surveyor ( surveyor ) where
 
 import qualified Brick as B
+import qualified Brick.BChan as B
+import qualified Graphics.Vty as V
 
 data State = State
 data Names = Main
@@ -24,6 +26,7 @@ appAttrMap = undefined
 
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = do
+  customEventChan <- B.newBChan 100
   let app = B.App { B.appDraw = appDraw
                   , B.appChooseCursor = appChooseCursor
                   , B.appHandleEvent = appHandleEvent
@@ -31,5 +34,5 @@ surveyor mExePath = do
                   , B.appAttrMap = appAttrMap
                   }
   let initialState = State
-  _finalState <- B.defaultMain app initialState
+  _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
