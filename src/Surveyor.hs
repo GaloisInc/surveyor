@@ -33,13 +33,15 @@ import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..) )
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Loader ( asynchronouslyLoad )
 
-data State = forall w . (MM.MemWidth w) =>
-  State { sInputFile :: Maybe FilePath
-        , sBinaryInfo :: Maybe BinaryAnalysisResult
-        , sDiagnosticLog :: Seq.Seq T.Text
-        , sFunctionList :: B.List Names (FunctionListEntry w)
-        , sUIMode :: UIMode
-        }
+data State where
+  State :: (MM.MemWidth w) => S w -> State
+
+data S w = S { sInputFile :: Maybe FilePath
+             , sBinaryInfo :: Maybe BinaryAnalysisResult
+             , sDiagnosticLog :: Seq.Seq T.Text
+             , sUIMode :: UIMode
+             , sFunctionList :: B.List Names (FunctionListEntry w)
+             }
 
 data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text
 
@@ -70,8 +72,8 @@ drawConcreteBlock isa b =
          , B.vBox [ B.str (R.isaPrettyInstruction isa i) | i <- R.basicBlockInstructions b ]
          ]
 
-drawFunctionList :: State -> BinaryAnalysisResult -> B.Widget Names
-drawFunctionList State { sFunctionList = flist }
+drawFunctionList :: (MM.MemWidth w) => S w -> BinaryAnalysisResult -> B.Widget Names
+drawFunctionList S { sFunctionList = flist }
                  BinaryAnalysisResult { rBlockInfo = binfo, rISA = isa } =
   B.renderList drawFunctionEntry True flist
   where
@@ -88,7 +90,7 @@ contained :: B.Widget Names -> B.Widget Names
 contained = B.withBorderStyle B.unicodeRounded
 
 appDraw :: State -> [B.Widget Names]
-appDraw s =
+appDraw (State s) =
   case sInputFile s of
     Nothing -> [contained (B.txt "No file loaded")]
     Just binFileName ->
@@ -104,7 +106,7 @@ appChooseCursor :: State -> [B.CursorLocation Names] -> Maybe (B.CursorLocation 
 appChooseCursor _ _ = Nothing
 
 appHandleEvent :: State -> B.BrickEvent Names Events -> B.EventM Names (B.Next State)
-appHandleEvent s0 evt =
+appHandleEvent (State s0) evt =
   case evt of
     B.AppEvent ae ->
       case ae of
@@ -114,24 +116,24 @@ appHandleEvent s0 evt =
               funcList = V.fromList [ FLE addr (TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi))
                                     | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo rbi)
                                     ]
-          in B.continue State { sBinaryInfo = Just bar
-                              , sFunctionList = B.list FunctionList funcList 1
-                              , sDiagnosticLog =
-                                sDiagnosticLog s0 <> Seq.fromList newDiags <> Seq.singleton notification
-                              , sUIMode = Diags
-                              , sInputFile = sInputFile s0
-                              }
+          in B.continue $ State S { sBinaryInfo = Just bar
+                                  , sFunctionList = B.list FunctionList funcList 1
+                                  , sDiagnosticLog =
+                                    sDiagnosticLog s0 <> Seq.fromList newDiags <> Seq.singleton notification
+                                  , sUIMode = Diags
+                                  , sInputFile = sInputFile s0
+                                  }
         AnalysisFailure exn ->
-          B.continue $ s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
+          B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
         ErrorLoadingELFHeader off msg ->
           let t = T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)
-          in B.continue $ s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
+          in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
         ErrorLoadingELF errs ->
           let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
-          in B.continue $ s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
-    B.VtyEvent vtyEvt -> handleVtyEvent s0 vtyEvt
-    B.MouseDown {} -> B.continue s0
-    B.MouseUp {} -> B.continue s0
+          in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
+    B.VtyEvent vtyEvt -> handleVtyEvent (State s0) vtyEvt
+    B.MouseDown {} -> B.continue (State s0)
+    B.MouseUp {} -> B.continue (State s0)
 
 isListEventKey :: V.Key -> Bool
 isListEventKey k =
@@ -145,25 +147,20 @@ isListEventKey k =
     _ -> False
 
 handleVtyEvent :: State -> V.Event -> B.EventM Names (B.Next State)
-handleVtyEvent s0@State { sFunctionList = l0 } evt =
+handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
   case evt of
     V.EvKey (V.KChar 's') [] ->
-      B.continue $ s0 { sUIMode = Summary }
+      B.continue $ State (s { sUIMode = Summary })
     V.EvKey (V.KChar 'm') [] ->
-      B.continue $ s0 { sUIMode = Diags }
+      B.continue $ State (s { sUIMode = Diags })
     V.EvKey (V.KChar 'f') [] ->
-      B.continue $ s0 { sUIMode = ListFunctions }
+      B.continue $ State (s { sUIMode = ListFunctions })
     V.EvKey (V.KChar 'q') [] -> B.halt s0
     V.EvKey V.KEsc [] -> B.halt s0
     V.EvKey k []
-      | sUIMode s0 == ListFunctions && isListEventKey k -> do
+      | sUIMode s == ListFunctions && isListEventKey k -> do
           l1 <- B.handleListEvent evt l0
-          B.continue State { sBinaryInfo = sBinaryInfo s0
-                           , sFunctionList = l1
-                           , sDiagnosticLog = sDiagnosticLog s0
-                           , sUIMode = sUIMode s0
-                           , sInputFile = sInputFile s0
-                           }
+          B.continue (State (s { sFunctionList = l1 }))
     _ -> B.continue s0
 
 appStartEvent :: State -> B.EventM Names State
@@ -183,7 +180,7 @@ surveyor mExePath = do
                   , B.appAttrMap = appAttrMap
                   }
   _ <- T.traverse (asynchronouslyLoad customEventChan) mExePath
-  let initialState = State { sInputFile = mExePath
+  let initialState = State S { sInputFile = mExePath
                            , sBinaryInfo = Nothing
                            , sDiagnosticLog = Seq.empty
                            , sFunctionList = (B.list FunctionList (V.empty @(FunctionListEntry 64)) 1)
