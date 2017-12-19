@@ -29,19 +29,22 @@ import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
-import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..) )
+import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..)
+                                               , BinaryAnalysisResultWrapper(..)
+                                               )
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Loader ( asynchronouslyLoad )
 
 data State where
-  State :: (MM.MemWidth w) => S w -> State
+  State :: (MM.MemWidth w) => S i a w arch -> State
 
-data S w = S { sInputFile :: Maybe FilePath
-             , sBinaryInfo :: Maybe BinaryAnalysisResult
-             , sDiagnosticLog :: Seq.Seq T.Text
-             , sUIMode :: UIMode
-             , sFunctionList :: B.List Names (FunctionListEntry w)
-             }
+data S i a w arch =
+  S { sInputFile :: Maybe FilePath
+    , sBinaryInfo :: Maybe (BinaryAnalysisResult i a w arch)
+    , sDiagnosticLog :: Seq.Seq T.Text
+    , sUIMode :: UIMode
+    , sFunctionList :: B.List Names (FunctionListEntry w)
+    }
 
 data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text
 
@@ -59,7 +62,7 @@ data Names = DiagnosticView
            | FunctionList
   deriving (Eq, Ord, Show)
 
-drawSummary :: FilePath -> BinaryAnalysisResult -> B.Widget Names
+drawSummary :: FilePath -> BinaryAnalysisResult i a w arch -> B.Widget Names
 drawSummary binFileName BinaryAnalysisResult { rBlockInfo = binfo } =
   B.vBox [ B.str ("Target binary: " ++ binFileName)
          , B.str ("Discovered functions: " ++ show (length (R.biFunctionEntries binfo)))
@@ -72,7 +75,7 @@ drawConcreteBlock isa b =
          , B.vBox [ B.str (R.isaPrettyInstruction isa i) | i <- R.basicBlockInstructions b ]
          ]
 
-drawFunctionList :: (MM.MemWidth w) => S w -> BinaryAnalysisResult -> B.Widget Names
+drawFunctionList :: (MM.MemWidth w) => S i a w arch -> BinaryAnalysisResult i a w arch -> B.Widget Names
 drawFunctionList S { sFunctionList = flist }
                  BinaryAnalysisResult { rBlockInfo = binfo, rISA = isa } =
   B.renderList drawFunctionEntry True flist
@@ -110,7 +113,7 @@ appHandleEvent (State s0) evt =
   case evt of
     B.AppEvent ae ->
       case ae of
-        AnalysisFinished bar@BinaryAnalysisResult { rBlockInfo = rbi } diags ->
+        AnalysisFinished (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) diags ->
           let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
               notification = "Finished loading file"
               funcList = V.fromList [ FLE addr (TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi))

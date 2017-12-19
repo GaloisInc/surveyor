@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Loader (
   asynchronouslyLoad,
@@ -16,7 +17,9 @@ import qualified Renovate as R
 import qualified Renovate.Arch.X86_64 as X86
 import qualified Renovate.Arch.PPC as PPC
 
-import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..) )
+import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..)
+                                               , BinaryAnalysisResultWrapper(..)
+                                               )
 import           Surveyor.Events ( Events(..) )
 
 -- | Start a thread to load an input file in the background
@@ -40,9 +43,9 @@ analysis :: (MM.MemWidth w)
          => R.ISA i a w
          -> MM.Memory w
          -> R.BlockInfo i w arch
-         -> BinaryAnalysisResult
+         -> BinaryAnalysisResultWrapper
 analysis isa mem bi =
-  BinaryAnalysisResult { rBlockInfo = bi
+  BinaryAnalysisResultWrapper $ BinaryAnalysisResult { rBlockInfo = bi
                        , rMemory = mem
                        , rISA = isa
                        }
