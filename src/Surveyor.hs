@@ -14,6 +14,7 @@ import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
 import qualified Data.Foldable as F
 import qualified Data.Map as M
+import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
@@ -45,9 +46,14 @@ data S i a w arch =
     , sDiagnosticLog :: Seq.Seq T.Text
     , sUIMode :: UIMode
     , sFunctionList :: B.List Names (FunctionListEntry w)
+    , sAppState :: AppState
     }
 
 data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
+
+data AppState = Loading
+              | Ready
+              | AwaitingFile
 
 data UIMode = Diags
             -- ^ A window containing the history of diagnostic information
@@ -56,6 +62,9 @@ data UIMode = Diags
             | ListFunctions
             -- ^ A list of all of the discovered functions (which allows for
             -- drilling down and displaying blocks)
+            | MiniBuffer UIMode
+            -- ^ An interactive widget that takes focus and accepts all
+            -- keystrokes except for C-g
             deriving (Eq, Ord, Show)
 
 data Names = DiagnosticView
@@ -82,7 +91,7 @@ drawFunctionList S { sFunctionList = flist }
   B.renderList drawFunctionEntry True flist
   where
     drawFunctionEntry isFocused (FLE addr txt blockCount) =
-      let focusedXfrm = if isFocused then B.withAttr "focused" else id
+      let focusedXfrm = if isFocused then B.withAttr focusedListAttr else id
       in focusedXfrm (B.hBox [B.str (printf "%s: %s (%d blocks)" (show (PP.pretty addr)) (T.unpack txt) blockCount)])
 
 drawDiagnostics :: Seq.Seq T.Text -> B.Widget Names
@@ -90,21 +99,43 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
   where
     body = B.vBox [ B.txtWrap t | t <- F.toList diags ]
 
-contained :: B.Widget Names -> B.Widget Names
-contained = B.withBorderStyle B.unicodeRounded
+-- | Draw a status bar based on the current state
+--
+-- The status bar is a line at the bottom of the screen that reflects the
+-- currently-loaded executable (if any) and includes an indicator of the
+-- analysis progress.
+drawStatusBar :: S i a w arch -> B.Widget Names
+drawStatusBar s =
+  B.withAttr statusBarAttr (B.hBox [fileNameWidget, B.padLeft B.Max statusWidget])
+  where
+    fileNameWidget = B.str (fromMaybe "" (sInputFile s))
+    statusWidget =
+      case sAppState s of
+        Loading -> B.str "Loading"
+        Ready -> B.str "Ready"
+        AwaitingFile -> B.str "Waiting for file"
+
+drawEchoArea :: S i a w arch -> B.Widget Names
+drawEchoArea s =
+  case Seq.viewr (sDiagnosticLog s) of
+    Seq.EmptyR -> B.emptyWidget
+    _ Seq.:> lastDiag -> B.txt lastDiag
+
+drawAppShell :: S i a w arch -> B.Widget Names -> [B.Widget Names]
+drawAppShell s w = [B.vBox [B.padBottom B.Max w, drawStatusBar s, drawEchoArea s]]
 
 appDraw :: State -> [B.Widget Names]
 appDraw (State s) =
   case sInputFile s of
-    Nothing -> [contained (B.txt "No file loaded")]
+    Nothing -> drawAppShell s B.emptyWidget
     Just binFileName ->
       case sBinaryInfo s of
-        Nothing -> [contained (B.str ("Analyzing " ++ binFileName))]
+        Nothing -> drawAppShell s B.emptyWidget
         Just binfo ->
           case sUIMode s of
-            Diags -> [contained (drawDiagnostics (sDiagnosticLog s))]
-            Summary -> [contained (drawSummary binFileName binfo)]
-            ListFunctions -> [contained (drawFunctionList s binfo)]
+            Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
+            Summary -> drawAppShell s (drawSummary binFileName binfo)
+            ListFunctions -> drawAppShell s (drawFunctionList s binfo)
 
 appChooseCursor :: State -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ _ = Nothing
@@ -128,6 +159,7 @@ appHandleEvent (State s0) evt =
                                     sDiagnosticLog s0 <> Seq.fromList newDiags <> Seq.singleton notification
                                   , sUIMode = Diags
                                   , sInputFile = sInputFile s0
+                                  , sAppState = Ready
                                   }
         AnalysisProgress _addr (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) ->
           let funcList = V.fromList [ FLE addr textName blockCount
@@ -140,6 +172,7 @@ appHandleEvent (State s0) evt =
                                   , sDiagnosticLog = sDiagnosticLog s0
                                   , sUIMode = sUIMode s0
                                   , sInputFile = sInputFile s0
+                                  , sAppState = Loading
                                   }
         BlockDiscovered addr ->
           B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Found a block at address " ++ show addr) }
@@ -187,8 +220,15 @@ appStartEvent :: State -> B.EventM Names State
 appStartEvent s0 = return s0
 
 appAttrMap :: State -> B.AttrMap
-appAttrMap _ = B.attrMap V.defAttr [ ("focused", B.bg V.blue)
+appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.white)
+                                   , (statusBarAttr, B.bg V.black <> B.fg V.white)
                                    ]
+
+focusedListAttr :: B.AttrName
+focusedListAttr = "focusedListItem"
+
+statusBarAttr :: B.AttrName
+statusBarAttr = "statusBar"
 
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = do
@@ -205,6 +245,7 @@ surveyor mExePath = do
                            , sDiagnosticLog = Seq.empty
                            , sFunctionList = (B.list FunctionList (V.empty @(FunctionListEntry 64)) 1)
                            , sUIMode = Diags
+                           , sAppState = maybe AwaitingFile (const Loading) mExePath
                            }
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
