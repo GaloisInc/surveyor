@@ -17,6 +17,7 @@ library
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Events
                        Surveyor.Loader
+                       Surveyor.Widget.Minibuffer
   -- other-modules:       
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
