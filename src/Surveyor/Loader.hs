@@ -5,8 +5,6 @@ module Surveyor.Loader (
   loadElf
   ) where
 
-import           GHC.IO ( ioToST )
-
 import qualified Brick.BChan as B
 import qualified Control.Concurrent.Async as A
 import qualified Data.ByteString as BS
@@ -72,8 +70,7 @@ loadElf customEventChan someElf = do
              , (R.X86_64, R.SomeConfig NR.knownNat (X86.config analysis undefined))
              ]
   R.withElfConfig someElf rcfgs $ \rc e0 m -> do
-    let rc' = rc { R.rcBlockCallback = \addr -> ioToST (B.writeBChan customEventChan (BlockDiscovered (MM.relativeSegmentAddr addr)))
-                 , R.rcFunctionCallback = \addr ebi ->
+    let rc' = rc { R.rcFunctionCallback = \addr ebi ->
                      case ebi of
                        Left ex -> B.writeBChan customEventChan (AnalysisFailure ex)
                        Right bi ->

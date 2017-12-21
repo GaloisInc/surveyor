@@ -26,6 +26,7 @@ library
                        text,
                        vector,
                        prettyprinter,
+                       lens >= 4.15 && < 5,
                        parameterized-utils,
                        brick >= 0.30 && < 1,
                        vty,

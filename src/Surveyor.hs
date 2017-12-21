@@ -11,6 +11,7 @@ import qualified Brick as B
 import qualified Brick.BChan as B
 import qualified Brick.Widgets.Border.Style as B
 import qualified Brick.Widgets.List as B
+import qualified Control.Lens as L
 import qualified Data.Foldable as F
 import qualified Data.Map as M
 import           Data.Monoid
@@ -46,7 +47,7 @@ data S i a w arch =
     , sFunctionList :: B.List Names (FunctionListEntry w)
     }
 
-data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text
+data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
 
 data UIMode = Diags
             -- ^ A window containing the history of diagnostic information
@@ -80,9 +81,9 @@ drawFunctionList S { sFunctionList = flist }
                  BinaryAnalysisResult { rBlockInfo = binfo, rISA = isa } =
   B.renderList drawFunctionEntry True flist
   where
-    drawFunctionEntry isFocused (FLE addr txt) =
+    drawFunctionEntry isFocused (FLE addr txt blockCount) =
       let focusedXfrm = if isFocused then B.withAttr "focused" else id
-      in focusedXfrm (B.hBox [B.str (show (PP.pretty addr) ++ ": "), B.txt txt])
+      in focusedXfrm (B.hBox [B.str (printf "%s: %s (%d blocks)" (show (PP.pretty addr)) (T.unpack txt) blockCount)])
 
 drawDiagnostics :: Seq.Seq T.Text -> B.Widget Names
 drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
@@ -116,8 +117,10 @@ appHandleEvent (State s0) evt =
         AnalysisFinished (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) diags ->
           let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
               notification = "Finished loading file"
-              funcList = V.fromList [ FLE addr (TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi))
+              funcList = V.fromList [ FLE addr textName blockCount
                                     | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo rbi)
+                                    , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
+                                    , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
                                     ]
           in B.continue $ State S { sBinaryInfo = Just bar
                                   , sFunctionList = B.list FunctionList funcList 1
@@ -127,14 +130,14 @@ appHandleEvent (State s0) evt =
                                   , sInputFile = sInputFile s0
                                   }
         AnalysisProgress _addr (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) ->
-          let notification = "Analyzed a function"
-              funcList = V.fromList [ FLE addr (TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi))
+          let funcList = V.fromList [ FLE addr textName blockCount
                                     | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo rbi)
+                                    , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
+                                    , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
                                     ]
           in B.continue $ State S { sBinaryInfo = Just bar
                                   , sFunctionList = B.list FunctionList funcList 1
-                                  , sDiagnosticLog =
-                                    sDiagnosticLog s0 Seq.|> notification
+                                  , sDiagnosticLog = sDiagnosticLog s0
                                   , sUIMode = sUIMode s0
                                   , sInputFile = sInputFile s0
                                   }
