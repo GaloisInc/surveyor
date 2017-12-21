@@ -126,6 +126,20 @@ appHandleEvent (State s0) evt =
                                   , sUIMode = Diags
                                   , sInputFile = sInputFile s0
                                   }
+        AnalysisProgress _addr (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) ->
+          let notification = "Analyzed a function"
+              funcList = V.fromList [ FLE addr (TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi))
+                                    | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo rbi)
+                                    ]
+          in B.continue $ State S { sBinaryInfo = Just bar
+                                  , sFunctionList = B.list FunctionList funcList 1
+                                  , sDiagnosticLog =
+                                    sDiagnosticLog s0 Seq.|> notification
+                                  , sUIMode = sUIMode s0
+                                  , sInputFile = sInputFile s0
+                                  }
+        BlockDiscovered addr ->
+          B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Found a block at address " ++ show addr) }
         AnalysisFailure exn ->
           B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
         ErrorLoadingELFHeader off msg ->

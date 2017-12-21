@@ -6,6 +6,7 @@ import qualified Control.Exception as X
 import qualified Data.ElfEdit as E
 import           Data.Int ( Int64 )
 
+import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
 import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResultWrapper )
@@ -16,3 +17,5 @@ data Events where
                   => [E.ElfParseError n] -> Events
   AnalysisFailure :: X.SomeException -> Events
   AnalysisFinished :: BinaryAnalysisResultWrapper -> [R.Diagnostic] -> Events
+  BlockDiscovered :: (MM.MemWidth w) => MM.MemAddr w -> Events
+  AnalysisProgress :: MM.MemAddr w -> BinaryAnalysisResultWrapper -> Events

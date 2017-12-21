@@ -5,6 +5,8 @@ module Surveyor.Loader (
   loadElf
   ) where
 
+import           GHC.IO ( ioToST )
+
 import qualified Brick.BChan as B
 import qualified Control.Concurrent.Async as A
 import qualified Data.ByteString as BS
@@ -28,16 +30,23 @@ import           Surveyor.Events ( Events(..) )
 -- provided event channel
 asynchronouslyLoad :: B.BChan Events -> FilePath -> IO ()
 asynchronouslyLoad customEventChan exePath = do
-  thread <- A.async $ do
-    bs <- BS.readFile exePath
-    case E.parseElf bs of
-      E.ElfHeaderError off msg ->
-        B.writeBChan customEventChan (ErrorLoadingELFHeader off msg)
-      E.Elf32Res [] e32 -> loadElf customEventChan (E.Elf32 e32)
-      E.Elf64Res [] e64 -> loadElf customEventChan (E.Elf64 e64)
-      E.Elf32Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
-      E.Elf64Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
-  A.link thread
+  _thread <- A.async $ do
+    -- We spawn off a second worker so that we can catch any exceptions it
+    -- throws without blocking the caller.
+    worker <- A.async $ do
+      bs <- BS.readFile exePath
+      case E.parseElf bs of
+        E.ElfHeaderError off msg ->
+          B.writeBChan customEventChan (ErrorLoadingELFHeader off msg)
+        E.Elf32Res [] e32 -> loadElf customEventChan (E.Elf32 e32)
+        E.Elf64Res [] e64 -> loadElf customEventChan (E.Elf64 e64)
+        E.Elf32Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
+        E.Elf64Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
+    eres <- A.waitCatch worker
+    case eres of
+      Right () -> return ()
+      Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
+  return ()
 
 analysis :: (MM.MemWidth w)
          => R.ISA i a w
@@ -63,7 +72,17 @@ loadElf customEventChan someElf = do
              , (R.X86_64, R.SomeConfig NR.knownNat (X86.config analysis undefined))
              ]
   R.withElfConfig someElf rcfgs $ \rc e0 m -> do
-    case R.analyzeElf rc e0 m of
-      Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
-      Right (res, diags) -> B.writeBChan customEventChan (AnalysisFinished res diags)
+    let rc' = rc { R.rcBlockCallback = \addr -> ioToST (B.writeBChan customEventChan (BlockDiscovered (MM.relativeSegmentAddr addr)))
+                 , R.rcFunctionCallback = \addr ebi ->
+                     case ebi of
+                       Left ex -> B.writeBChan customEventChan (AnalysisFailure ex)
+                       Right bi ->
+                         let res = BinaryAnalysisResult { rBlockInfo = bi
+                                                        , rMemory = m
+                                                        , rISA = R.rcISA rc
+                                                        }
+                         in B.writeBChan customEventChan (AnalysisProgress (MM.relativeSegmentAddr addr) (BinaryAnalysisResultWrapper res))
+                 }
+    (res, diags) <- R.analyzeElf rc' e0 m
+    B.writeBChan customEventChan (AnalysisFinished res diags)
 
