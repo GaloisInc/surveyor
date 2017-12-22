@@ -19,3 +19,4 @@ data Events where
   AnalysisFinished :: BinaryAnalysisResultWrapper -> [R.Diagnostic] -> Events
   BlockDiscovered :: (MM.MemWidth w) => MM.MemAddr w -> Events
   AnalysisProgress :: MM.MemAddr w -> BinaryAnalysisResultWrapper -> Events
+  ShowSummary :: Events

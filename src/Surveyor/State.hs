@@ -22,8 +22,8 @@ import qualified Data.Text as T
 import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
-import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..)
-                                               )
+import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..) )
+import           Surveyor.Events ( Events )
 import qualified Surveyor.Minibuffer as MB
 
 data State where
@@ -37,6 +37,7 @@ data S i a w arch =
     , sFunctionList :: B.List Names (FunctionListEntry w)
     , sMinibuffer :: MB.Minibuffer MB.Argument MB.TypeRepr T.Text Names
     , sAppState :: AppState
+    , sEmitEvent :: Events -> IO ()
     }
 
 data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int

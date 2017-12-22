@@ -11,10 +11,12 @@ import qualified Brick as B
 import qualified Brick.BChan as B
 import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
+import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
 import qualified Data.Map as M
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
+import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -155,6 +157,7 @@ appHandleEvent (State s0) evt =
                                   , sInputFile = sInputFile s0
                                   , sMinibuffer = sMinibuffer s0
                                   , sAppState = Ready
+                                  , sEmitEvent = sEmitEvent s0
                                   }
         AnalysisProgress _addr (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) ->
           let funcList = V.fromList [ FLE addr textName blockCount
@@ -169,6 +172,7 @@ appHandleEvent (State s0) evt =
                                   , sUIMode = sUIMode s0
                                   , sInputFile = sInputFile s0
                                   , sAppState = Loading
+                                  , sEmitEvent = sEmitEvent s0
                                   }
         BlockDiscovered addr ->
           B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Found a block at address " ++ show addr) }
@@ -180,6 +184,7 @@ appHandleEvent (State s0) evt =
         ErrorLoadingELF errs ->
           let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
           in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
+        ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
     B.VtyEvent vtyEvt -> handleVtyEvent (State s0) vtyEvt
     B.MouseDown {} -> B.continue (State s0)
     B.MouseUp {} -> B.continue (State s0)
@@ -216,8 +221,9 @@ handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
           case sUIMode s of
             SomeMiniBuffer (MiniBuffer _) -> B.continue s0
             SomeUIMode oldMode -> B.continue $ State (s { sUIMode = SomeMiniBuffer (MiniBuffer oldMode) })
-        V.EvKey (V.KChar 's') [] ->
-          B.continue $ State (s { sUIMode = SomeUIMode Summary })
+        V.EvKey (V.KChar 's') [] -> do
+          liftIO (sEmitEvent s ShowSummary)
+          B.continue (State s)
         V.EvKey (V.KChar 'm') [] ->
           B.continue $ State (s { sUIMode = SomeUIMode Diags })
         V.EvKey (V.KChar 'f') [] ->
@@ -240,13 +246,16 @@ surveyor mExePath = do
                   , B.appAttrMap = appAttrMap
                   }
   _ <- T.traverse (asynchronouslyLoad customEventChan) mExePath
+  let commands = [ MB.Command "summary" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowSummary)
+                 ]
   let initialState = State S { sInputFile = mExePath
                              , sBinaryInfo = Nothing
                              , sDiagnosticLog = Seq.empty
                              , sFunctionList = (B.list FunctionList (V.empty @(FunctionListEntry 64)) 1)
                              , sUIMode = SomeUIMode Diags
                              , sAppState = maybe AwaitingFile (const Loading) mExePath
-                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" []
+                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" commands
+                             , sEmitEvent = B.writeBChan customEventChan
                              }
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
