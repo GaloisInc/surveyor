@@ -9,7 +9,6 @@ module Surveyor ( surveyor ) where
 
 import qualified Brick as B
 import qualified Brick.BChan as B
-import qualified Brick.Widgets.Border.Style as B
 import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
 import qualified Data.Foldable as F
@@ -31,46 +30,14 @@ import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
+import           Surveyor.Attributes
 import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..)
                                                , BinaryAnalysisResultWrapper(..)
                                                )
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Loader ( asynchronouslyLoad )
-
-data State where
-  State :: (MM.MemWidth w) => S i a w arch -> State
-
-data S i a w arch =
-  S { sInputFile :: Maybe FilePath
-    , sBinaryInfo :: Maybe (BinaryAnalysisResult i a w arch)
-    , sDiagnosticLog :: Seq.Seq T.Text
-    , sUIMode :: UIMode
-    , sFunctionList :: B.List Names (FunctionListEntry w)
-    , sAppState :: AppState
-    }
-
-data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
-
-data AppState = Loading
-              | Ready
-              | AwaitingFile
-
-data UIMode = Diags
-            -- ^ A window containing the history of diagnostic information
-            | Summary
-            -- ^ Summary information returned by the binary analysis
-            | ListFunctions
-            -- ^ A list of all of the discovered functions (which allows for
-            -- drilling down and displaying blocks)
-            | MiniBuffer UIMode
-            -- ^ An interactive widget that takes focus and accepts all
-            -- keystrokes except for C-g
-            deriving (Eq, Ord, Show)
-
-data Names = DiagnosticView
-           | DiagnosticContent
-           | FunctionList
-  deriving (Eq, Ord, Show)
+import qualified Surveyor.Minibuffer as MB
+import           Surveyor.State
 
 drawSummary :: FilePath -> BinaryAnalysisResult i a w arch -> B.Widget Names
 drawSummary binFileName BinaryAnalysisResult { rBlockInfo = binfo } =
@@ -122,7 +89,16 @@ drawEchoArea s =
     _ Seq.:> lastDiag -> B.txt lastDiag
 
 drawAppShell :: S i a w arch -> B.Widget Names -> [B.Widget Names]
-drawAppShell s w = [B.vBox [B.padBottom B.Max w, drawStatusBar s, drawEchoArea s]]
+drawAppShell s w = [B.vBox [ B.padBottom B.Max w
+                           , drawStatusBar s
+                           , bottomLine
+                           ]
+                   ]
+  where
+    bottomLine =
+      case sUIMode s of
+        SomeMiniBuffer (MiniBuffer _) -> MB.renderMinibuffer True (sMinibuffer s)
+        _ ->  drawEchoArea s
 
 appDraw :: State -> [B.Widget Names]
 appDraw (State s) =
@@ -133,12 +109,30 @@ appDraw (State s) =
         Nothing -> drawAppShell s B.emptyWidget
         Just binfo ->
           case sUIMode s of
-            Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
-            Summary -> drawAppShell s (drawSummary binFileName binfo)
-            ListFunctions -> drawAppShell s (drawFunctionList s binfo)
+            SomeMiniBuffer (MiniBuffer innerMode) ->
+              drawUIMode binFileName binfo s innerMode
+            SomeUIMode mode ->
+              drawUIMode binFileName binfo s mode
+
+drawUIMode :: (MM.MemWidth w)
+           => FilePath
+           -> BinaryAnalysisResult i a w arch
+           -> S i a w arch
+           -> UIMode NormalK
+           -> [B.Widget Names]
+drawUIMode binFileName binfo s uim =
+  case uim of
+    Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
+    Summary -> drawAppShell s (drawSummary binFileName binfo)
+    ListFunctions -> drawAppShell s (drawFunctionList s binfo)
 
 appChooseCursor :: State -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ _ = Nothing
+
+appAttrMap :: State -> B.AttrMap
+appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.white)
+                                   , (statusBarAttr, B.bg V.black <> B.fg V.white)
+                                   ]
 
 appHandleEvent :: State -> B.BrickEvent Names Events -> B.EventM Names (B.Next State)
 appHandleEvent (State s0) evt =
@@ -157,8 +151,9 @@ appHandleEvent (State s0) evt =
                                   , sFunctionList = B.list FunctionList funcList 1
                                   , sDiagnosticLog =
                                     sDiagnosticLog s0 <> Seq.fromList newDiags <> Seq.singleton notification
-                                  , sUIMode = Diags
+                                  , sUIMode = SomeUIMode Diags
                                   , sInputFile = sInputFile s0
+                                  , sMinibuffer = sMinibuffer s0
                                   , sAppState = Ready
                                   }
         AnalysisProgress _addr (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) ->
@@ -169,6 +164,7 @@ appHandleEvent (State s0) evt =
                                     ]
           in B.continue $ State S { sBinaryInfo = Just bar
                                   , sFunctionList = B.list FunctionList funcList 1
+                                  , sMinibuffer = sMinibuffer s0
                                   , sDiagnosticLog = sDiagnosticLog s0
                                   , sUIMode = sUIMode s0
                                   , sInputFile = sInputFile s0
@@ -202,33 +198,26 @@ isListEventKey k =
 handleVtyEvent :: State -> V.Event -> B.EventM Names (B.Next State)
 handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
   case evt of
+    V.EvKey (V.KChar 'x') [V.MAlt] ->
+      case sUIMode s of
+        SomeMiniBuffer (MiniBuffer _) -> B.continue s0
+        SomeUIMode oldMode -> B.continue $ State (s { sUIMode = SomeMiniBuffer (MiniBuffer oldMode) })
     V.EvKey (V.KChar 's') [] ->
-      B.continue $ State (s { sUIMode = Summary })
+      B.continue $ State (s { sUIMode = SomeUIMode Summary })
     V.EvKey (V.KChar 'm') [] ->
-      B.continue $ State (s { sUIMode = Diags })
+      B.continue $ State (s { sUIMode = SomeUIMode Diags })
     V.EvKey (V.KChar 'f') [] ->
-      B.continue $ State (s { sUIMode = ListFunctions })
+      B.continue $ State (s { sUIMode = SomeUIMode ListFunctions })
     V.EvKey (V.KChar 'q') [] -> B.halt s0
     V.EvKey V.KEsc [] -> B.halt s0
     V.EvKey k []
-      | sUIMode s == ListFunctions && isListEventKey k -> do
+      | sUIMode s == SomeUIMode ListFunctions && isListEventKey k -> do
           l1 <- B.handleListEvent evt l0
           B.continue (State (s { sFunctionList = l1 }))
     _ -> B.continue s0
 
 appStartEvent :: State -> B.EventM Names State
 appStartEvent s0 = return s0
-
-appAttrMap :: State -> B.AttrMap
-appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.white)
-                                   , (statusBarAttr, B.bg V.black <> B.fg V.white)
-                                   ]
-
-focusedListAttr :: B.AttrName
-focusedListAttr = "focusedListItem"
-
-statusBarAttr :: B.AttrName
-statusBarAttr = "statusBar"
 
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = do
@@ -241,12 +230,13 @@ surveyor mExePath = do
                   }
   _ <- T.traverse (asynchronouslyLoad customEventChan) mExePath
   let initialState = State S { sInputFile = mExePath
-                           , sBinaryInfo = Nothing
-                           , sDiagnosticLog = Seq.empty
-                           , sFunctionList = (B.list FunctionList (V.empty @(FunctionListEntry 64)) 1)
-                           , sUIMode = Diags
-                           , sAppState = maybe AwaitingFile (const Loading) mExePath
-                           }
+                             , sBinaryInfo = Nothing
+                             , sDiagnosticLog = Seq.empty
+                             , sFunctionList = (B.list FunctionList (V.empty @(FunctionListEntry 64)) 1)
+                             , sUIMode = SomeUIMode Diags
+                             , sAppState = maybe AwaitingFile (const Loading) mExePath
+                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" []
+                             }
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
 

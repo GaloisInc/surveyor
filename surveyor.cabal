@@ -14,10 +14,12 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Surveyor
+                       Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Events
                        Surveyor.Loader
                        Surveyor.Minibuffer
+                       Surveyor.State
                        Surveyor.Widget.Minibuffer
   -- other-modules:       
   -- other-extensions:    
@@ -31,6 +33,7 @@ library
                        lens >= 4.15 && < 5,
                        parameterized-utils >= 1 && < 2,
                        text-zipper,
+                       megaparsec >= 6 && < 7,
                        regex >= 1 && < 2,
                        brick >= 0.30 && < 1,
                        vty,

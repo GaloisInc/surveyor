@@ -26,6 +26,7 @@ import           Data.Word ( Word64 )
 import           Numeric.Natural ( Natural )
 import           Text.Read ( readMaybe )
 
+import           Surveyor.Attributes
 import qualified Surveyor.Widget.Minibuffer as MB
 
 data Type where
@@ -64,7 +65,7 @@ parseArgument (Z.toList -> txt) rep =
     StringTypeRepr -> Just (StringArgument (T.pack txt))
     IntTypeRepr -> IntArgument <$> readMaybe txt
     WordTypeRepr -> WordArgument <$> readMaybe txt
-    AddressTypeRepr -> AddressArgument <$> readMaybe txt -- FIXME: support 0x notation
+    AddressTypeRepr -> AddressArgument <$> readMaybe txt
 
 showRepr :: TypeRepr tp -> T.Text
 showRepr r =
@@ -76,7 +77,10 @@ showRepr r =
 
 minibuffer :: (Z.GenericTextZipper t)
            => n
+           -- ^ The name of the editor widget
+           -> n
+           -- ^ The name of the completion list
            -> T.Text
            -> [MB.Command Argument TypeRepr]
            -> MB.Minibuffer Argument TypeRepr t n
-minibuffer = MB.minibuffer parseArgument showRepr
+minibuffer = MB.minibuffer parseArgument showRepr focusedListAttr

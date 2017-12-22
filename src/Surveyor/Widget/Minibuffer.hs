@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -13,6 +14,7 @@ module Surveyor.Widget.Minibuffer (
 
 import qualified Brick as B
 import qualified Brick.Widgets.Edit as B
+import qualified Brick.Widgets.List as B
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
 import qualified Data.Functor.Const as C
@@ -20,9 +22,9 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
-import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
+import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 import qualified Text.RE.TDFA.Text as RE
@@ -64,11 +66,14 @@ data MinibufferState a r where
 data Minibuffer a r t n =
   Minibuffer { prefix :: !T.Text
              , editor :: !(B.Editor t n)
-             , allCommands :: !(Seq.Seq (Command a r))
+             , completionName :: n
+             , allCommands :: !(V.Vector (Command a r))
              , commandIndex :: !(M.Map T.Text (Command a r))
-             , matchedCommands :: !(Seq.Seq (Command a r))
+             , matchedCommands :: !(V.Vector (Command a r))
+             , matchedCommandsList :: !(B.List n (Command a r))
              , selectedMatch :: !Int
              , state :: MinibufferState a r
+             , focusedListAttr :: B.AttrName
              , parseArgument :: forall tp . t -> r tp -> Maybe (a tp)
              , showRepr :: forall tp . r tp -> T.Text
              }
@@ -81,21 +86,28 @@ minibuffer :: (Z.GenericTextZipper t)
            -- ^ Parse a textual object into an argument
            -> (forall tp . r tp -> T.Text)
            -- ^ Convert a type repr into a friendly name
+           -> B.AttrName
+           -- ^ The attribute used to highlight the current completion target
            -> n
            -- ^ The name to assign to the editor widget
+           -> n
+           -- ^ The name to assign to the completion list
            -> T.Text
            -- ^ The prefix to display before the editor widget
            -> [Command a r]
            -- ^ The commands supported by the minibuffer
            -> Minibuffer a r t n
-minibuffer parseArg showRep edName pfx cmds =
+minibuffer parseArg showRep attr edName compName pfx cmds =
   Minibuffer { prefix = pfx
              , editor = B.editor edName (Just 1) mempty
-             , allCommands = Seq.fromList cmds
+             , completionName = compName
+             , allCommands = V.fromList cmds
              , commandIndex = F.foldl' indexCommand M.empty cmds
-             , matchedCommands = Seq.empty
+             , matchedCommands = V.empty
+             , matchedCommandsList = B.list compName V.empty 1
              , selectedMatch = 0
              , state = Editing
+             , focusedListAttr = attr
              , parseArgument = parseArg
              , showRepr = showRep
              }
@@ -124,14 +136,19 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
       case state mb of
         Editing -> do
           -- If we are waiting for a command, try to accept the command and start
-          -- processing arguments
+          -- processing arguments.  If there are no arguments, activate the command immediately
           let val = Z.toList (mconcat (B.getEditContents (editor mb)))
           case M.lookup (T.pack val) (commandIndex mb) of
             Nothing -> return mb
             Just (Command _ argNames argTypes callback) ->
-              return mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
-                        , editor = B.applyEdit (const (Z.textZipper [] Nothing)) (editor mb)
-                        }
+              case (argNames, argTypes) of
+                (PL.Nil, PL.Nil) -> do
+                  liftIO (callback PL.Nil)
+                  return (resetMinibuffer mb)
+                _ -> do
+                  return mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
+                            , editor = clearEditor (editor mb)
+                            }
         CollectingArguments expectedArgNames expectedArgTypes collectedArgTypes collectedArgValues callbackType callback ->
           case (expectedArgNames, expectedArgTypes) of
             (PL.Nil, PL.Nil) ->
@@ -139,9 +156,7 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
                 case () of
                   _ | Just Refl <- testEquality callbackType collectedArgTypes' -> do
                         liftIO (callback collectedArgValues')
-                        return mb { state = Editing
-                                  , editor = B.applyEdit (const (Z.textZipper [] Nothing)) (editor mb)
-                                  }
+                        return (resetMinibuffer mb)
                     | otherwise -> error "impossible"
             (C.Const _expectedArgName PL.:< restArgs, expectedArgType PL.:< restTypes) -> do
               let val = mconcat (B.getEditContents (editor mb))
@@ -153,8 +168,9 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
     V.EvKey (V.KChar '\t') [] ->
       -- If there is a single match, replace the editor contents with it.
       -- Otherwise, do nothing.
-      case matchedCommands mb of
-        (Command ctxt _ _ _) Seq.:<| Seq.Empty -> do
+      case V.length (matchedCommands mb) == 1 of
+        True -> do
+          let Command ctxt _ _ _ = matchedCommands mb V.! 0
           let str = T.unpack ctxt
           let chars = map Z.singleton str
           return mb { editor = B.applyEdit (const (Z.textZipper [mconcat chars] Nothing)) (editor mb)
@@ -162,22 +178,13 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
         _ -> return mb
     V.EvKey (V.KChar 'n') [V.MCtrl] ->
       -- Select the next match in the completion list
-      return mb { selectedMatch = min (Seq.length (matchedCommands mb)) (selectedMatch mb + 1) }
+      return mb { selectedMatch = min (V.length (matchedCommands mb)) (selectedMatch mb + 1) }
     V.EvKey (V.KChar 'p') [V.MCtrl] ->
       -- Select the previous match in the completion list
       return mb { selectedMatch = max 0 (selectedMatch mb - 1) }
     V.EvKey (V.KChar 'g') [V.MCtrl] ->
       -- Cancel everything and reset to a base state (including an empty editor line)
-      return Minibuffer { prefix = prefix mb
-                        , editor = B.applyEdit (const (Z.textZipper [] Nothing)) (editor mb)
-                        , allCommands = allCommands mb
-                        , commandIndex = commandIndex mb
-                        , matchedCommands = Seq.empty
-                        , selectedMatch = 0
-                        , state = Editing
-                        , parseArgument = parseArgument mb
-                        , showRepr = showRepr mb
-                        }
+      return (resetMinibuffer mb)
     _ -> do
       editor' <- B.handleEditorEvent evt (editor mb)
       let val = Z.toList (mconcat (B.getEditContents editor'))
@@ -185,12 +192,30 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
       case RE.compileRegex reStr of
         Nothing -> return mb { editor = editor' }
         Just re -> do
-          let matches = Seq.filter (commandMatches re) (allCommands mb)
+          let matches = V.filter (commandMatches re) (allCommands mb)
           return mb { editor = editor'
                     , matchedCommands = matches
                     , selectedMatch =
-                      if selectedMatch mb >= Seq.length matches then 0 else selectedMatch mb
+                      if selectedMatch mb >= V.length matches then 0 else selectedMatch mb
                     }
+
+clearEditor :: (Z.GenericTextZipper t) => B.Editor t n -> B.Editor t n
+clearEditor = B.applyEdit (const (Z.textZipper [] Nothing))
+
+resetMinibuffer :: (Z.GenericTextZipper t) => Minibuffer a r t n -> Minibuffer a r t n
+resetMinibuffer mb = Minibuffer { prefix = prefix mb
+                                , editor = clearEditor (editor mb)
+                                , completionName = completionName mb
+                                , allCommands = allCommands mb
+                                , commandIndex = commandIndex mb
+                                , matchedCommands = V.empty
+                                , matchedCommandsList = B.list (completionName mb) V.empty 1
+                                , selectedMatch = 0
+                                , state = Editing
+                                , focusedListAttr = focusedListAttr mb
+                                , parseArgument = parseArgument mb
+                                , showRepr = showRepr mb
+                                }
 
 withReversedF :: forall a b c tps . PL.List a tps -> PL.List b tps -> (forall tps' . PL.List a tps' -> PL.List b tps' -> c) -> c
 withReversedF l1 l2 k = go PL.Nil PL.Nil l1 l2
@@ -209,11 +234,35 @@ renderMinibuffer :: (Ord n, Show n, B.TextWidth t, Z.GenericTextZipper t)
                  -> Minibuffer a r t n
                  -> B.Widget n
 renderMinibuffer hasFocus mb =
-  B.vBox [editorLine] -- : take 5 (map toCandidateLine (F.toList (matchedCommands mb))))
+  case state mb of
+    Editing ->
+      let editorLine = B.hBox [ B.str (printf "%d %s " (V.length (matchedCommands mb)) (prefix mb))
+                              , B.renderEditor (drawContent mb) hasFocus (editor mb)
+                              ]
+          compList = B.vLimit 5 (B.renderList (renderCompletionItem mb) False (matchedCommandsList mb))
+      in B.vBox [editorLine, compList]
+    CollectingArguments expectedArgNames expectedArgTypes _collectedArgTypes _collectedArgValues _callbackType _callback ->
+      case (expectedArgNames, expectedArgTypes) of
+        (PL.Nil, PL.Nil) -> error "impossible"
+        (C.Const name PL.:< _, ty PL.:< _) ->
+          B.hBox [ B.str (printf "%s (%s): " name (showRepr mb ty))
+                 , B.renderEditor (drawContent mb) hasFocus (editor mb)
+                 ]
+
+renderCompletionItem :: forall a r t n . Minibuffer a r t n -> Bool -> Command a r -> B.Widget n
+renderCompletionItem mb isFocused (Command name argNames argTypes _) =
+  let xfrm = if isFocused then B.withAttr (focusedListAttr mb) else id
+  in xfrm (B.str (printf "%s (%s)" name sig))
   where
-    editorLine = B.hBox [ B.str (printf "%d %s " (Seq.length (matchedCommands mb)) (prefix mb))
-                        , B.renderEditor (drawContent mb) hasFocus (editor mb)
-                        ]
+    sig = T.intercalate " -> " [ T.pack (printf "%s :: %s" n t)
+                               | (n, t) <- args
+                               ]
+    args = collect argNames argTypes
+    collect :: forall tps . PL.List (C.Const T.Text) tps -> PL.List r tps -> [(T.Text, T.Text)]
+    collect names types =
+      case (names, types) of
+        (PL.Nil, PL.Nil) -> []
+        (C.Const n PL.:< rn, t PL.:< rt) -> (n, showRepr mb t) : collect rn rt
 
 drawContent :: (Monoid t, Z.GenericTextZipper t) => Minibuffer a r t n -> [t] -> B.Widget n
 drawContent _mb txts = B.str (Z.toList (mconcat txts))
