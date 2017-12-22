@@ -5,7 +5,11 @@
 {-# LANGUAGE ViewPatterns #-}
 -- | An instantiation of the generic minibuffer widget with a specific argument type
 module Surveyor.Minibuffer (
+  MB.Minibuffer,
   minibuffer,
+  MB.handleMinibufferEvent,
+  MB.renderMinibuffer,
+  MB.Command(..),
   Argument(..),
   Type(..),
   TypeRepr(..),

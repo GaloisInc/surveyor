@@ -24,6 +24,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import qualified Graphics.Vty as V
+import           Text.Printf ( printf )
 import qualified Text.RE.TDFA.Text as RE
 
 data Command a r where
@@ -66,7 +67,7 @@ data Minibuffer a r t n =
              , allCommands :: !(Seq.Seq (Command a r))
              , commandIndex :: !(M.Map T.Text (Command a r))
              , matchedCommands :: !(Seq.Seq (Command a r))
-             , selectedMatch :: Maybe Int
+             , selectedMatch :: !Int
              , state :: MinibufferState a r
              , parseArgument :: forall tp . t -> r tp -> Maybe (a tp)
              , showRepr :: forall tp . r tp -> T.Text
@@ -93,7 +94,7 @@ minibuffer parseArg showRep edName pfx cmds =
              , allCommands = Seq.fromList cmds
              , commandIndex = F.foldl' indexCommand M.empty cmds
              , matchedCommands = Seq.empty
-             , selectedMatch = Nothing
+             , selectedMatch = 0
              , state = Editing
              , parseArgument = parseArg
              , showRepr = showRep
@@ -161,10 +162,10 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
         _ -> return mb
     V.EvKey (V.KChar 'n') [V.MCtrl] ->
       -- Select the next match in the completion list
-      undefined
+      return mb { selectedMatch = min (Seq.length (matchedCommands mb)) (selectedMatch mb + 1) }
     V.EvKey (V.KChar 'p') [V.MCtrl] ->
       -- Select the previous match in the completion list
-      undefined
+      return mb { selectedMatch = max 0 (selectedMatch mb - 1) }
     V.EvKey (V.KChar 'g') [V.MCtrl] ->
       -- Cancel everything and reset to a base state (including an empty editor line)
       return Minibuffer { prefix = prefix mb
@@ -172,7 +173,7 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
                         , allCommands = allCommands mb
                         , commandIndex = commandIndex mb
                         , matchedCommands = Seq.empty
-                        , selectedMatch = Nothing
+                        , selectedMatch = 0
                         , state = Editing
                         , parseArgument = parseArgument mb
                         , showRepr = showRepr mb
@@ -187,7 +188,8 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
           let matches = Seq.filter (commandMatches re) (allCommands mb)
           return mb { editor = editor'
                     , matchedCommands = matches
-                    , selectedMatch = fmap (\ix -> if ix >= Seq.length matches then 0 else ix) (selectedMatch mb)
+                    , selectedMatch =
+                      if selectedMatch mb >= Seq.length matches then 0 else selectedMatch mb
                     }
 
 withReversedF :: forall a b c tps . PL.List a tps -> PL.List b tps -> (forall tps' . PL.List a tps' -> PL.List b tps' -> c) -> c
@@ -206,7 +208,12 @@ renderMinibuffer :: (Ord n, Show n, B.TextWidth t, Z.GenericTextZipper t)
                  => Bool
                  -> Minibuffer a r t n
                  -> B.Widget n
-renderMinibuffer hasFocus mb = B.renderEditor (drawContent mb) hasFocus (editor mb)
+renderMinibuffer hasFocus mb =
+  B.vBox [editorLine] -- : take 5 (map toCandidateLine (F.toList (matchedCommands mb))))
+  where
+    editorLine = B.hBox [ B.str (printf "%d %s " (Seq.length (matchedCommands mb)) (prefix mb))
+                        , B.renderEditor (drawContent mb) hasFocus (editor mb)
+                        ]
 
-drawContent :: Minibuffer a r t n -> [t] -> B.Widget n
-drawContent = undefined
+drawContent :: (Monoid t, Z.GenericTextZipper t) => Minibuffer a r t n -> [t] -> B.Widget n
+drawContent _mb txts = B.str (Z.toList (mconcat txts))
