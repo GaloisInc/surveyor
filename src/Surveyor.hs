@@ -208,7 +208,9 @@ handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
   case sUIMode s of
     SomeMiniBuffer (MiniBuffer oldMode) ->
       case evt of
-        V.EvKey (V.KChar 'q') [V.MCtrl] -> B.halt s0
+        V.EvKey (V.KChar 'q') [V.MCtrl] -> do
+          liftIO (sEmitEvent s Exit)
+          B.continue (State s)
         _ -> do
           mbs <- MB.handleMinibufferEvent evt (sMinibuffer s)
           case mbs of
@@ -233,7 +235,6 @@ handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
         V.EvKey (V.KChar 'q') [V.MCtrl] -> do
           liftIO (sEmitEvent s Exit)
           B.continue (State s)
-        V.EvKey V.KEsc [] -> B.halt s0
         V.EvKey _k [] -> B.continue s0
         _ -> B.continue s0
 
