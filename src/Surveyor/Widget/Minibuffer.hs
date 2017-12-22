@@ -16,6 +16,7 @@ module Surveyor.Widget.Minibuffer (
 import qualified Brick as B
 import qualified Brick.Widgets.Edit as B
 import qualified Brick.Widgets.List as B
+import qualified Control.Lens as L
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
 import qualified Data.Functor.Const as C
@@ -72,7 +73,6 @@ data Minibuffer a r t n =
              , commandIndex :: !(M.Map T.Text (Command a r))
              , matchedCommands :: !(V.Vector (Command a r))
              , matchedCommandsList :: !(B.List n (Command a r))
-             , selectedMatch :: !Int
              , state :: MinibufferState a r
              , focusedListAttr :: B.AttrName
              , parseArgument :: forall tp . t -> r tp -> Maybe (a tp)
@@ -106,7 +106,6 @@ minibuffer parseArg showRep attr edName compName pfx cmds =
              , commandIndex = F.foldl' indexCommand M.empty cmds
              , matchedCommands = allCmds
              , matchedCommandsList = B.list compName allCmds 1
-             , selectedMatch = 0
              , state = Editing
              , focusedListAttr = attr
              , parseArgument = parseArg
@@ -183,10 +182,10 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
         _ -> return (Completed mb)
     V.EvKey (V.KChar 'n') [V.MCtrl] ->
       -- Select the next match in the completion list
-      return $ Completed mb { selectedMatch = min (V.length (matchedCommands mb)) (selectedMatch mb + 1) }
+      return $ Completed mb { matchedCommandsList = B.listMoveDown (matchedCommandsList mb) }
     V.EvKey (V.KChar 'p') [V.MCtrl] ->
       -- Select the previous match in the completion list
-      return $ Completed mb { selectedMatch = max 0 (selectedMatch mb - 1) }
+      return $ Completed mb { matchedCommandsList = B.listMoveUp (matchedCommandsList mb) }
     V.EvKey (V.KChar 'g') [V.MCtrl] ->
       -- Cancel everything and reset to a base state (including an empty editor line)
       return $ Canceled (resetMinibuffer mb)
@@ -198,11 +197,12 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
         Nothing -> return $ Completed mb { editor = editor' }
         Just re -> do
           let matches = V.filter (commandMatches re) (allCommands mb)
+          let oldSel = matchedCommandsList mb L.^. B.listSelectedL
+          let newSel = fmap (\ix -> if ix >= V.length matches then 0 else ix) oldSel
+          let newList = B.list (completionName mb) matches 1
           return $ Completed mb { editor = editor'
                                 , matchedCommands = matches
-                                , matchedCommandsList = B.list (completionName mb) matches 1
-                                , selectedMatch =
-                                  if selectedMatch mb >= V.length matches then 0 else selectedMatch mb
+                                , matchedCommandsList = L.set B.listSelectedL newSel newList
                                 }
 
 clearEditor :: (Z.GenericTextZipper t) => B.Editor t n -> B.Editor t n
@@ -216,7 +216,6 @@ resetMinibuffer mb = Minibuffer { prefix = prefix mb
                                 , commandIndex = commandIndex mb
                                 , matchedCommands = allCommands mb
                                 , matchedCommandsList = B.list (completionName mb) (allCommands mb) 1
-                                , selectedMatch = 0
                                 , state = Editing
                                 , focusedListAttr = focusedListAttr mb
                                 , parseArgument = parseArgument mb
