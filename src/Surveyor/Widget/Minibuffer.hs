@@ -166,8 +166,22 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
               let val = mconcat (B.getEditContents (editor mb))
               case parseArg val expectedArgType of
                 Just arg ->
-                  return $ Completed mb { state = CollectingArguments restArgs restTypes (expectedArgType PL.:< collectedArgTypes) (arg PL.:< collectedArgValues) callbackType callback
-                                        }
+                  case (restArgs, restTypes) of
+                    (PL.Nil, PL.Nil) ->
+                      withReversedF (expectedArgType PL.:< collectedArgTypes) (arg PL.:< collectedArgValues) $ \collectedArgTypes' collectedArgValues' -> do
+                        case () of
+                          _ | Just Refl <- testEquality callbackType collectedArgTypes' -> do
+                                liftIO (callback collectedArgValues')
+                                return (Completed (resetMinibuffer mb))
+                            | otherwise -> error "impossible"
+                    (_, _) ->
+                      return $ Completed mb { state = CollectingArguments restArgs
+                                                                          restTypes
+                                                                          (expectedArgType PL.:< collectedArgTypes)
+                                                                          (arg PL.:< collectedArgValues)
+                                                                          callbackType
+                                                                          callback
+                                            }
                 Nothing -> return (Completed mb)
     V.EvKey (V.KChar '\t') [] ->
       -- If there is a single match, replace the editor contents with it.
