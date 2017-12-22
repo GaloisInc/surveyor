@@ -102,10 +102,10 @@ minibuffer parseArg showRep attr edName compName pfx cmds =
   Minibuffer { prefix = pfx
              , editor = B.editor edName (Just 1) mempty
              , completionName = compName
-             , allCommands = V.fromList cmds
+             , allCommands = allCmds
              , commandIndex = F.foldl' indexCommand M.empty cmds
-             , matchedCommands = V.empty
-             , matchedCommandsList = B.list compName V.empty 1
+             , matchedCommands = allCmds
+             , matchedCommandsList = B.list compName allCmds 1
              , selectedMatch = 0
              , state = Editing
              , focusedListAttr = attr
@@ -113,6 +113,7 @@ minibuffer parseArg showRep attr edName compName pfx cmds =
              , showRepr = showRep
              }
   where
+    allCmds = V.fromList cmds
     indexCommand m cmd@(Command name _ _ _) = M.insert name cmd m
 
 data MinibufferStatus a r t n = Completed (Minibuffer a r t n)
@@ -199,6 +200,7 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
           let matches = V.filter (commandMatches re) (allCommands mb)
           return $ Completed mb { editor = editor'
                                 , matchedCommands = matches
+                                , matchedCommandsList = B.list (completionName mb) matches 1
                                 , selectedMatch =
                                   if selectedMatch mb >= V.length matches then 0 else selectedMatch mb
                                 }
@@ -212,8 +214,8 @@ resetMinibuffer mb = Minibuffer { prefix = prefix mb
                                 , completionName = completionName mb
                                 , allCommands = allCommands mb
                                 , commandIndex = commandIndex mb
-                                , matchedCommands = V.empty
-                                , matchedCommandsList = B.list (completionName mb) V.empty 1
+                                , matchedCommands = allCommands mb
+                                , matchedCommandsList = B.list (completionName mb) (allCommands mb) 1
                                 , selectedMatch = 0
                                 , state = Editing
                                 , focusedListAttr = focusedListAttr mb
