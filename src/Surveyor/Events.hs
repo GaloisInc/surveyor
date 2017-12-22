@@ -5,6 +5,7 @@ module Surveyor.Events ( Events(..) ) where
 import qualified Control.Exception as X
 import qualified Data.ElfEdit as E
 import           Data.Int ( Int64 )
+import           Data.Word ( Word64 )
 
 import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
@@ -19,6 +20,7 @@ data Events where
   AnalysisFinished :: BinaryAnalysisResultWrapper -> [R.Diagnostic] -> Events
   BlockDiscovered :: (MM.MemWidth w) => MM.MemAddr w -> Events
   AnalysisProgress :: MM.MemAddr w -> BinaryAnalysisResultWrapper -> Events
+  FindBlockContaining :: Word64 -> Events
   ShowSummary :: Events
   ShowDiagnostics :: Events
   Exit :: Events

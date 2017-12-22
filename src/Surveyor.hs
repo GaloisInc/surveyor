@@ -13,6 +13,7 @@ import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
+import qualified Data.Functor.Const as C
 import qualified Data.Map as M
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
@@ -137,57 +138,59 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.whi
                                    , (statusBarAttr, B.bg V.black <> B.fg V.white)
                                    ]
 
+stateFromAnalysisResult :: S i0 a0 w0 arch0
+                        -> BinaryAnalysisResult i a w arch
+                        -> Seq.Seq T.Text
+                        -> AppState
+                        -> SomeUIMode
+                        -> S i a w arch
+stateFromAnalysisResult s0 bar newDiags state uiMode =
+  S { sBinaryInfo = Just bar
+    , sFunctionList = B.list FunctionList funcList 1
+    , sDiagnosticLog = sDiagnosticLog s0 <> newDiags
+    , sUIMode = uiMode
+    , sInputFile = sInputFile s0
+    , sMinibuffer = sMinibuffer s0
+    , sAppState = state
+    , sEmitEvent = sEmitEvent s0
+    }
+  where
+    funcList = V.fromList [ FLE addr textName blockCount
+                          | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo (rBlockInfo bar))
+                          , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
+                          , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
+                          ]
+
+handleCustomEvent :: (MM.MemWidth w) => S i a w arch -> Events -> B.EventM Names (B.Next State)
+handleCustomEvent s0 evt =
+  case evt of
+    AnalysisFinished (BinaryAnalysisResultWrapper bar) diags ->
+      let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
+          notification = "Finished loading file"
+          s1 = stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) Ready (SomeUIMode Diags)
+      in B.continue (State s1)
+    AnalysisProgress _addr (BinaryAnalysisResultWrapper bar) ->
+      let s1 = stateFromAnalysisResult s0 bar Seq.empty Loading (sUIMode s0)
+      in B.continue (State s1)
+    BlockDiscovered addr ->
+      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Found a block at address " ++ show addr) }
+    AnalysisFailure exn ->
+      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
+    ErrorLoadingELFHeader off msg ->
+      let t = T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)
+      in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
+    ErrorLoadingELF errs ->
+      let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
+      in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
+    ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
+    ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
+    FindBlockContaining addr -> undefined
+    Exit -> B.halt (State s0)
+
 appHandleEvent :: State -> B.BrickEvent Names Events -> B.EventM Names (B.Next State)
 appHandleEvent (State s0) evt =
   case evt of
-    B.AppEvent ae ->
-      case ae of
-        AnalysisFinished (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) diags ->
-          let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
-              notification = "Finished loading file"
-              funcList = V.fromList [ FLE addr textName blockCount
-                                    | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo rbi)
-                                    , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
-                                    , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
-                                    ]
-          in B.continue $ State S { sBinaryInfo = Just bar
-                                  , sFunctionList = B.list FunctionList funcList 1
-                                  , sDiagnosticLog =
-                                    sDiagnosticLog s0 <> Seq.fromList newDiags <> Seq.singleton notification
-                                  , sUIMode = SomeUIMode Diags
-                                  , sInputFile = sInputFile s0
-                                  , sMinibuffer = sMinibuffer s0
-                                  , sAppState = Ready
-                                  , sEmitEvent = sEmitEvent s0
-                                  }
-        AnalysisProgress _addr (BinaryAnalysisResultWrapper bar@BinaryAnalysisResult { rBlockInfo = rbi }) ->
-          let funcList = V.fromList [ FLE addr textName blockCount
-                                    | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo rbi)
-                                    , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
-                                    , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
-                                    ]
-          in B.continue $ State S { sBinaryInfo = Just bar
-                                  , sFunctionList = B.list FunctionList funcList 1
-                                  , sMinibuffer = sMinibuffer s0
-                                  , sDiagnosticLog = sDiagnosticLog s0
-                                  , sUIMode = sUIMode s0
-                                  , sInputFile = sInputFile s0
-                                  , sAppState = Loading
-                                  , sEmitEvent = sEmitEvent s0
-                                  }
-        BlockDiscovered addr ->
-          B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Found a block at address " ++ show addr) }
-        AnalysisFailure exn ->
-          B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
-        ErrorLoadingELFHeader off msg ->
-          let t = T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)
-          in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
-        ErrorLoadingELF errs ->
-          let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
-          in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
-        ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
-        ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
-        Exit -> B.halt (State s0)
+    B.AppEvent ae -> handleCustomEvent s0 ae
     B.VtyEvent vtyEvt -> handleVtyEvent (State s0) vtyEvt
     B.MouseDown {} -> B.continue (State s0)
     B.MouseUp {} -> B.continue (State s0)
@@ -241,6 +244,23 @@ handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
 appStartEvent :: State -> B.EventM Names State
 appStartEvent s0 = return s0
 
+commands :: B.BChan Events -> [MB.Command MB.Argument MB.TypeRepr]
+commands customEventChan =
+  [ MB.Command "summary" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowSummary)
+  , MB.Command "exit" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan Exit)
+  , MB.Command "log" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowDiagnostics)
+  , findBlockCommand customEventChan
+  ]
+
+findBlockCommand :: B.BChan Events -> MB.Command MB.Argument MB.TypeRepr
+findBlockCommand customEventChan =
+  MB.Command "find-block" names rep callback
+  where
+    names = C.Const "address" PL.:< PL.Nil
+    rep = MB.AddressTypeRepr PL.:< PL.Nil
+    callback = \(MB.AddressArgument addr PL.:< PL.Nil) ->
+      B.writeBChan customEventChan (FindBlockContaining addr)
+
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = do
   customEventChan <- B.newBChan 100
@@ -251,17 +271,13 @@ surveyor mExePath = do
                   , B.appAttrMap = appAttrMap
                   }
   _ <- T.traverse (asynchronouslyLoad customEventChan) mExePath
-  let commands = [ MB.Command "summary" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowSummary)
-                 , MB.Command "exit" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan Exit)
-                 , MB.Command "log" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowDiagnostics)
-                 ]
   let initialState = State S { sInputFile = mExePath
                              , sBinaryInfo = Nothing
                              , sDiagnosticLog = Seq.empty
                              , sFunctionList = (B.list FunctionList (V.empty @(FunctionListEntry 64)) 1)
                              , sUIMode = SomeUIMode Diags
                              , sAppState = maybe AwaitingFile (const Loading) mExePath
-                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" commands
+                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (commands customEventChan)
                              , sEmitEvent = B.writeBChan customEventChan
                              }
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
