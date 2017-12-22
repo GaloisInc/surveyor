@@ -17,6 +17,7 @@ library
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Events
                        Surveyor.Loader
+                       Surveyor.Minibuffer
                        Surveyor.Widget.Minibuffer
   -- other-modules:       
   -- other-extensions:    

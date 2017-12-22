@@ -1,28 +1,14 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
 -- | An emacs-style minibuffer as a Brick widget
 module Surveyor.Widget.Minibuffer (
   Minibuffer,
   minibuffer,
   handleMinibufferEvent,
   renderMinibuffer,
-  Type(..),
-  TypeRepr(..),
-  Argument(..),
-  Command(..),
-  IntType,
-  WordType,
-  AddressType,
-  StringType
+  Command(..)
   ) where
 
 import qualified Brick as B
@@ -37,93 +23,71 @@ import qualified Data.Parameterized.List as PL
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
-import           Data.Word ( Word64 )
 import qualified Graphics.Vty as V
-import           Numeric.Natural ( Natural )
 import qualified Text.RE.TDFA.Text as RE
 
-data Type where
-  StringType :: Type
-  AddressType :: Type
-  IntType :: Type
-  WordType :: Type
-
-type StringType = 'StringType
-type AddressType = 'AddressType
-type IntType = 'IntType
-type WordType = 'WordType
-
-data TypeRepr tp where
-  StringTypeRepr :: TypeRepr StringType
-  AddressTypeRepr :: TypeRepr AddressType
-  IntTypeRepr :: TypeRepr IntType
-  WordTypeRepr :: TypeRepr WordType
-
-instance TestEquality TypeRepr where
-  testEquality StringTypeRepr StringTypeRepr = Just Refl
-  testEquality AddressTypeRepr AddressTypeRepr = Just Refl
-  testEquality IntTypeRepr IntTypeRepr = Just Refl
-  testEquality WordTypeRepr WordTypeRepr = Just Refl
-  testEquality _ _ = Nothing
-
-data Argument tp where
-  StringArgument :: T.Text -> Argument StringType
-  AddressArgument :: Word64 -> Argument AddressType
-  IntArgument :: Integer -> Argument IntType
-  WordArgument :: Natural -> Argument WordType
-
-data Command where
+data Command a r where
   Command :: T.Text
           -- ^ Command name
           -> PL.List (C.Const T.Text) tps
           -- ^ Argument names
-          -> PL.List TypeRepr tps
+          -> PL.List r tps
           -- ^ Argument types
-          -> (PL.List Argument tps -> IO ())
+          -> (PL.List a tps -> IO ())
           -- ^ Function to call on the argument list
-          -> Command
+          -> Command a r
 
-data MinibufferState where
+data MinibufferState a r where
   CollectingArguments :: PL.List (C.Const T.Text) tps
-                      -> PL.List TypeRepr tps
-                      -> PL.List TypeRepr tps'
-                      -> PL.List Argument tps'
-                      -> PL.List TypeRepr tps0
-                      -> (PL.List Argument tps0 -> IO ())
-                      -> MinibufferState
+                      -> PL.List r tps
+                      -> PL.List r tps'
+                      -> PL.List a tps'
+                      -> PL.List r tps0
+                      -> (PL.List a tps0 -> IO ())
+                      -> MinibufferState a r
   -- ^ In the process of collecting arguments
-  Editing :: MinibufferState
+  Editing :: MinibufferState a r
   -- ^ The input editor has focus
 
 -- | The abstract state of a minibuffer
+--
+-- The @a@ type parameter is the type of arguments for commands
+--
+-- The @r@ type parameter is the type of the type representative for arguments
 --
 -- The @t@ parameter is the type of the content (probably 'T.Text', but anything
 -- that implements 'GenericTextZipper').
 --
 -- The @n@ parameter is the type of the names used to identify widgets in your
 -- application.
-data Minibuffer t n =
+data Minibuffer a r t n =
   Minibuffer { prefix :: !T.Text
              , editor :: !(B.Editor t n)
-             , allCommands :: !(Seq.Seq Command)
-             , commandIndex :: !(M.Map T.Text Command)
-             , matchedCommands :: !(Seq.Seq Command)
+             , allCommands :: !(Seq.Seq (Command a r))
+             , commandIndex :: !(M.Map T.Text (Command a r))
+             , matchedCommands :: !(Seq.Seq (Command a r))
              , selectedMatch :: Maybe Int
-             , state :: MinibufferState
+             , state :: MinibufferState a r
+             , parseArgument :: forall tp . t -> r tp -> Maybe (a tp)
+             , showRepr :: forall tp . r tp -> T.Text
              }
 
 -- | Create a new 'Minibuffer' state.
 --
 -- The minibuffer supports the given set of commands
 minibuffer :: (Z.GenericTextZipper t)
-           => n
+           => (forall tp . t -> r tp -> Maybe (a tp))
+           -- ^ Parse a textual object into an argument
+           -> (forall tp . r tp -> T.Text)
+           -- ^ Convert a type repr into a friendly name
+           -> n
            -- ^ The name to assign to the editor widget
            -> T.Text
            -- ^ The prefix to display before the editor widget
-           -> [Command]
+           -> [Command a r]
            -- ^ The commands supported by the minibuffer
-           -> Minibuffer t n
-minibuffer edName pfx cmds =
+           -> Minibuffer a r t n
+minibuffer parseArg showRep edName pfx cmds =
   Minibuffer { prefix = pfx
              , editor = B.editor edName (Just 1) mempty
              , allCommands = Seq.fromList cmds
@@ -131,6 +95,8 @@ minibuffer edName pfx cmds =
              , matchedCommands = Seq.empty
              , selectedMatch = Nothing
              , state = Editing
+             , parseArgument = parseArg
+             , showRepr = showRep
              }
   where
     indexCommand m cmd@(Command name _ _ _) = M.insert name cmd m
@@ -147,11 +113,11 @@ minibuffer edName pfx cmds =
 --
 --  * Pressing <C-g> while a command is processing arguments or waiting for a
 --    command will deactivate the minibuffer
-handleMinibufferEvent :: (Ord n, Eq t, Monoid t, Z.GenericTextZipper t)
+handleMinibufferEvent :: (Ord n, Eq t, Monoid t, Z.GenericTextZipper t, TestEquality r)
                       => V.Event
-                      -> Minibuffer t n
-                      -> B.EventM n (Minibuffer t n)
-handleMinibufferEvent evt mb =
+                      -> Minibuffer a r t n
+                      -> B.EventM n (Minibuffer a r t n)
+handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
   case evt of
     V.EvKey V.KEnter [] ->
       case state mb of
@@ -176,13 +142,13 @@ handleMinibufferEvent evt mb =
                                   , editor = B.applyEdit (const (Z.textZipper [] Nothing)) (editor mb)
                                   }
                     | otherwise -> error "impossible"
-            (C.Const expectedArgName PL.:< restArgs, expectedArgType PL.:< restTypes) ->
-              case expectedArgType of
-                StringTypeRepr -> do
-                  let val = Z.toList (mconcat (B.getEditContents (editor mb)))
-                  return mb { state = CollectingArguments restArgs restTypes (StringTypeRepr PL.:< collectedArgTypes) (StringArgument (T.pack val) PL.:< collectedArgValues) callbackType callback
-                            , editor = B.applyEdit (const (Z.textZipper [] Nothing)) (editor mb)
+            (C.Const _expectedArgName PL.:< restArgs, expectedArgType PL.:< restTypes) -> do
+              let val = mconcat (B.getEditContents (editor mb))
+              case parseArg val expectedArgType of
+                Just arg ->
+                  return mb { state = CollectingArguments restArgs restTypes (expectedArgType PL.:< collectedArgTypes) (arg PL.:< collectedArgValues) callbackType callback
                             }
+                Nothing -> return mb
     V.EvKey (V.KChar '\t') [] ->
       -- If there is a single match, replace the editor contents with it.
       -- Otherwise, do nothing.
@@ -208,6 +174,8 @@ handleMinibufferEvent evt mb =
                         , matchedCommands = Seq.empty
                         , selectedMatch = Nothing
                         , state = Editing
+                        , parseArgument = parseArgument mb
+                        , showRepr = showRepr mb
                         }
     _ -> do
       editor' <- B.handleEditorEvent evt (editor mb)
@@ -231,14 +199,14 @@ withReversedF l1 l2 k = go PL.Nil PL.Nil l1 l2
         (PL.Nil, PL.Nil) -> k acc1 acc2
         (x1 PL.:< xs1, x2 PL.:< xs2) -> go (x1 PL.:< acc1) (x2 PL.:< acc2) xs1 xs2
 
-commandMatches :: RE.RE -> Command -> Bool
+commandMatches :: RE.RE -> Command a r -> Bool
 commandMatches rx (Command name _ _ _) = RE.matched (name RE.?=~ rx)
 
 renderMinibuffer :: (Ord n, Show n, B.TextWidth t, Z.GenericTextZipper t)
                  => Bool
-                 -> Minibuffer t n
+                 -> Minibuffer a r t n
                  -> B.Widget n
 renderMinibuffer hasFocus mb = B.renderEditor (drawContent mb) hasFocus (editor mb)
 
-drawContent :: Minibuffer t n -> [t] -> B.Widget n
+drawContent :: Minibuffer a r t n -> [t] -> B.Widget n
 drawContent = undefined
