@@ -19,6 +19,7 @@ library
                        Surveyor.Events
                        Surveyor.Loader
                        Surveyor.Minibuffer
+                       Surveyor.Mode
                        Surveyor.State
                        Surveyor.Widget.Minibuffer
   -- other-modules:       

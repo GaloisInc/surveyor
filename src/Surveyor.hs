@@ -39,6 +39,7 @@ import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..)
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
+import           Surveyor.Mode
 import           Surveyor.State
 
 drawSummary :: FilePath -> BinaryAnalysisResult i a w arch -> B.Widget Names
@@ -185,6 +186,8 @@ appHandleEvent (State s0) evt =
           let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
           in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
         ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
+        ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
+        Exit -> B.halt (State s0)
     B.VtyEvent vtyEvt -> handleVtyEvent (State s0) vtyEvt
     B.MouseDown {} -> B.continue (State s0)
     B.MouseUp {} -> B.continue (State s0)
@@ -224,11 +227,12 @@ handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
         V.EvKey (V.KChar 's') [] -> do
           liftIO (sEmitEvent s ShowSummary)
           B.continue (State s)
-        V.EvKey (V.KChar 'm') [] ->
-          B.continue $ State (s { sUIMode = SomeUIMode Diags })
-        V.EvKey (V.KChar 'f') [] ->
-          B.continue $ State (s { sUIMode = SomeUIMode ListFunctions })
-        V.EvKey (V.KChar 'q') [V.MCtrl] -> B.halt s0
+        V.EvKey (V.KChar 'm') [] -> do
+          liftIO (sEmitEvent s ShowDiagnostics)
+          B.continue (State s)
+        V.EvKey (V.KChar 'q') [V.MCtrl] -> do
+          liftIO (sEmitEvent s Exit)
+          B.continue (State s)
         V.EvKey V.KEsc [] -> B.halt s0
         V.EvKey _k [] -> B.continue s0
         _ -> B.continue s0
@@ -247,6 +251,8 @@ surveyor mExePath = do
                   }
   _ <- T.traverse (asynchronouslyLoad customEventChan) mExePath
   let commands = [ MB.Command "summary" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowSummary)
+                 , MB.Command "exit" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan Exit)
+                 , MB.Command "log" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowDiagnostics)
                  ]
   let initialState = State S { sInputFile = mExePath
                              , sBinaryInfo = Nothing

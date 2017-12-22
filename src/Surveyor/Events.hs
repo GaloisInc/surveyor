@@ -20,3 +20,5 @@ data Events where
   BlockDiscovered :: (MM.MemWidth w) => MM.MemAddr w -> Events
   AnalysisProgress :: MM.MemAddr w -> BinaryAnalysisResultWrapper -> Events
   ShowSummary :: Events
+  ShowDiagnostics :: Events
+  Exit :: Events
