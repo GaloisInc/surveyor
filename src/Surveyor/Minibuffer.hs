@@ -7,6 +7,7 @@
 module Surveyor.Minibuffer (
   MB.Minibuffer,
   minibuffer,
+  MB.MinibufferStatus(..),
   MB.handleMinibufferEvent,
   MB.renderMinibuffer,
   MB.Command(..),

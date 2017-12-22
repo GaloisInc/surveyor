@@ -7,6 +7,7 @@
 module Surveyor.Widget.Minibuffer (
   Minibuffer,
   minibuffer,
+  MinibufferStatus(..),
   handleMinibufferEvent,
   renderMinibuffer,
   Command(..)
@@ -114,6 +115,9 @@ minibuffer parseArg showRep attr edName compName pfx cmds =
   where
     indexCommand m cmd@(Command name _ _ _) = M.insert name cmd m
 
+data MinibufferStatus a r t n = Completed (Minibuffer a r t n)
+                              | Canceled (Minibuffer a r t n)
+
 -- | Largely delegate events to the editor widget, but also handles some completion tasks
 --
 -- The additional features over the default editor widget include:
@@ -129,7 +133,7 @@ minibuffer parseArg showRep attr edName compName pfx cmds =
 handleMinibufferEvent :: (Ord n, Eq t, Monoid t, Z.GenericTextZipper t, TestEquality r)
                       => V.Event
                       -> Minibuffer a r t n
-                      -> B.EventM n (Minibuffer a r t n)
+                      -> B.EventM n (MinibufferStatus a r t n)
 handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
   case evt of
     V.EvKey V.KEnter [] ->
@@ -139,16 +143,16 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
           -- processing arguments.  If there are no arguments, activate the command immediately
           let val = Z.toList (mconcat (B.getEditContents (editor mb)))
           case M.lookup (T.pack val) (commandIndex mb) of
-            Nothing -> return mb
+            Nothing -> return (Completed mb)
             Just (Command _ argNames argTypes callback) ->
               case (argNames, argTypes) of
                 (PL.Nil, PL.Nil) -> do
                   liftIO (callback PL.Nil)
-                  return (resetMinibuffer mb)
+                  return (Completed (resetMinibuffer mb))
                 _ -> do
-                  return mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
-                            , editor = clearEditor (editor mb)
-                            }
+                  return $ Completed mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
+                                        , editor = clearEditor (editor mb)
+                                        }
         CollectingArguments expectedArgNames expectedArgTypes collectedArgTypes collectedArgValues callbackType callback ->
           case (expectedArgNames, expectedArgTypes) of
             (PL.Nil, PL.Nil) ->
@@ -156,15 +160,15 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
                 case () of
                   _ | Just Refl <- testEquality callbackType collectedArgTypes' -> do
                         liftIO (callback collectedArgValues')
-                        return (resetMinibuffer mb)
+                        return (Completed (resetMinibuffer mb))
                     | otherwise -> error "impossible"
             (C.Const _expectedArgName PL.:< restArgs, expectedArgType PL.:< restTypes) -> do
               let val = mconcat (B.getEditContents (editor mb))
               case parseArg val expectedArgType of
                 Just arg ->
-                  return mb { state = CollectingArguments restArgs restTypes (expectedArgType PL.:< collectedArgTypes) (arg PL.:< collectedArgValues) callbackType callback
-                            }
-                Nothing -> return mb
+                  return $ Completed mb { state = CollectingArguments restArgs restTypes (expectedArgType PL.:< collectedArgTypes) (arg PL.:< collectedArgValues) callbackType callback
+                                        }
+                Nothing -> return (Completed mb)
     V.EvKey (V.KChar '\t') [] ->
       -- If there is a single match, replace the editor contents with it.
       -- Otherwise, do nothing.
@@ -173,31 +177,31 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
           let Command ctxt _ _ _ = matchedCommands mb V.! 0
           let str = T.unpack ctxt
           let chars = map Z.singleton str
-          return mb { editor = B.applyEdit (const (Z.textZipper [mconcat chars] Nothing)) (editor mb)
-                    }
-        _ -> return mb
+          return $ Completed mb { editor = B.applyEdit (const (Z.textZipper [mconcat chars] Nothing)) (editor mb)
+                                }
+        _ -> return (Completed mb)
     V.EvKey (V.KChar 'n') [V.MCtrl] ->
       -- Select the next match in the completion list
-      return mb { selectedMatch = min (V.length (matchedCommands mb)) (selectedMatch mb + 1) }
+      return $ Completed mb { selectedMatch = min (V.length (matchedCommands mb)) (selectedMatch mb + 1) }
     V.EvKey (V.KChar 'p') [V.MCtrl] ->
       -- Select the previous match in the completion list
-      return mb { selectedMatch = max 0 (selectedMatch mb - 1) }
+      return $ Completed mb { selectedMatch = max 0 (selectedMatch mb - 1) }
     V.EvKey (V.KChar 'g') [V.MCtrl] ->
       -- Cancel everything and reset to a base state (including an empty editor line)
-      return (resetMinibuffer mb)
+      return $ Canceled (resetMinibuffer mb)
     _ -> do
       editor' <- B.handleEditorEvent evt (editor mb)
       let val = Z.toList (mconcat (B.getEditContents editor'))
       let reStr = L.intercalate ".*" (map RE.escapeREString (words val))
       case RE.compileRegex reStr of
-        Nothing -> return mb { editor = editor' }
+        Nothing -> return $ Completed mb { editor = editor' }
         Just re -> do
           let matches = V.filter (commandMatches re) (allCommands mb)
-          return mb { editor = editor'
-                    , matchedCommands = matches
-                    , selectedMatch =
-                      if selectedMatch mb >= V.length matches then 0 else selectedMatch mb
-                    }
+          return $ Completed mb { editor = editor'
+                                , matchedCommands = matches
+                                , selectedMatch =
+                                  if selectedMatch mb >= V.length matches then 0 else selectedMatch mb
+                                }
 
 clearEditor :: (Z.GenericTextZipper t) => B.Editor t n -> B.Editor t n
 clearEditor = B.applyEdit (const (Z.textZipper [] Nothing))

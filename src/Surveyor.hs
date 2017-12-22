@@ -197,24 +197,35 @@ isListEventKey k =
 
 handleVtyEvent :: State -> V.Event -> B.EventM Names (B.Next State)
 handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
-  case evt of
-    V.EvKey (V.KChar 'x') [V.MAlt] ->
-      case sUIMode s of
-        SomeMiniBuffer (MiniBuffer _) -> B.continue s0
-        SomeUIMode oldMode -> B.continue $ State (s { sUIMode = SomeMiniBuffer (MiniBuffer oldMode) })
-    V.EvKey (V.KChar 's') [] ->
-      B.continue $ State (s { sUIMode = SomeUIMode Summary })
-    V.EvKey (V.KChar 'm') [] ->
-      B.continue $ State (s { sUIMode = SomeUIMode Diags })
-    V.EvKey (V.KChar 'f') [] ->
-      B.continue $ State (s { sUIMode = SomeUIMode ListFunctions })
-    V.EvKey (V.KChar 'q') [] -> B.halt s0
-    V.EvKey V.KEsc [] -> B.halt s0
-    V.EvKey k []
-      | sUIMode s == SomeUIMode ListFunctions && isListEventKey k -> do
-          l1 <- B.handleListEvent evt l0
-          B.continue (State (s { sFunctionList = l1 }))
-    _ -> B.continue s0
+  case sUIMode s of
+    SomeMiniBuffer (MiniBuffer oldMode) ->
+      case evt of
+        V.EvKey (V.KChar 'q') [V.MCtrl] -> B.halt s0
+        _ -> do
+          mbs <- MB.handleMinibufferEvent evt (sMinibuffer s)
+          case mbs of
+            MB.Canceled mb' ->
+              B.continue $ State s { sMinibuffer = mb'
+                                   , sUIMode = SomeUIMode oldMode
+                                   }
+            MB.Completed mb' ->
+              B.continue $ State s { sMinibuffer = mb' }
+    SomeUIMode _ ->
+      case evt of
+        V.EvKey (V.KChar 'x') [V.MMeta] ->
+          case sUIMode s of
+            SomeMiniBuffer (MiniBuffer _) -> B.continue s0
+            SomeUIMode oldMode -> B.continue $ State (s { sUIMode = SomeMiniBuffer (MiniBuffer oldMode) })
+        V.EvKey (V.KChar 's') [] ->
+          B.continue $ State (s { sUIMode = SomeUIMode Summary })
+        V.EvKey (V.KChar 'm') [] ->
+          B.continue $ State (s { sUIMode = SomeUIMode Diags })
+        V.EvKey (V.KChar 'f') [] ->
+          B.continue $ State (s { sUIMode = SomeUIMode ListFunctions })
+        V.EvKey (V.KChar 'q') [V.MCtrl] -> B.halt s0
+        V.EvKey V.KEsc [] -> B.halt s0
+        V.EvKey _k [] -> B.continue s0
+        _ -> B.continue s0
 
 appStartEvent :: State -> B.EventM Names State
 appStartEvent s0 = return s0
