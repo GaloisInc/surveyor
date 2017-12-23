@@ -17,6 +17,7 @@ library
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Events
+                       Surveyor.Handlers
                        Surveyor.Loader
                        Surveyor.Minibuffer
                        Surveyor.Mode

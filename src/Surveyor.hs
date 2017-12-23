@@ -11,33 +11,27 @@ import qualified Brick as B
 import qualified Brick.BChan as B
 import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
-import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
 import qualified Data.Functor.Const as C
-import qualified Data.Map as M
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
-import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Traversable as T
 import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
-import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
 import           Surveyor.Attributes
 import           Surveyor.BinaryAnalysisResult
 import           Surveyor.Events ( Events(..) )
+import           Surveyor.Handlers ( appHandleEvent )
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
@@ -141,135 +135,27 @@ drawUIMode binFileName binfo s uim =
     BlockSelector -> drawAppShell s (drawBlockSelector s binfo)
 
 appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
-appChooseCursor _ _ = Nothing
+appChooseCursor _ cursors =
+  case cursors of
+    [c] -> Just c
+    _ -> Nothing
 
 appAttrMap :: State s -> B.AttrMap
 appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.white)
                                    , (statusBarAttr, B.bg V.black <> B.fg V.white)
                                    ]
 
-stateFromAnalysisResult :: (MM.MemWidth w)
-                        => S s i0 a0 w0 arch0
-                        -> BinaryAnalysisResult s i a w arch
-                        -> Seq.Seq T.Text
-                        -> AppState
-                        -> SomeUIMode
-                        -> S s i a w arch
-stateFromAnalysisResult s0 bar newDiags state uiMode =
-  S { sBinaryInfo = Just bar
-    , sFunctionList = B.list FunctionList funcList 1
-    , sBlockList =
-      case sBinaryInfo s0 of
-        Nothing -> (MM.absoluteAddr 0, B.list BlockList V.empty 1)
-        Just bar0 -> do
-          let (nonceW0, nonceI0) = rNonces bar0
-          let (nonceW1, nonceI1) = rNonces bar
-          case (testEquality nonceW0 nonceW1, testEquality nonceI0 nonceI1) of
-            (Just Refl, Just Refl) -> sBlockList s0
-            _ -> (MM.absoluteAddr 0, B.list BlockList V.empty 1)
-    , sDiagnosticLog = sDiagnosticLog s0 <> newDiags
-    , sUIMode = uiMode
-    , sInputFile = sInputFile s0
-    , sMinibuffer = sMinibuffer s0
-    , sAppState = state
-    , sEmitEvent = sEmitEvent s0
-    , sNonceGenerator = sNonceGenerator s0
-    }
-  where
-    funcList = V.fromList [ FLE addr textName blockCount
-                          | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo (rBlockInfo bar))
-                          , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
-                          , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
-                          ]
+-- isListEventKey :: V.Key -> Bool
+-- isListEventKey k =
+--   case k of
+--     V.KUp -> True
+--     V.KDown -> True
+--     V.KHome -> True
+--     V.KEnd -> True
+--     V.KPageDown -> True
+--     V.KPageUp -> True
+--     _ -> False
 
-handleCustomEvent :: (MM.MemWidth w) => S s i a w arch -> Events s -> B.EventM Names (B.Next (State s))
-handleCustomEvent s0 evt =
-  case evt of
-    AnalysisFinished (BinaryAnalysisResultWrapper bar) diags ->
-      let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
-          notification = "Finished loading file"
-          s1 = stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) Ready (SomeUIMode Diags)
-      in B.continue (State s1)
-    AnalysisProgress _addr (BinaryAnalysisResultWrapper bar) ->
-      let s1 = stateFromAnalysisResult s0 bar Seq.empty Loading (sUIMode s0)
-      in B.continue (State s1)
-    BlockDiscovered addr ->
-      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Found a block at address " ++ show addr) }
-    AnalysisFailure exn ->
-      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
-    ErrorLoadingELFHeader off msg ->
-      let t = T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)
-      in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
-    ErrorLoadingELF errs ->
-      let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
-      in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
-    ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
-    ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
-    FindBlockContaining addr ->
-      case sBinaryInfo s0 of
-        Nothing -> B.continue (State s0)
-        Just bar -> do
-          let absAddr = MM.absoluteAddr (fromIntegral addr)
-          let blocks = blocksContaining bar absAddr
-          B.continue $ State s0 { sBlockList = (absAddr, B.list BlockList (V.fromList blocks) 1)
-                                , sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList [T.pack ("Finding blocks containing " ++ show absAddr)]
-                                , sUIMode = SomeUIMode BlockSelector
-                                }
-    Exit -> B.halt (State s0)
-
-appHandleEvent :: State s -> B.BrickEvent Names (Events s) -> B.EventM Names (B.Next (State s))
-appHandleEvent (State s0) evt =
-  case evt of
-    B.AppEvent ae -> handleCustomEvent s0 ae
-    B.VtyEvent vtyEvt -> handleVtyEvent (State s0) vtyEvt
-    B.MouseDown {} -> B.continue (State s0)
-    B.MouseUp {} -> B.continue (State s0)
-
-isListEventKey :: V.Key -> Bool
-isListEventKey k =
-  case k of
-    V.KUp -> True
-    V.KDown -> True
-    V.KHome -> True
-    V.KEnd -> True
-    V.KPageDown -> True
-    V.KPageUp -> True
-    _ -> False
-
-handleVtyEvent :: State s -> V.Event -> B.EventM Names (B.Next (State s))
-handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
-  case sUIMode s of
-    SomeMiniBuffer (MiniBuffer oldMode) ->
-      case evt of
-        V.EvKey (V.KChar 'q') [V.MCtrl] -> do
-          liftIO (sEmitEvent s Exit)
-          B.continue (State s)
-        _ -> do
-          mbs <- MB.handleMinibufferEvent evt (sMinibuffer s)
-          case mbs of
-            MB.Canceled mb' ->
-              B.continue $ State s { sMinibuffer = mb'
-                                   , sUIMode = SomeUIMode oldMode
-                                   }
-            MB.Completed mb' ->
-              B.continue $ State s { sMinibuffer = mb' }
-    SomeUIMode _ ->
-      case evt of
-        V.EvKey (V.KChar 'x') [V.MMeta] ->
-          case sUIMode s of
-            SomeMiniBuffer (MiniBuffer _) -> B.continue s0
-            SomeUIMode oldMode -> B.continue $ State (s { sUIMode = SomeMiniBuffer (MiniBuffer oldMode) })
-        V.EvKey (V.KChar 's') [] -> do
-          liftIO (sEmitEvent s ShowSummary)
-          B.continue (State s)
-        V.EvKey (V.KChar 'm') [] -> do
-          liftIO (sEmitEvent s ShowDiagnostics)
-          B.continue (State s)
-        V.EvKey (V.KChar 'q') [V.MCtrl] -> do
-          liftIO (sEmitEvent s Exit)
-          B.continue (State s)
-        V.EvKey _k [] -> B.continue s0
-        _ -> B.continue s0
 
 appStartEvent :: State s -> B.EventM Names (State s)
 appStartEvent s0 = return s0
