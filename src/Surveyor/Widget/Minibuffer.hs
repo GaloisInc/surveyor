@@ -255,10 +255,11 @@ renderMinibuffer :: (Ord n, Show n, B.TextWidth t, Z.GenericTextZipper t)
 renderMinibuffer hasFocus mb =
   case state mb of
     Editing ->
-      let editorLine = B.hBox [ B.str (printf "%d %s " (V.length (matchedCommands mb)) (prefix mb))
-                              , B.renderEditor (drawContent mb) hasFocus (editor mb)
-                              ]
-          compList = B.vLimit 5 (B.renderList (renderCompletionItem mb) False (matchedCommandsList mb))
+      let matches = V.length (matchedCommands mb)
+          editorLine = B.vLimit 1 $ B.hBox [ B.str (printf "%d %s " matches (prefix mb))
+                                           , B.renderEditor (drawContent mb) hasFocus (editor mb)
+                                           ]
+          compList = B.vLimit (min matches 5) (B.renderList (renderCompletionItem mb) False (matchedCommandsList mb))
       in B.vBox [editorLine, compList]
     CollectingArguments expectedArgNames expectedArgTypes _collectedArgTypes _collectedArgValues _callbackType _callback ->
       case (expectedArgNames, expectedArgTypes) of
