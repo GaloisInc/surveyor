@@ -15,6 +15,7 @@ import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Traversable as T
@@ -27,9 +28,10 @@ import qualified Renovate as R
 
 import           Surveyor.Attributes
 import           Surveyor.BinaryAnalysisResult
-import           Surveyor.Commands ( allCommands )
+import qualified Surveyor.Commands as C
+import           Surveyor.Events ( Events )
 import           Surveyor.Handlers ( appHandleEvent )
-import           Surveyor.Keymap ( defaultKeymap )
+import qualified Surveyor.Keymap as K
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
@@ -158,6 +160,13 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.whi
 appStartEvent :: State s -> B.EventM Names (State s)
 appStartEvent s0 = return s0
 
+-- | A default keymap with some reasonable keybindings
+defaultKeymap :: B.BChan (Events s) -> K.Keymap SomeUIMode MB.Argument MB.TypeRepr
+defaultKeymap c = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
+  where
+    globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some (C.exitC c))
+              ]
+
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   customEventChan <- B.newBChan 100
@@ -175,7 +184,7 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
                              , sBlockList = (MM.absoluteAddr 0, B.list BlockList V.empty 1)
                              , sUIMode = SomeUIMode Diags
                              , sAppState = maybe AwaitingFile (const Loading) mExePath
-                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (allCommands customEventChan)
+                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
                              , sEmitEvent = B.writeBChan customEventChan
                              , sNonceGenerator = ng
                              , sKeymap = defaultKeymap customEventChan

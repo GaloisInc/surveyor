@@ -1,41 +1,34 @@
+{-# LANGUAGE PolyKinds #-}
 module Surveyor.Keymap (
   Key(..),
   Keymap,
   emptyKeymap,
   addGlobalKey,
-  lookupKeyCommand,
-  defaultKeymap
+  lookupKeyCommand
   ) where
 
-import qualified Brick.BChan as B
-import qualified Data.Foldable as F
 import qualified Data.Map as M
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Graphics.Vty as V
 
-import qualified Surveyor.Commands as C
-import           Surveyor.Events
 import qualified Surveyor.Minibuffer as MB
-import           Surveyor.Mode
 
 data Key = Key V.Key [V.Modifier]
   deriving (Eq, Ord, Show)
 
-data Keymap = Keymap { globalKeys :: !(M.Map Key (Some (MB.Command MB.Argument MB.TypeRepr)))
-                     , modeKeys :: !(M.Map SomeUIMode (M.Map Key (Some (MB.Command MB.Argument MB.TypeRepr))))
-                     }
+data Keymap m a r =
+  Keymap { globalKeys :: !(M.Map Key (Some (MB.Command a r)))
+         , modeKeys :: !(M.Map m (M.Map Key (Some (MB.Command a r))))
+         }
 
 -- | Create a new empty keymap
-emptyKeymap :: Keymap
+emptyKeymap :: Keymap m a r
 emptyKeymap = Keymap { globalKeys = M.empty
-                     , modeKeys = M.fromList [ (SomeUIMode Diags, M.empty)
-                                             , (SomeUIMode Summary, M.empty)
-                                             , (SomeUIMode BlockSelector, M.empty)
-                                             ]
+                     , modeKeys = M.empty
                      }
 
 -- | Add a command to the global keymap
-addGlobalKey :: Key -> Some (MB.Command MB.Argument MB.TypeRepr) -> Keymap -> Keymap
+addGlobalKey :: Key -> Some (MB.Command a r) -> Keymap m a r -> Keymap m a r
 addGlobalKey k cmd m =
   m { globalKeys = M.insert k cmd (globalKeys m) }
 
@@ -43,10 +36,11 @@ addGlobalKey k cmd m =
 --
 -- The map for the given mode is checked first; if there is no relevant
 -- keybinding, the global keymap is also consulted.
-lookupKeyCommand :: SomeUIMode
+lookupKeyCommand :: (Ord m)
+                 => m
                  -> Key
-                 -> Keymap
-                 -> Maybe (Some (MB.Command MB.Argument MB.TypeRepr))
+                 -> Keymap m a r
+                 -> Maybe (Some (MB.Command a r))
 lookupKeyCommand mode k km =
   case M.lookup mode (modeKeys km) of
     Nothing -> M.lookup k (globalKeys km)
@@ -54,10 +48,3 @@ lookupKeyCommand mode k km =
       case M.lookup k modeMap of
         Nothing -> M.lookup k (globalKeys km)
         Just cmd -> Just cmd
-
--- | A default keymap with some reasonable keybindings
-defaultKeymap :: B.BChan (Events s) -> Keymap
-defaultKeymap c = F.foldl' (\km (k, cmd) -> addGlobalKey k cmd km) emptyKeymap globals
-  where
-    globals = [ (Key (V.KChar 'q') [V.MCtrl], Some (C.exitC c))
-              ]

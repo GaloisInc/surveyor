@@ -65,7 +65,7 @@ data S s i a w arch =
     , sFunctionList :: B.List Names (FunctionListEntry w)
     -- ^ Functions available in the function selector
     , sBlockList :: (MM.MemAddr w, B.List Names (R.ConcreteBlock i w))
-    , sKeymap :: Keymap
+    , sKeymap :: Keymap SomeUIMode MB.Argument MB.TypeRepr
     }
 
 data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
