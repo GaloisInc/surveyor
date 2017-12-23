@@ -135,7 +135,7 @@ handleMinibufferEvent evt mb@(Minibuffer { parseArgument = parseArg }) =
           let val = Z.toList (mconcat (B.getEditContents (editor mb)))
           case M.lookup (T.pack val) (commandIndex mb) of
             Nothing -> return (Completed mb)
-            Just (Some (Command _ argNames argTypes callback)) ->
+            Just (Some (Command _ _ argNames argTypes callback)) ->
               case (argNames, argTypes) of
                 (PL.Nil, PL.Nil) -> do
                   liftIO (callback PL.Nil)
@@ -262,7 +262,7 @@ renderMinibuffer hasFocus mb =
                  ]
 
 renderCompletionItem :: forall a r t n . Minibuffer a r t n -> Bool -> Some (Command a r) -> B.Widget n
-renderCompletionItem mb isFocused (Some (Command name argNames argTypes _)) =
+renderCompletionItem mb isFocused (Some (Command name _ argNames argTypes _)) =
   let xfrm = if isFocused then B.withAttr (focusedListAttr mb) else id
   in xfrm (B.str (printf "%s (%s)" name sig))
   where

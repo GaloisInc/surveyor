@@ -10,6 +10,8 @@ import qualified Data.Text as T
 data Command a r tps =
   Command { cmdName :: T.Text
           -- ^ The name of the command
+          , cmdDocstring :: T.Text
+          -- ^ Documentation for the command
           , cmdArgNames :: PL.List (C.Const T.Text) tps
           -- ^ Argument names
           , cmdArgTypes :: PL.List r tps
