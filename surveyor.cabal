@@ -19,12 +19,13 @@ library
                        Surveyor.Commands
                        Surveyor.Events
                        Surveyor.Handlers
-                       Surveyor.Keymap
                        Surveyor.Loader
                        Surveyor.Minibuffer
                        Surveyor.Mode
                        Surveyor.State
-                       Surveyor.Widget.Minibuffer
+                       Brick.Command
+                       Brick.Keymap
+                       Brick.Widget.Minibuffer
   -- other-modules:       
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,

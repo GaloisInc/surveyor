@@ -26,12 +26,12 @@ import           Text.Printf ( printf )
 import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
+import qualified Brick.Keymap as K
 import           Surveyor.Attributes
 import           Surveyor.BinaryAnalysisResult
 import qualified Surveyor.Commands as C
 import           Surveyor.Events ( Events )
 import           Surveyor.Handlers ( appHandleEvent )
-import qualified Surveyor.Keymap as K
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode

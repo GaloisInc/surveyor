@@ -1,5 +1,5 @@
 {-# LANGUAGE PolyKinds #-}
-module Surveyor.Keymap (
+module Brick.Keymap (
   Key(..),
   Keymap,
   emptyKeymap,
@@ -11,14 +11,14 @@ import qualified Data.Map as M
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Graphics.Vty as V
 
-import qualified Surveyor.Minibuffer as MB
+import qualified Brick.Command as C
 
 data Key = Key V.Key [V.Modifier]
   deriving (Eq, Ord, Show)
 
 data Keymap m a r =
-  Keymap { globalKeys :: !(M.Map Key (Some (MB.Command a r)))
-         , modeKeys :: !(M.Map m (M.Map Key (Some (MB.Command a r))))
+  Keymap { globalKeys :: !(M.Map Key (Some (C.Command a r)))
+         , modeKeys :: !(M.Map m (M.Map Key (Some (C.Command a r))))
          }
 
 -- | Create a new empty keymap
@@ -28,7 +28,7 @@ emptyKeymap = Keymap { globalKeys = M.empty
                      }
 
 -- | Add a command to the global keymap
-addGlobalKey :: Key -> Some (MB.Command a r) -> Keymap m a r -> Keymap m a r
+addGlobalKey :: Key -> Some (C.Command a r) -> Keymap m a r -> Keymap m a r
 addGlobalKey k cmd m =
   m { globalKeys = M.insert k cmd (globalKeys m) }
 
@@ -40,7 +40,7 @@ lookupKeyCommand :: (Ord m)
                  => m
                  -> Key
                  -> Keymap m a r
-                 -> Maybe (Some (MB.Command a r))
+                 -> Maybe (Some (C.Command a r))
 lookupKeyCommand mode k km =
   case M.lookup mode (modeKeys km) of
     Nothing -> M.lookup k (globalKeys km)

@@ -18,9 +18,10 @@ import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
+import qualified Brick.Command as C
+import qualified Brick.Keymap as K
 import           Surveyor.BinaryAnalysisResult
 import           Surveyor.Events
-import qualified Surveyor.Keymap as K
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.State
@@ -37,12 +38,12 @@ handleVtyEvent :: State s -> V.Event -> B.EventM Names (B.Next (State s))
 handleVtyEvent s0@(State s) evt
   | V.EvKey k mods <- evt
   , Just (Some cmd) <- K.lookupKeyCommand (sUIMode s) (K.Key k mods) (sKeymap s)
-  , Just Refl <- testEquality (MB.cmdArgTypes cmd) PL.Nil = do
+  , Just Refl <- testEquality (C.cmdArgTypes cmd) PL.Nil = do
       -- First, we try to consult the keymap.  For now, we can only handle
       -- commands that take no arguments.  Later, once we develop a notion of
       -- "current context", we can use that to call commands that take an
       -- argument.
-      liftIO (MB.cmdFunc cmd PL.Nil)
+      liftIO (C.cmdFunc cmd PL.Nil)
       B.continue (State s)
   | otherwise =
   case sUIMode s of

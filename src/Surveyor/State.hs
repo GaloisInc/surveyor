@@ -27,9 +27,9 @@ import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
+import           Brick.Keymap ( Keymap )
 import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..) )
 import           Surveyor.Events ( Events )
-import           Surveyor.Keymap ( Keymap )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 

@@ -10,7 +10,6 @@ module Surveyor.Minibuffer (
   MB.MinibufferStatus(..),
   MB.handleMinibufferEvent,
   MB.renderMinibuffer,
-  MB.Command(..),
   Argument(..),
   Type(..),
   TypeRepr(..),
@@ -28,8 +27,9 @@ import           Data.Word ( Word64 )
 import           Numeric.Natural ( Natural )
 import           Text.Read ( readMaybe )
 
+import qualified Brick.Command as C
+import qualified Brick.Widget.Minibuffer as MB
 import           Surveyor.Attributes
-import qualified Surveyor.Widget.Minibuffer as MB
 
 data Type where
   StringType :: Type
@@ -83,6 +83,6 @@ minibuffer :: (Z.GenericTextZipper t)
            -> n
            -- ^ The name of the completion list
            -> T.Text
-           -> [Some (MB.Command Argument TypeRepr)]
+           -> [Some (C.Command Argument TypeRepr)]
            -> MB.Minibuffer Argument TypeRepr t n
 minibuffer = MB.minibuffer parseArgument showRepr focusedListAttr

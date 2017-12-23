@@ -4,13 +4,12 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | An emacs-style minibuffer as a Brick widget
-module Surveyor.Widget.Minibuffer (
+module Brick.Widget.Minibuffer (
   Minibuffer,
   minibuffer,
   MinibufferStatus(..),
   handleMinibufferEvent,
-  renderMinibuffer,
-  Command(..)
+  renderMinibuffer
   ) where
 
 import qualified Brick as B
@@ -32,16 +31,7 @@ import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 import qualified Text.RE.TDFA.Text as RE
 
-data Command a r tps =
-  Command { cmdName :: T.Text
-          -- ^ The name of the command
-          , cmdArgNames :: PL.List (C.Const T.Text) tps
-          -- ^ Argument names
-          , cmdArgTypes :: PL.List r tps
-          -- ^ Argument types
-          , cmdFunc :: PL.List a tps -> IO ()
-          -- ^ A function to call on the argument list
-          }
+import           Brick.Command ( Command(..) )
 
 data MinibufferState a r where
   CollectingArguments :: PL.List (C.Const T.Text) tps
