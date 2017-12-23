@@ -16,8 +16,10 @@ library
   exposed-modules:     Surveyor
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
+                       Surveyor.Commands
                        Surveyor.Events
                        Surveyor.Handlers
+                       Surveyor.Keymap
                        Surveyor.Loader
                        Surveyor.Minibuffer
                        Surveyor.Mode

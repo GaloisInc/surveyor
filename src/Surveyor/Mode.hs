@@ -37,6 +37,7 @@ data SomeUIMode where
   SomeUIMode :: UIMode NormalK -> SomeUIMode
 
 deriving instance Eq SomeUIMode
+deriving instance Ord SomeUIMode
 
 deriving instance Eq (UIMode s)
 deriving instance Ord (UIMode s)

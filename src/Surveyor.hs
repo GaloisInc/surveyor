@@ -12,14 +12,11 @@ import qualified Brick.BChan as B
 import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
 import qualified Data.Foldable as F
-import qualified Data.Functor.Const as C
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
-import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Traversable as T
 import qualified Data.Vector as V
 import qualified Graphics.Vty as V
@@ -30,8 +27,9 @@ import qualified Renovate as R
 
 import           Surveyor.Attributes
 import           Surveyor.BinaryAnalysisResult
-import           Surveyor.Events ( Events(..) )
+import           Surveyor.Commands ( allCommands )
 import           Surveyor.Handlers ( appHandleEvent )
+import           Surveyor.Keymap ( defaultKeymap )
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
@@ -50,14 +48,14 @@ drawConcreteBlock isa b =
          , B.vBox [ B.str (R.isaPrettyInstruction isa i) | i <- R.basicBlockInstructions b ]
          ]
 
-drawFunctionList :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
-drawFunctionList S { sFunctionList = flist }
-                 BinaryAnalysisResult { rBlockInfo = binfo, rISA = isa } =
-  B.renderList drawFunctionEntry True flist
-  where
-    drawFunctionEntry isFocused (FLE addr txt blockCount) =
-      let focusedXfrm = if isFocused then B.withAttr focusedListAttr else id
-      in focusedXfrm (B.hBox [B.str (printf "%s: %s (%d blocks)" (show (PP.pretty addr)) (T.unpack txt) blockCount)])
+-- drawFunctionList :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
+-- drawFunctionList S { sFunctionList = flist }
+--                  BinaryAnalysisResult { rBlockInfo = binfo, rISA = isa } =
+--   B.renderList drawFunctionEntry True flist
+--   where
+--     drawFunctionEntry isFocused (FLE addr txt blockCount) =
+--       let focusedXfrm = if isFocused then B.withAttr focusedListAttr else id
+--       in focusedXfrm (B.hBox [B.str (printf "%s: %s (%d blocks)" (show (PP.pretty addr)) (T.unpack txt) blockCount)])
 
 drawDiagnostics :: Seq.Seq T.Text -> B.Widget Names
 drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
@@ -131,7 +129,7 @@ drawUIMode binFileName binfo s uim =
   case uim of
     Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
     Summary -> drawAppShell s (drawSummary binFileName binfo)
-    ListFunctions -> drawAppShell s (drawFunctionList s binfo)
+    ListFunctions -> drawAppShell s B.emptyWidget -- drawAppShell s (drawFunctionList s binfo)
     BlockSelector -> drawAppShell s (drawBlockSelector s binfo)
 
 appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
@@ -160,23 +158,6 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.whi
 appStartEvent :: State s -> B.EventM Names (State s)
 appStartEvent s0 = return s0
 
-commands :: B.BChan (Events s) -> [MB.Command MB.Argument MB.TypeRepr]
-commands customEventChan =
-  [ MB.Command "summary" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowSummary)
-  , MB.Command "exit" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan Exit)
-  , MB.Command "log" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowDiagnostics)
-  , findBlockCommand customEventChan
-  ]
-
-findBlockCommand :: B.BChan (Events s) -> MB.Command MB.Argument MB.TypeRepr
-findBlockCommand customEventChan =
-  MB.Command "find-block" names rep callback
-  where
-    names = C.Const "address" PL.:< PL.Nil
-    rep = MB.AddressTypeRepr PL.:< PL.Nil
-    callback = \(MB.AddressArgument addr PL.:< PL.Nil) ->
-      B.writeBChan customEventChan (FindBlockContaining addr)
-
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   customEventChan <- B.newBChan 100
@@ -194,9 +175,10 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
                              , sBlockList = (MM.absoluteAddr 0, B.list BlockList V.empty 1)
                              , sUIMode = SomeUIMode Diags
                              , sAppState = maybe AwaitingFile (const Loading) mExePath
-                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (commands customEventChan)
+                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (allCommands customEventChan)
                              , sEmitEvent = B.writeBChan customEventChan
                              , sNonceGenerator = ng
+                             , sKeymap = defaultKeymap customEventChan
                              }
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()

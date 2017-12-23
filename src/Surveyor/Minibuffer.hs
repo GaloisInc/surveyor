@@ -21,6 +21,7 @@ module Surveyor.Minibuffer (
   ) where
 
 import           Data.Parameterized.Classes
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import           Data.Word ( Word64 )
@@ -82,6 +83,6 @@ minibuffer :: (Z.GenericTextZipper t)
            -> n
            -- ^ The name of the completion list
            -> T.Text
-           -> [MB.Command Argument TypeRepr]
+           -> [Some (MB.Command Argument TypeRepr)]
            -> MB.Minibuffer Argument TypeRepr t n
 minibuffer = MB.minibuffer parseArgument showRepr focusedListAttr

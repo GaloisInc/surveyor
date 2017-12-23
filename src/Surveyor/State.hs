@@ -29,6 +29,7 @@ import qualified Renovate as R
 
 import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..) )
 import           Surveyor.Events ( Events )
+import           Surveyor.Keymap ( Keymap )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 
@@ -64,6 +65,7 @@ data S s i a w arch =
     , sFunctionList :: B.List Names (FunctionListEntry w)
     -- ^ Functions available in the function selector
     , sBlockList :: (MM.MemAddr w, B.List Names (R.ConcreteBlock i w))
+    , sKeymap :: Keymap
     }
 
 data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
@@ -106,6 +108,7 @@ stateFromAnalysisResult s0 bar newDiags state uiMode =
     , sAppState = state
     , sEmitEvent = sEmitEvent s0
     , sNonceGenerator = sNonceGenerator s0
+    , sKeymap = sKeymap s0
     }
   where
     funcList = V.fromList [ FLE addr textName blockCount

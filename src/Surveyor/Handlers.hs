@@ -9,6 +9,9 @@ import qualified Brick.Widgets.List as B
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Macaw.Memory as MM
 import           Data.Monoid
+import           Data.Parameterized.Classes
+import qualified Data.Parameterized.List as PL
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -17,6 +20,7 @@ import           Text.Printf ( printf )
 
 import           Surveyor.BinaryAnalysisResult
 import           Surveyor.Events
+import qualified Surveyor.Keymap as K
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.State
@@ -30,38 +34,41 @@ appHandleEvent (State s0) evt =
     B.MouseUp {} -> B.continue (State s0)
 
 handleVtyEvent :: State s -> V.Event -> B.EventM Names (B.Next (State s))
-handleVtyEvent s0@(State s) evt =
+handleVtyEvent s0@(State s) evt
+  | V.EvKey k mods <- evt
+  , Just (Some cmd) <- K.lookupKeyCommand (sUIMode s) (K.Key k mods) (sKeymap s)
+  , Just Refl <- testEquality (MB.cmdArgTypes cmd) PL.Nil = do
+      -- First, we try to consult the keymap.  For now, we can only handle
+      -- commands that take no arguments.  Later, once we develop a notion of
+      -- "current context", we can use that to call commands that take an
+      -- argument.
+      liftIO (MB.cmdFunc cmd PL.Nil)
+      B.continue (State s)
+  | otherwise =
   case sUIMode s of
-    SomeMiniBuffer (MiniBuffer oldMode) ->
-      case evt of
-        V.EvKey (V.KChar 'q') [V.MCtrl] -> do
-          liftIO (sEmitEvent s Exit)
-          B.continue (State s)
-        _ -> do
-          mbs <- MB.handleMinibufferEvent evt (sMinibuffer s)
-          case mbs of
-            MB.Canceled mb' ->
-              B.continue $ State s { sMinibuffer = mb'
-                                   , sUIMode = SomeUIMode oldMode
-                                   }
-            MB.Completed mb' ->
-              B.continue $ State s { sMinibuffer = mb' }
-    SomeUIMode _ ->
+    SomeMiniBuffer (MiniBuffer oldMode) -> do
+      mbs <- MB.handleMinibufferEvent evt (sMinibuffer s)
+      case mbs of
+        MB.Canceled mb' ->
+          B.continue $ State s { sMinibuffer = mb'
+                               , sUIMode = SomeUIMode oldMode
+                               }
+        MB.Completed mb' ->
+          B.continue $ State s { sMinibuffer = mb' }
+    SomeUIMode m ->
       case evt of
         V.EvKey (V.KChar 'x') [V.MMeta] ->
-          case sUIMode s of
-            SomeMiniBuffer (MiniBuffer _) -> B.continue s0
-            SomeUIMode oldMode -> B.continue $ State (s { sUIMode = SomeMiniBuffer (MiniBuffer oldMode) })
+          -- Activate the minibuffer; due to the representation of SomeUIMode,
+          -- it cannot contain a MiniBuffer (i.e., the minibuffer cannot
+          -- possibly already be active if we are here), so we don't need to
+          -- check for recursive minibuffer activation.
+          B.continue $ State s { sUIMode = SomeMiniBuffer (MiniBuffer m) }
         V.EvKey (V.KChar 's') [] -> do
           liftIO (sEmitEvent s ShowSummary)
           B.continue (State s)
         V.EvKey (V.KChar 'm') [] -> do
           liftIO (sEmitEvent s ShowDiagnostics)
           B.continue (State s)
-        V.EvKey (V.KChar 'q') [V.MCtrl] -> do
-          liftIO (sEmitEvent s Exit)
-          B.continue (State s)
-        V.EvKey _k [] -> B.continue s0
         _ -> B.continue s0
 
 
