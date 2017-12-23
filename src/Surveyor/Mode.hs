@@ -25,6 +25,9 @@ data UIMode s where
   ListFunctions :: UIMode NormalK
   -- ^ A list of all of the discovered functions (which allows for
   -- drilling down and displaying blocks)
+  BlockSelector :: UIMode NormalK
+  -- ^ A selector list for blocks that are the result of a search (based on the
+  -- sBlockList in the State)
   MiniBuffer :: UIMode NormalK -> UIMode MiniBufferK
   -- ^ An interactive widget that takes focus and accepts all
   -- keystrokes except for C-g
@@ -43,6 +46,7 @@ instance TestEquality UIMode where
   testEquality Diags Diags = Just Refl
   testEquality Summary Summary = Just Refl
   testEquality ListFunctions ListFunctions = Just Refl
+  testEquality BlockSelector BlockSelector = Just Refl
   testEquality (MiniBuffer a) (MiniBuffer b) = do
     _ <- testEquality a b
     return Refl

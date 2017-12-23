@@ -12,15 +12,15 @@ import qualified Renovate as R
 
 import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResultWrapper )
 
-data Events where
-  ErrorLoadingELFHeader :: Int64 -> String -> Events
+data Events s where
+  ErrorLoadingELFHeader :: Int64 -> String -> Events s
   ErrorLoadingELF :: (Eq (E.ElfWordType n), Num (E.ElfWordType n), Show (E.ElfWordType n))
-                  => [E.ElfParseError n] -> Events
-  AnalysisFailure :: X.SomeException -> Events
-  AnalysisFinished :: BinaryAnalysisResultWrapper -> [R.Diagnostic] -> Events
-  BlockDiscovered :: (MM.MemWidth w) => MM.MemAddr w -> Events
-  AnalysisProgress :: MM.MemAddr w -> BinaryAnalysisResultWrapper -> Events
-  FindBlockContaining :: Word64 -> Events
-  ShowSummary :: Events
-  ShowDiagnostics :: Events
-  Exit :: Events
+                  => [E.ElfParseError n] -> Events s
+  AnalysisFailure :: X.SomeException -> Events s
+  AnalysisFinished :: BinaryAnalysisResultWrapper s -> [R.Diagnostic] -> Events s
+  BlockDiscovered :: (MM.MemWidth w) => MM.MemAddr w -> Events s
+  AnalysisProgress :: MM.MemAddr w -> BinaryAnalysisResultWrapper s -> Events s
+  FindBlockContaining :: Word64 -> Events s
+  ShowSummary :: Events s
+  ShowDiagnostics :: Events s
+  Exit :: Events s

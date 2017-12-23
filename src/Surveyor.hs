@@ -17,7 +17,9 @@ import qualified Data.Functor.Const as C
 import qualified Data.Map as M
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
+import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -34,16 +36,14 @@ import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
 import           Surveyor.Attributes
-import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..)
-                                               , BinaryAnalysisResultWrapper(..)
-                                               )
+import           Surveyor.BinaryAnalysisResult
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.State
 
-drawSummary :: FilePath -> BinaryAnalysisResult i a w arch -> B.Widget Names
+drawSummary :: FilePath -> BinaryAnalysisResult s i a w arch -> B.Widget Names
 drawSummary binFileName BinaryAnalysisResult { rBlockInfo = binfo } =
   B.vBox [ B.str ("Target binary: " ++ binFileName)
          , B.str ("Discovered functions: " ++ show (length (R.biFunctionEntries binfo)))
@@ -56,7 +56,7 @@ drawConcreteBlock isa b =
          , B.vBox [ B.str (R.isaPrettyInstruction isa i) | i <- R.basicBlockInstructions b ]
          ]
 
-drawFunctionList :: (MM.MemWidth w) => S i a w arch -> BinaryAnalysisResult i a w arch -> B.Widget Names
+drawFunctionList :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
 drawFunctionList S { sFunctionList = flist }
                  BinaryAnalysisResult { rBlockInfo = binfo, rISA = isa } =
   B.renderList drawFunctionEntry True flist
@@ -75,7 +75,7 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
 -- The status bar is a line at the bottom of the screen that reflects the
 -- currently-loaded executable (if any) and includes an indicator of the
 -- analysis progress.
-drawStatusBar :: S i a w arch -> B.Widget Names
+drawStatusBar :: S s i a w arch -> B.Widget Names
 drawStatusBar s =
   B.withAttr statusBarAttr (B.hBox [fileNameWidget, B.padLeft B.Max statusWidget])
   where
@@ -86,13 +86,22 @@ drawStatusBar s =
         Ready -> B.str "Ready"
         AwaitingFile -> B.str "Waiting for file"
 
-drawEchoArea :: S i a w arch -> B.Widget Names
+drawEchoArea :: S s i a w arch -> B.Widget Names
 drawEchoArea s =
   case Seq.viewr (sDiagnosticLog s) of
     Seq.EmptyR -> B.emptyWidget
     _ Seq.:> lastDiag -> B.txt lastDiag
 
-drawAppShell :: S i a w arch -> B.Widget Names -> [B.Widget Names]
+drawBlockSelector :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
+drawBlockSelector s res =
+  case V.toList (blockList L.^. B.listElementsL) of
+    [] -> B.str (printf "No blocks found containing address %s" (show selectedAddr))
+    [cb] -> drawConcreteBlock (rISA res) cb
+    _ -> B.emptyWidget
+  where
+    (selectedAddr, blockList) = sBlockList s
+
+drawAppShell :: S s i a w arch -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w = [B.vBox [ B.padBottom B.Max w
                            , drawStatusBar s
                            , bottomLine
@@ -104,7 +113,7 @@ drawAppShell s w = [B.vBox [ B.padBottom B.Max w
         SomeMiniBuffer (MiniBuffer _) -> MB.renderMinibuffer True (sMinibuffer s)
         _ ->  drawEchoArea s
 
-appDraw :: State -> [B.Widget Names]
+appDraw :: State s -> [B.Widget Names]
 appDraw (State s) =
   case sInputFile s of
     Nothing -> drawAppShell s B.emptyWidget
@@ -120,8 +129,8 @@ appDraw (State s) =
 
 drawUIMode :: (MM.MemWidth w)
            => FilePath
-           -> BinaryAnalysisResult i a w arch
-           -> S i a w arch
+           -> BinaryAnalysisResult s i a w arch
+           -> S s i a w arch
            -> UIMode NormalK
            -> [B.Widget Names]
 drawUIMode binFileName binfo s uim =
@@ -129,30 +138,42 @@ drawUIMode binFileName binfo s uim =
     Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
     Summary -> drawAppShell s (drawSummary binFileName binfo)
     ListFunctions -> drawAppShell s (drawFunctionList s binfo)
+    BlockSelector -> drawAppShell s (drawBlockSelector s binfo)
 
-appChooseCursor :: State -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
+appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ _ = Nothing
 
-appAttrMap :: State -> B.AttrMap
+appAttrMap :: State s -> B.AttrMap
 appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.white)
                                    , (statusBarAttr, B.bg V.black <> B.fg V.white)
                                    ]
 
-stateFromAnalysisResult :: S i0 a0 w0 arch0
-                        -> BinaryAnalysisResult i a w arch
+stateFromAnalysisResult :: (MM.MemWidth w)
+                        => S s i0 a0 w0 arch0
+                        -> BinaryAnalysisResult s i a w arch
                         -> Seq.Seq T.Text
                         -> AppState
                         -> SomeUIMode
-                        -> S i a w arch
+                        -> S s i a w arch
 stateFromAnalysisResult s0 bar newDiags state uiMode =
   S { sBinaryInfo = Just bar
     , sFunctionList = B.list FunctionList funcList 1
+    , sBlockList =
+      case sBinaryInfo s0 of
+        Nothing -> (MM.absoluteAddr 0, B.list BlockList V.empty 1)
+        Just bar0 -> do
+          let (nonceW0, nonceI0) = rNonces bar0
+          let (nonceW1, nonceI1) = rNonces bar
+          case (testEquality nonceW0 nonceW1, testEquality nonceI0 nonceI1) of
+            (Just Refl, Just Refl) -> sBlockList s0
+            _ -> (MM.absoluteAddr 0, B.list BlockList V.empty 1)
     , sDiagnosticLog = sDiagnosticLog s0 <> newDiags
     , sUIMode = uiMode
     , sInputFile = sInputFile s0
     , sMinibuffer = sMinibuffer s0
     , sAppState = state
     , sEmitEvent = sEmitEvent s0
+    , sNonceGenerator = sNonceGenerator s0
     }
   where
     funcList = V.fromList [ FLE addr textName blockCount
@@ -161,7 +182,7 @@ stateFromAnalysisResult s0 bar newDiags state uiMode =
                           , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
                           ]
 
-handleCustomEvent :: (MM.MemWidth w) => S i a w arch -> Events -> B.EventM Names (B.Next State)
+handleCustomEvent :: (MM.MemWidth w) => S s i a w arch -> Events s -> B.EventM Names (B.Next (State s))
 handleCustomEvent s0 evt =
   case evt of
     AnalysisFinished (BinaryAnalysisResultWrapper bar) diags ->
@@ -184,10 +205,19 @@ handleCustomEvent s0 evt =
       in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
     ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
     ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
-    FindBlockContaining addr -> undefined
+    FindBlockContaining addr ->
+      case sBinaryInfo s0 of
+        Nothing -> B.continue (State s0)
+        Just bar -> do
+          let absAddr = MM.absoluteAddr (fromIntegral addr)
+          let blocks = blocksContaining bar absAddr
+          B.continue $ State s0 { sBlockList = (absAddr, B.list BlockList (V.fromList blocks) 1)
+                                , sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList [T.pack ("Finding blocks containing " ++ show absAddr)]
+                                , sUIMode = SomeUIMode BlockSelector
+                                }
     Exit -> B.halt (State s0)
 
-appHandleEvent :: State -> B.BrickEvent Names Events -> B.EventM Names (B.Next State)
+appHandleEvent :: State s -> B.BrickEvent Names (Events s) -> B.EventM Names (B.Next (State s))
 appHandleEvent (State s0) evt =
   case evt of
     B.AppEvent ae -> handleCustomEvent s0 ae
@@ -206,7 +236,7 @@ isListEventKey k =
     V.KPageUp -> True
     _ -> False
 
-handleVtyEvent :: State -> V.Event -> B.EventM Names (B.Next State)
+handleVtyEvent :: State s -> V.Event -> B.EventM Names (B.Next (State s))
 handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
   case sUIMode s of
     SomeMiniBuffer (MiniBuffer oldMode) ->
@@ -241,10 +271,10 @@ handleVtyEvent s0@(State (s@S { sFunctionList = l0 })) evt =
         V.EvKey _k [] -> B.continue s0
         _ -> B.continue s0
 
-appStartEvent :: State -> B.EventM Names State
+appStartEvent :: State s -> B.EventM Names (State s)
 appStartEvent s0 = return s0
 
-commands :: B.BChan Events -> [MB.Command MB.Argument MB.TypeRepr]
+commands :: B.BChan (Events s) -> [MB.Command MB.Argument MB.TypeRepr]
 commands customEventChan =
   [ MB.Command "summary" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan ShowSummary)
   , MB.Command "exit" PL.Nil PL.Nil (\_ -> B.writeBChan customEventChan Exit)
@@ -252,7 +282,7 @@ commands customEventChan =
   , findBlockCommand customEventChan
   ]
 
-findBlockCommand :: B.BChan Events -> MB.Command MB.Argument MB.TypeRepr
+findBlockCommand :: B.BChan (Events s) -> MB.Command MB.Argument MB.TypeRepr
 findBlockCommand customEventChan =
   MB.Command "find-block" names rep callback
   where
@@ -262,7 +292,7 @@ findBlockCommand customEventChan =
       B.writeBChan customEventChan (FindBlockContaining addr)
 
 surveyor :: Maybe FilePath -> IO ()
-surveyor mExePath = do
+surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   customEventChan <- B.newBChan 100
   let app = B.App { B.appDraw = appDraw
                   , B.appChooseCursor = appChooseCursor
@@ -270,15 +300,17 @@ surveyor mExePath = do
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  _ <- T.traverse (asynchronouslyLoad customEventChan) mExePath
+  _ <- T.traverse (asynchronouslyLoad ng customEventChan) mExePath
   let initialState = State S { sInputFile = mExePath
                              , sBinaryInfo = Nothing
                              , sDiagnosticLog = Seq.empty
-                             , sFunctionList = (B.list FunctionList (V.empty @(FunctionListEntry 64)) 1)
+                             , sFunctionList = B.list FunctionList (V.empty @(FunctionListEntry 64)) 1
+                             , sBlockList = (MM.absoluteAddr 0, B.list BlockList V.empty 1)
                              , sUIMode = SomeUIMode Diags
                              , sAppState = maybe AwaitingFile (const Loading) mExePath
                              , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (commands customEventChan)
                              , sEmitEvent = B.writeBChan customEventChan
+                             , sNonceGenerator = ng
                              }
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
