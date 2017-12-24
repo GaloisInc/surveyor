@@ -17,6 +17,7 @@ library
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Commands
+                       Surveyor.EchoArea
                        Surveyor.Events
                        Surveyor.Handlers
                        Surveyor.Loader

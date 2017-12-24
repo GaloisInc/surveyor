@@ -30,7 +30,8 @@ import qualified Brick.Keymap as K
 import           Surveyor.Attributes
 import           Surveyor.BinaryAnalysisResult
 import qualified Surveyor.Commands as C
-import           Surveyor.Events ( Events )
+import qualified Surveyor.EchoArea as EA
+import           Surveyor.Events ( Events(..) )
 import           Surveyor.Handlers ( appHandleEvent )
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
@@ -80,12 +81,6 @@ drawStatusBar s =
         Ready -> B.str "Ready"
         AwaitingFile -> B.str "Waiting for file"
 
-drawEchoArea :: S s i a w arch -> B.Widget Names
-drawEchoArea s =
-  case Seq.viewr (sDiagnosticLog s) of
-    Seq.EmptyR -> B.emptyWidget
-    _ Seq.:> lastDiag -> B.txt lastDiag
-
 drawBlockSelector :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
 drawBlockSelector s res =
   case V.toList (blockList L.^. B.listElementsL) of
@@ -105,7 +100,7 @@ drawAppShell s w = [B.vBox [ B.padBottom B.Max w
     bottomLine =
       case sUIMode s of
         SomeMiniBuffer (MiniBuffer _) -> MB.renderMinibuffer True (sMinibuffer s)
-        _ ->  drawEchoArea s
+        _ -> EA.renderEchoArea (sEchoArea s)
 
 appDraw :: State s -> [B.Widget Names]
 appDraw (State s) =
@@ -160,6 +155,10 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.whi
 appStartEvent :: State s -> B.EventM Names (State s)
 appStartEvent s0 = return s0
 
+updateEchoArea :: B.BChan (Events s) -> EA.EchoArea -> IO ()
+updateEchoArea customEventChan ea =
+  B.writeBChan customEventChan (UpdateEchoArea ea)
+
 -- | A default keymap with some reasonable keybindings
 defaultKeymap :: B.BChan (Events s) -> K.Keymap SomeUIMode MB.Argument MB.TypeRepr
 defaultKeymap c = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
@@ -180,6 +179,7 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   let initialState = State S { sInputFile = mExePath
                              , sBinaryInfo = Nothing
                              , sDiagnosticLog = Seq.empty
+                             , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
                              , sFunctionList = B.list FunctionList (V.empty @(FunctionListEntry 64)) 1
                              , sBlockList = (MM.absoluteAddr 0, B.list BlockList V.empty 1)
                              , sUIMode = SomeUIMode Diags

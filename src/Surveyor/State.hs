@@ -32,6 +32,7 @@ import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResult(..) )
 import           Surveyor.Events ( Events )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
+import qualified Surveyor.EchoArea as EA
 
 data State s where
   State :: (MM.MemWidth w) => S s i a w arch -> State s
@@ -42,6 +43,8 @@ data S s i a w arch =
     -- ^ Information returned by the binary analysis
     , sDiagnosticLog :: Seq.Seq T.Text
     -- ^ Diagnostics collected over time (displayed in the diagnostic view)
+    , sEchoArea :: EA.EchoArea
+    -- ^ An area where one-line messages can be displayed
     , sUIMode :: SomeUIMode
     -- ^ The current UI mode, which drives rendering and keybindings available
     , sMinibuffer :: MB.Minibuffer MB.Argument MB.TypeRepr T.Text Names
@@ -102,6 +105,7 @@ stateFromAnalysisResult s0 bar newDiags state uiMode =
             (Just Refl, Just Refl) -> sBlockList s0
             _ -> (MM.absoluteAddr 0, B.list BlockList V.empty 1)
     , sDiagnosticLog = sDiagnosticLog s0 <> newDiags
+    , sEchoArea = sEchoArea s0
     , sUIMode = uiMode
     , sInputFile = sInputFile s0
     , sMinibuffer = sMinibuffer s0

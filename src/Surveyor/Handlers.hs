@@ -21,6 +21,7 @@ import           Text.Printf ( printf )
 import qualified Brick.Command as C
 import qualified Brick.Keymap as K
 import           Surveyor.BinaryAnalysisResult
+import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
@@ -96,10 +97,20 @@ handleCustomEvent s0 evt =
       in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
     ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
     ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
-    DescribeCommand (Some cmd) ->
-      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
-                            , sUIMode = SomeUIMode Diags
+    DescribeCommand (Some cmd) -> do
+      let msg = T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
+      liftIO (sEmitEvent s0 (EchoText msg))
+      let newMode =
+            case sUIMode s0 of
+              SomeMiniBuffer (MiniBuffer oldMode) -> oldMode
+              SomeUIMode mode -> mode
+      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> msg
+                            , sUIMode = SomeUIMode newMode
                             }
+    EchoText txt -> do
+      ea' <- liftIO (EA.setText (sEchoArea s0) txt)
+      B.continue $ State s0 { sEchoArea = ea' }
+    UpdateEchoArea ea -> B.continue $ State s0 { sEchoArea = ea }
     FindBlockContaining addr ->
       case sBinaryInfo s0 of
         Nothing -> B.continue (State s0)
