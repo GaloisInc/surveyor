@@ -96,6 +96,10 @@ handleCustomEvent s0 evt =
       in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
     ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
     ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
+    DescribeCommand (Some cmd) ->
+      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
+                            , sUIMode = SomeUIMode Diags
+                            }
     FindBlockContaining addr ->
       case sBinaryInfo s0 of
         Nothing -> B.continue (State s0)

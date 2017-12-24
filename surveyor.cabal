@@ -25,6 +25,7 @@ library
                        Surveyor.State
                        Brick.Command
                        Brick.Keymap
+                       Brick.Match.Subword
                        Brick.Widget.Minibuffer
   -- other-modules:       
   -- other-extensions:    

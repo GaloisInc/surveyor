@@ -7,6 +7,7 @@ module Surveyor.Commands (
   showSummaryC,
   showDiagnosticsC,
   findBlockC,
+  describeCommandC,
   allCommands
   ) where
 
@@ -25,6 +26,7 @@ allCommands customEventChan =
   , Some (exitC customEventChan)
   , Some (showDiagnosticsC customEventChan)
   , Some (findBlockC customEventChan)
+  , Some (describeCommandC customEventChan)
   ]
 
 exitC :: B.BChan (Events s) -> C.Command MB.Argument MB.TypeRepr '[]
@@ -57,3 +59,13 @@ findBlockC customEventChan =
     rep = MB.AddressTypeRepr PL.:< PL.Nil
     callback = \(MB.AddressArgument addr PL.:< PL.Nil) ->
       B.writeBChan customEventChan (FindBlockContaining addr)
+
+describeCommandC :: B.BChan (Events s) -> C.Command MB.Argument MB.TypeRepr '[MB.CommandType]
+describeCommandC customEventChan =
+  C.Command "describe-command" doc names rep callback
+  where
+    doc = "Display the docstring of the named command"
+    names = C.Const "command-name" PL.:< PL.Nil
+    rep = MB.CommandTypeRepr PL.:< PL.Nil
+    callback = \(MB.CommandArgument cmd PL.:< PL.Nil) ->
+      B.writeBChan customEventChan (DescribeCommand cmd)
