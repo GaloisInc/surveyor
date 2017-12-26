@@ -7,7 +7,6 @@ module Surveyor.Handlers (
 import qualified Brick as B
 import qualified Brick.Widgets.List as B
 import           Control.Monad.IO.Class ( liftIO )
-import qualified Data.Macaw.Memory as MM
 import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
@@ -20,7 +19,7 @@ import           Text.Printf ( printf )
 
 import qualified Brick.Command as C
 import qualified Brick.Keymap as K
-import           Surveyor.BinaryAnalysisResult
+import qualified Surveyor.Architecture as A
 import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events
 import qualified Surveyor.Minibuffer as MB
@@ -57,32 +56,17 @@ handleVtyEvent s0@(State s) evt
                                }
         MB.Completed mb' ->
           B.continue $ State s { sMinibuffer = mb' }
-    SomeUIMode m ->
-      case evt of
-        V.EvKey (V.KChar 'x') [V.MMeta] ->
-          -- Activate the minibuffer; due to the representation of SomeUIMode,
-          -- it cannot contain a MiniBuffer (i.e., the minibuffer cannot
-          -- possibly already be active if we are here), so we don't need to
-          -- check for recursive minibuffer activation.
-          B.continue $ State s { sUIMode = SomeMiniBuffer (MiniBuffer m) }
-        V.EvKey (V.KChar 's') [] -> do
-          liftIO (sEmitEvent s ShowSummary)
-          B.continue (State s)
-        V.EvKey (V.KChar 'm') [] -> do
-          liftIO (sEmitEvent s ShowDiagnostics)
-          B.continue (State s)
-        _ -> B.continue s0
+    SomeUIMode _m -> B.continue s0
 
-
-handleCustomEvent :: (MM.MemWidth w) => S s i a w arch -> Events s -> B.EventM Names (B.Next (State s))
+handleCustomEvent :: (A.Architecture st arch s) => S s st arch -> Events s -> B.EventM Names (B.Next (State s))
 handleCustomEvent s0 evt =
   case evt of
-    AnalysisFinished (BinaryAnalysisResultWrapper bar) diags ->
+    AnalysisFinished (A.SomeResult bar) diags ->
       let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
           notification = "Finished loading file"
           s1 = stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) Ready (SomeUIMode Diags)
       in B.continue (State s1)
-    AnalysisProgress _addr (BinaryAnalysisResultWrapper bar) ->
+    AnalysisProgress (A.SomeResult bar) ->
       let s1 = stateFromAnalysisResult s0 bar Seq.empty Loading (sUIMode s0)
       in B.continue (State s1)
     AnalysisFailure exn ->
@@ -109,14 +93,18 @@ handleCustomEvent s0 evt =
       ea' <- liftIO (EA.setText (sEchoArea s0) txt)
       B.continue $ State s0 { sEchoArea = ea' }
     UpdateEchoArea ea -> B.continue $ State s0 { sEchoArea = ea }
-    FindBlockContaining addr ->
-      case sBinaryInfo s0 of
-        Nothing -> B.continue (State s0)
-        Just bar -> do
-          let absAddr = MM.absoluteAddr (fromIntegral addr)
-          let blocks = blocksContaining bar absAddr
-          B.continue $ State s0 { sBlockList = (absAddr, B.list BlockList (V.fromList blocks) 1)
-                                , sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList [T.pack ("Finding blocks containing " ++ show absAddr)]
-                                , sUIMode = SomeUIMode BlockSelector
-                                }
+    OpenMinibuffer ->
+      case sUIMode s0 of
+        SomeMiniBuffer _ -> B.continue (State s0)
+        SomeUIMode mode -> B.continue $ State s0 { sUIMode = SomeMiniBuffer (MiniBuffer mode) }
+    -- FindBlockContaining addr ->
+    --   case sBinaryInfo s0 of
+    --     Nothing -> B.continue (State s0)
+    --     Just bar -> do
+    --       let absAddr = MM.absoluteAddr (fromIntegral addr)
+    --       let blocks = blocksContaining bar absAddr
+    --       B.continue $ State s0 { sBlockList = (absAddr, B.list BlockList (V.fromList blocks) 1)
+    --                             , sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList [T.pack ("Finding blocks containing " ++ show absAddr)]
+    --                             , sUIMode = SomeUIMode BlockSelector
+    --                             }
     Exit -> B.halt (State s0)

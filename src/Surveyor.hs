@@ -20,6 +20,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Traversable as T
 import qualified Data.Vector as V
+import           Data.Void ( Void )
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
@@ -27,8 +28,8 @@ import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
 import qualified Brick.Keymap as K
+import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes
-import           Surveyor.BinaryAnalysisResult
 import qualified Surveyor.Commands as C
 import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events ( Events(..) )
@@ -38,18 +39,28 @@ import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.State
 
-drawSummary :: FilePath -> BinaryAnalysisResult s i a w arch -> B.Widget Names
-drawSummary binFileName BinaryAnalysisResult { rBlockInfo = binfo } =
-  B.vBox [ B.str ("Target binary: " ++ binFileName)
-         , B.str ("Discovered functions: " ++ show (length (R.biFunctionEntries binfo)))
-         , B.str ("Discovered blocks: " ++ show (length (R.biBlocks binfo)))
-         ]
+drawSummary :: (A.Architecture st arch s) => FilePath -> A.AnalysisResult st arch s -> B.Widget Names
+drawSummary binFileName ares =
+  B.vBox (map (drawSummaryTableEntry descColWidth) tbl)
+  where
+    tbl = ("Target Binary", T.pack binFileName) : A.summarizeResult ares
+    descColWidth = maximum (1 : map (T.length . fst) tbl) + 4
 
-drawConcreteBlock :: (MM.MemWidth w) => R.ISA i a w -> R.ConcreteBlock i w -> B.Widget Names
-drawConcreteBlock isa b =
-  B.vBox [ B.str (printf "Block address: %s" (show (R.basicBlockAddress b)))
-         , B.vBox [ B.str (R.isaPrettyInstruction isa i) | i <- R.basicBlockInstructions b ]
-         ]
+drawSummaryTableEntry :: Int -> (T.Text, T.Text) -> B.Widget Names
+drawSummaryTableEntry keyColWidth (key, val) =
+  B.padRight (B.Pad (keyColWidth - T.length key)) (B.txt key) B.<+> B.txt val
+
+         -- , B.str ("Discovered functions: " ++ show (length (R.biFunctionEntries binfo)))
+         -- , B.str ("Discovered blocks: " ++ show (length (R.biBlocks binfo)))
+         -- ]
+
+
+
+-- drawConcreteBlock :: (A.Architecture st arch) => R.ISA i a w -> R.ConcreteBlock i w -> B.Widget Names
+-- drawConcreteBlock isa b =
+--   B.vBox [ B.str (printf "Block address: %s" (show (R.basicBlockAddress b)))
+--          , B.vBox [ B.str (R.isaPrettyInstruction isa i) | i <- R.basicBlockInstructions b ]
+--          ]
 
 -- drawFunctionList :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
 -- drawFunctionList S { sFunctionList = flist }
@@ -70,7 +81,7 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
 -- The status bar is a line at the bottom of the screen that reflects the
 -- currently-loaded executable (if any) and includes an indicator of the
 -- analysis progress.
-drawStatusBar :: S s i a w arch -> B.Widget Names
+drawStatusBar :: S s st arch -> B.Widget Names
 drawStatusBar s =
   B.withAttr statusBarAttr (B.hBox [fileNameWidget, B.padLeft B.Max statusWidget])
   where
@@ -81,16 +92,17 @@ drawStatusBar s =
         Ready -> B.str "Ready"
         AwaitingFile -> B.str "Waiting for file"
 
-drawBlockSelector :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
-drawBlockSelector s res =
+drawBlockSelector :: (A.Architecture st arch s) => S s st arch -> A.AnalysisResult st arch s -> B.Widget Names
+drawBlockSelector s res = B.emptyWidget
+{-
   case V.toList (blockList L.^. B.listElementsL) of
     [] -> B.str (printf "No blocks found containing address %s" (show selectedAddr))
     [cb] -> drawConcreteBlock (rISA res) cb
     _ -> B.emptyWidget
   where
     (selectedAddr, blockList) = sBlockList s
-
-drawAppShell :: S s i a w arch -> B.Widget Names -> [B.Widget Names]
+-}
+drawAppShell :: S s st arch -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w = [B.vBox [ B.padBottom B.Max w
                            , drawStatusBar s
                            , bottomLine
@@ -107,7 +119,7 @@ appDraw (State s) =
   case sInputFile s of
     Nothing -> drawAppShell s B.emptyWidget
     Just binFileName ->
-      case sBinaryInfo s of
+      case sAnalysisResult s of
         Nothing -> drawAppShell s B.emptyWidget
         Just binfo ->
           case sUIMode s of
@@ -116,10 +128,10 @@ appDraw (State s) =
             SomeUIMode mode ->
               drawUIMode binFileName binfo s mode
 
-drawUIMode :: (MM.MemWidth w)
+drawUIMode :: (A.Architecture st arch s)
            => FilePath
-           -> BinaryAnalysisResult s i a w arch
-           -> S s i a w arch
+           -> A.AnalysisResult st arch s
+           -> S s st arch
            -> UIMode NormalK
            -> [B.Widget Names]
 drawUIMode binFileName binfo s uim =
@@ -164,6 +176,7 @@ defaultKeymap :: B.BChan (Events s) -> K.Keymap SomeUIMode MB.Argument MB.TypeRe
 defaultKeymap c = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
     globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some (C.exitC c))
+              , (K.Key (V.KChar 'x') [V.MMeta], Some (C.minibufferC c))
               ]
 
 surveyor :: Maybe FilePath -> IO ()
@@ -176,19 +189,34 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
                   , B.appAttrMap = appAttrMap
                   }
   _ <- T.traverse (asynchronouslyLoad ng customEventChan) mExePath
-  let initialState = State S { sInputFile = mExePath
-                             , sBinaryInfo = Nothing
-                             , sDiagnosticLog = Seq.empty
-                             , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
-                             , sFunctionList = B.list FunctionList (V.empty @(FunctionListEntry 64)) 1
-                             , sBlockList = (MM.absoluteAddr 0, B.list BlockList V.empty 1)
-                             , sUIMode = SomeUIMode Diags
-                             , sAppState = maybe AwaitingFile (const Loading) mExePath
-                             , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
-                             , sEmitEvent = B.writeBChan customEventChan
-                             , sNonceGenerator = ng
-                             , sKeymap = defaultKeymap customEventChan
-                             }
+  let initialState = State (emptyState mExePath ng customEventChan)
+  -- State S { sInputFile = mExePath
+--                              , sAnalysisResult = Nothing
+--                              , sDiagnosticLog = Seq.empty
+--                              , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
+-- --                             , sFunctionList = B.list FunctionList (V.empty @(FunctionListEntry 64)) 1
+-- --                             , sBlockList = (MM.absoluteAddr 0, B.list BlockList V.empty 1)
+--                              , sUIMode = SomeUIMode Diags
+--                              , sAppState = maybe AwaitingFile (const Loading) mExePath
+--                              , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
+--                              , sEmitEvent = B.writeBChan customEventChan
+--                              , sNonceGenerator = ng
+--                              , sKeymap = defaultKeymap customEventChan
+--                              }
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
 
+
+emptyState :: Maybe FilePath -> PN.NonceGenerator IO s -> B.BChan (Events s) -> S s Void Void
+emptyState mfp ng customEventChan =
+  S { sInputFile = mfp
+    , sAnalysisResult = Nothing
+    , sDiagnosticLog = Seq.empty
+    , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
+    , sUIMode = SomeUIMode Diags
+    , sAppState = maybe AwaitingFile (const Loading) mfp
+    , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
+    , sEmitEvent = B.writeBChan customEventChan
+    , sNonceGenerator = ng
+    , sKeymap = defaultKeymap customEventChan
+    }

@@ -3,6 +3,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -20,6 +21,8 @@ module Surveyor.Architecture (
   ) where
 
 import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Text as T
+import           Data.Void
 
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
@@ -30,28 +33,46 @@ import qualified Renovate.Arch.X86_64 as X86
 import           Surveyor.BinaryAnalysisResult
 
 data SomeResult s where
-  SomeResult :: (Architecture st arch) => AnalysisResult st arch s -> SomeResult s
+  SomeResult :: (Architecture st arch s) => AnalysisResult st arch s -> SomeResult s
 
-class Architecture (st :: *) (arch :: *) where
-  data AnalysisResult st arch :: * -> *
-  data Block s arch :: *
-  data Instruction s arch :: *
-  data Operand s arch :: *
-  data Address s arch :: *
+class Architecture (st :: *) (arch :: *) s where
+  data AnalysisResult st arch s :: *
+  data Block st arch :: *
+  data Instruction st arch :: *
+  data Operand st arch :: *
+  data Address st arch :: *
+
+  summarizeResult :: AnalysisResult st arch s -> [(T.Text, T.Text)]
 
 mkPPC32Result :: BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32
-              -> AnalysisResult (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32) PPC.PPC32 s
-mkPPC32Result = PPC32AnalysisResult
+              -> SomeResult s
+mkPPC32Result = SomeResult . PPC32AnalysisResult
 
 mkPPC64Result :: BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64
-              -> AnalysisResult (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64) PPC.PPC64 s
-mkPPC64Result = PPC64AnalysisResult
+              -> SomeResult s
+mkPPC64Result = SomeResult . PPC64AnalysisResult
 
 mkX86Result :: BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64
-            -> AnalysisResult (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64) X86.X86_64 s
-mkX86Result = X86AnalysisResult
+            -> SomeResult s
+mkX86Result = SomeResult . X86AnalysisResult
 
-instance Architecture (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32) PPC.PPC32 where
+summarizeRenovate :: BinaryAnalysisResult s i a w arch -> [(T.Text, T.Text)]
+summarizeRenovate bar =
+  [ ("Discovered Functions", T.pack (show (length (R.biFunctionEntries binfo))))
+  , ("Discovered Blocks", T.pack (show (length (R.biBlocks binfo))))
+  ]
+  where
+    binfo = rBlockInfo bar
+
+instance Architecture Void Void s where
+  data AnalysisResult Void Void s = VoidAnalysisResult Void
+  data Block Void Void = VoidBlock Void
+  data Instruction Void Void = VoidInstruction Void
+  data Operand Void Void = VoidOperand Void
+  data Address Void Void = VoidAddress Void
+  summarizeResult (VoidAnalysisResult v) = absurd v
+
+instance Architecture (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32) PPC.PPC32 s where
   data AnalysisResult (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32) PPC.PPC32 s =
     PPC32AnalysisResult (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32)
   data Block (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32) PPC.PPC32 =
@@ -61,7 +82,9 @@ instance Architecture (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32) PP
   data Operand (BinaryAnalysisResult s PPC.Instruction a 32 PPC.PPC32) PPC.PPC32 =
     PPC32Operand (Some DPPC.Operand)
 
-instance Architecture (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64) PPC.PPC64 where
+  summarizeResult (PPC32AnalysisResult bar) = summarizeRenovate bar
+
+instance Architecture (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64) PPC.PPC64 s where
   data AnalysisResult (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64) PPC.PPC64 s =
     PPC64AnalysisResult (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64)
   data Block (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64) PPC.PPC64 =
@@ -71,7 +94,9 @@ instance Architecture (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64) PP
   data Operand (BinaryAnalysisResult s PPC.Instruction a 64 PPC.PPC64) PPC.PPC64 =
     PPC64Operand (Some DPPC.Operand)
 
-instance Architecture (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64) X86.X86_64 where
+  summarizeResult (PPC64AnalysisResult bar) = summarizeRenovate bar
+
+instance Architecture (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64) X86.X86_64 s where
   data AnalysisResult (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64) X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64)
   data Block (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64) X86.X86_64 =
@@ -80,3 +105,5 @@ instance Architecture (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64) X
     X86Instruction (X86.Instruction ())
   data Operand (BinaryAnalysisResult s X86.Instruction a 64 X86.X86_64) X86.X86_64 =
     X86Operand FD.Value FD.OperandType
+
+  summarizeResult (X86AnalysisResult bar) = summarizeRenovate bar

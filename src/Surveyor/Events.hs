@@ -10,7 +10,6 @@ import           Data.Parameterized.Some ( Some )
 import qualified Data.Text as T
 import           Data.Word ( Word64 )
 
-import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
 import qualified Brick.Command as C
@@ -23,11 +22,12 @@ data Events s where
                   => [E.ElfParseError n] -> Events s
   AnalysisFailure :: X.SomeException -> Events s
   AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
-  AnalysisProgress :: MM.MemAddr w -> A.SomeResult s -> Events s
+  AnalysisProgress :: A.SomeResult s -> Events s
   FindBlockContaining :: Word64 -> Events s
   DescribeCommand :: Some (C.Command a r) -> Events s
   EchoText :: T.Text -> Events s
   UpdateEchoArea :: EA.EchoArea -> Events s
   ShowSummary :: Events s
   ShowDiagnostics :: Events s
+  OpenMinibuffer :: Events s
   Exit :: Events s

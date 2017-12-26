@@ -2,7 +2,6 @@
 {-# LANGUAGE RankNTypes #-}
 module Surveyor.BinaryAnalysisResult (
   BinaryAnalysisResult(..),
-  BinaryAnalysisResultWrapper(..),
   indexBlocksByAddress,
   blocksContaining
   ) where
@@ -12,9 +11,6 @@ import qualified Data.IntervalMap as IM
 import qualified Data.Macaw.Memory as MM
 import qualified Data.Parameterized.Nonce as NG
 import qualified Renovate as R
-
-data BinaryAnalysisResultWrapper s where
-  BinaryAnalysisResultWrapper :: (MM.MemWidth w) => BinaryAnalysisResult s i a w arch -> BinaryAnalysisResultWrapper s
 
 data BinaryAnalysisResult s i a w arch =
   BinaryAnalysisResult { rBlockInfo :: R.BlockInfo i w arch

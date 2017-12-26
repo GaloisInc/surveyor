@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
@@ -49,15 +50,14 @@ asynchronouslyLoad ng customEventChan exePath = do
       Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
   return ()
 
-analysis :: (A.Architecture (BinaryAnalysisResult s i a w arch) arch, MM.MemWidth w)
-         => (BinaryAnalysisResult s i a w arch -> A.AnalysisResult (BinaryAnalysisResult s i a w arch) arch s)
+analysis :: (A.Architecture (BinaryAnalysisResult s i a w arch) arch s, MM.MemWidth w)
+         => (BinaryAnalysisResult s i a w arch -> A.SomeResult s)
          -> (NG.Nonce s w, NG.Nonce s i)
          -> R.ISA i a w
          -> MM.Memory w
          -> R.BlockInfo i w arch
          -> A.SomeResult s
-analysis con nonces isa mem bi =
-  A.SomeResult (con r)
+analysis con nonces isa mem bi = con r
   where
     r = BinaryAnalysisResult { rBlockInfo = bi
                              , rMemory = mem
@@ -92,8 +92,8 @@ loadElf ng customEventChan someElf = do
                                                , rBlockMap = indexBlocksByAddress (R.rcISA ppc32cfg0) mem bi
                                                , rNonces = (nonceW, nonceI)
                                                }
-                    sr = A.SomeResult (A.mkPPC32Result res)
-                in B.writeBChan customEventChan (AnalysisProgress (MM.relativeSegmentAddr addr) sr)
+                    sr = A.mkPPC32Result res
+                in B.writeBChan customEventChan (AnalysisProgress sr)
       let ppc32cfg = ppc32cfg0 { R.rcFunctionCallback = ppc32callback }
       return [ (R.PPC32, R.SomeConfig NR.knownNat ppc32cfg)
              ]
@@ -115,8 +115,8 @@ loadElf ng customEventChan someElf = do
                                                , rBlockMap = indexBlocksByAddress (R.rcISA ppc64cfg0) mem bi
                                                , rNonces = (nonceWppc64, nonceIppc64)
                                                }
-                    sr = A.SomeResult (A.mkPPC64Result res)
-                in B.writeBChan customEventChan (AnalysisProgress (MM.relativeSegmentAddr addr) sr)
+                    sr = A.mkPPC64Result res
+                in B.writeBChan customEventChan (AnalysisProgress sr)
       let ppc64cfg = ppc64cfg0 { R.rcFunctionCallback = ppc64callback }
       let x86cfg0 = X86.config (analysis A.mkX86Result (nonceWx86, nonceIx86)) undefined
       let x86callback addr ebi =
@@ -129,8 +129,8 @@ loadElf ng customEventChan someElf = do
                                                , rBlockMap = indexBlocksByAddress (R.rcISA x86cfg0) mem bi
                                                , rNonces = (nonceWx86, nonceIx86)
                                                }
-                    sr = A.SomeResult (A.mkX86Result res)
-                in B.writeBChan customEventChan (AnalysisProgress (MM.relativeSegmentAddr addr) sr)
+                    sr = A.mkX86Result res
+                in B.writeBChan customEventChan (AnalysisProgress sr)
       let x86cfg = x86cfg0 { R.rcFunctionCallback = x86callback }
       return [ (R.PPC64, R.SomeConfig NR.knownNat ppc64cfg)
              , (R.X86_64, R.SomeConfig NR.knownNat x86cfg)

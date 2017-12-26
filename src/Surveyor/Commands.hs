@@ -8,6 +8,7 @@ module Surveyor.Commands (
   showDiagnosticsC,
   findBlockC,
   describeCommandC,
+  minibufferC,
   allCommands
   ) where
 
@@ -69,3 +70,12 @@ describeCommandC customEventChan =
     rep = MB.CommandTypeRepr PL.:< PL.Nil
     callback = \(MB.CommandArgument cmd PL.:< PL.Nil) ->
       B.writeBChan customEventChan (DescribeCommand cmd)
+
+-- | This isn't part of 'allCommands' because we can never productively launch
+-- it from the minibuffer
+minibufferC :: B.BChan (Events s) -> C.Command MB.Argument MB.TypeRepr '[]
+minibufferC customEventChan =
+  C.Command "show-minibuffer" doc PL.Nil PL.Nil callback
+  where
+    doc = "Open the minibuffer"
+    callback = \PL.Nil -> B.writeBChan customEventChan OpenMinibuffer
