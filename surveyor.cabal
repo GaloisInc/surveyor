@@ -14,6 +14,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Surveyor
+                       Surveyor.Architecture
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Commands
@@ -50,7 +51,9 @@ library
                        macaw-base,
                        renovate,
                        renovate-ppc,
-                       renovate-x86
+                       renovate-x86,
+                       flexdis86,
+                       dismantle-ppc
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options: -Wall

@@ -14,7 +14,7 @@ import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
 import qualified Brick.Command as C
-import           Surveyor.BinaryAnalysisResult ( BinaryAnalysisResultWrapper )
+import qualified Surveyor.Architecture as A
 import qualified Surveyor.EchoArea as EA
 
 data Events s where
@@ -22,9 +22,8 @@ data Events s where
   ErrorLoadingELF :: (Eq (E.ElfWordType n), Num (E.ElfWordType n), Show (E.ElfWordType n))
                   => [E.ElfParseError n] -> Events s
   AnalysisFailure :: X.SomeException -> Events s
-  AnalysisFinished :: BinaryAnalysisResultWrapper s -> [R.Diagnostic] -> Events s
-  BlockDiscovered :: (MM.MemWidth w) => MM.MemAddr w -> Events s
-  AnalysisProgress :: MM.MemAddr w -> BinaryAnalysisResultWrapper s -> Events s
+  AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
+  AnalysisProgress :: MM.MemAddr w -> A.SomeResult s -> Events s
   FindBlockContaining :: Word64 -> Events s
   DescribeCommand :: Some (C.Command a r) -> Events s
   EchoText :: T.Text -> Events s

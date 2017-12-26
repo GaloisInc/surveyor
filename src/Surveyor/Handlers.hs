@@ -85,8 +85,6 @@ handleCustomEvent s0 evt =
     AnalysisProgress _addr (BinaryAnalysisResultWrapper bar) ->
       let s1 = stateFromAnalysisResult s0 bar Seq.empty Loading (sUIMode s0)
       in B.continue (State s1)
-    BlockDiscovered addr ->
-      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Found a block at address " ++ show addr) }
     AnalysisFailure exn ->
       B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
     ErrorLoadingELFHeader off msg ->
