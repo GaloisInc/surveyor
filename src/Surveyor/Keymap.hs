@@ -10,9 +10,10 @@ import qualified Surveyor.Commands as C
 import           Surveyor.Events
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
+import           Surveyor.State
 
 -- | A default keymap with some reasonable keybindings
-defaultKeymap :: B.BChan (Events s) -> K.Keymap SomeUIMode (MB.Argument arch s) MB.TypeRepr
+defaultKeymap :: B.BChan (Events s) -> K.Keymap SomeUIMode (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr
 defaultKeymap c = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
     globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some (C.exitC c))

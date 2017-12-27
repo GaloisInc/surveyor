@@ -6,6 +6,7 @@ module Surveyor.Events ( Events(..) ) where
 import qualified Control.Exception as X
 import qualified Data.ElfEdit as E
 import           Data.Int ( Int64 )
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some )
 import qualified Data.Text as T
 
@@ -22,8 +23,9 @@ data Events s where
   AnalysisFailure :: X.SomeException -> Events s
   AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
   AnalysisProgress :: A.SomeResult s -> Events s
-  FindBlockContaining :: A.Address arch s -> Events s
-  DescribeCommand :: Some (C.Command a r) -> Events s
+  FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> Events s
+  ViewBlock :: PN.Nonce s arch -> A.Block arch s -> Events s
+  DescribeCommand :: Some (C.Command st a r) -> Events s
   EchoText :: T.Text -> Events s
   UpdateEchoArea :: EA.EchoArea -> Events s
   ShowSummary :: Events s

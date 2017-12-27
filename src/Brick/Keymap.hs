@@ -16,19 +16,19 @@ import qualified Brick.Command as C
 data Key = Key V.Key [V.Modifier]
   deriving (Eq, Ord, Show)
 
-data Keymap m a r =
-  Keymap { globalKeys :: !(M.Map Key (Some (C.Command a r)))
-         , modeKeys :: !(M.Map m (M.Map Key (Some (C.Command a r))))
+data Keymap m s a r =
+  Keymap { globalKeys :: !(M.Map Key (Some (C.Command s a r)))
+         , modeKeys :: !(M.Map m (M.Map Key (Some (C.Command s a r))))
          }
 
 -- | Create a new empty keymap
-emptyKeymap :: Keymap m a r
+emptyKeymap :: Keymap m s a r
 emptyKeymap = Keymap { globalKeys = M.empty
                      , modeKeys = M.empty
                      }
 
 -- | Add a command to the global keymap
-addGlobalKey :: Key -> Some (C.Command a r) -> Keymap m a r -> Keymap m a r
+addGlobalKey :: Key -> Some (C.Command s a r) -> Keymap m s a r -> Keymap m s a r
 addGlobalKey k cmd m =
   m { globalKeys = M.insert k cmd (globalKeys m) }
 
@@ -39,8 +39,8 @@ addGlobalKey k cmd m =
 lookupKeyCommand :: (Ord m)
                  => m
                  -> Key
-                 -> Keymap m a r
-                 -> Maybe (Some (C.Command a r))
+                 -> Keymap m s a r
+                 -> Maybe (Some (C.Command s a r))
 lookupKeyCommand mode k km =
   case M.lookup mode (modeKeys km) of
     Nothing -> M.lookup k (globalKeys km)

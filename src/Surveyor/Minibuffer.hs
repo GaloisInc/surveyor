@@ -64,17 +64,17 @@ instance TestEquality TypeRepr where
   testEquality WordTypeRepr WordTypeRepr = Just Refl
   testEquality _ _ = Nothing
 
-data Argument arch s tp where
-  CommandArgument :: Some (C.Command (Argument arch s) TypeRepr) -> Argument arch s CommandType
-  StringArgument :: T.Text -> Argument arch s StringType
-  AddressArgument :: A.Address arch s -> Argument arch s AddressType
-  IntArgument :: Integer -> Argument arch s IntType
-  WordArgument :: Natural -> Argument arch s WordType
+data Argument arch st s tp where
+  CommandArgument :: Some (C.Command st (Argument arch st s) TypeRepr) -> Argument arch st s CommandType
+  StringArgument :: T.Text -> Argument arch st s StringType
+  AddressArgument :: A.Address arch s -> Argument arch st s AddressType
+  IntArgument :: Integer -> Argument arch st s IntType
+  WordArgument :: Natural -> Argument arch st s WordType
 
 parseArgument :: (A.Architecture arch s, Z.GenericTextZipper t)
-              => [Some (C.Command (Argument arch s) TypeRepr)]
+              => [Some (C.Command st (Argument arch st s) TypeRepr)]
               -> t
-              -> (TypeRepr tp -> Maybe (Argument arch s tp))
+              -> (TypeRepr tp -> Maybe (Argument arch st s tp))
 parseArgument cmds =
   let indexCommand m (Some cmd) = M.insert (C.cmdName cmd) (Some cmd) m
       cmdIndex = F.foldl' indexCommand M.empty cmds
@@ -98,7 +98,7 @@ showRepr r =
     CommandTypeRepr -> "Command"
 
 completeArgument :: (Z.GenericTextZipper t)
-                 => [Some (C.Command (Argument arch s) TypeRepr)]
+                 => [Some (C.Command st (Argument arch st s) TypeRepr)]
                  -> (t -> TypeRepr tp -> IO (V.Vector t))
 completeArgument cmds =
   let cmdNames = V.fromList [ C.cmdName cmd | Some cmd <- cmds ]
@@ -122,7 +122,7 @@ minibuffer :: (Z.GenericTextZipper t, A.Architecture arch s)
            -> n
            -- ^ The name of the completion list
            -> T.Text
-           -> [Some (C.Command (Argument arch s) TypeRepr)]
-           -> MB.Minibuffer (Argument arch s) TypeRepr t n
+           -> [Some (C.Command st (Argument arch st s) TypeRepr)]
+           -> MB.Minibuffer st (Argument arch st s) TypeRepr t n
 minibuffer edName compName pfx cmds =
   MB.minibuffer (parseArgument cmds) (completeArgument cmds) showRepr focusedListAttr edName compName pfx cmds

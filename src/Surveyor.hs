@@ -9,26 +9,19 @@ module Surveyor ( surveyor ) where
 
 import qualified Brick as B
 import qualified Brick.BChan as B
-import qualified Brick.Widgets.List as B
-import qualified Control.Lens as L
 import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
 import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Traversable as T
-import qualified Data.Vector as V
 import           Data.Void ( Void )
 import qualified Graphics.Vty as V
-import           Text.Printf ( printf )
 
-import qualified Renovate as R
-
-import qualified Brick.Keymap as K
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes
+import qualified Surveyor.BlockSelector as BS
 import qualified Surveyor.Commands as C
 import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events ( Events(..) )
@@ -37,6 +30,7 @@ import           Surveyor.Keymap ( defaultKeymap )
 import           Surveyor.Loader ( asynchronouslyLoad )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
+import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
 
 drawSummary :: (A.Architecture arch s) => FilePath -> A.AnalysisResult arch s -> B.Widget Names
@@ -86,16 +80,6 @@ drawStatusBar s =
         Ready -> B.str "Ready"
         AwaitingFile -> B.str "Waiting for file"
 
-drawBlockSelector :: (A.Architecture arch s) => S arch s -> A.AnalysisResult arch s -> B.Widget Names
-drawBlockSelector s res = B.emptyWidget
-{-
-  case V.toList (blockList L.^. B.listElementsL) of
-    [] -> B.str (printf "No blocks found containing address %s" (show selectedAddr))
-    [cb] -> drawConcreteBlock (rISA res) cb
-    _ -> B.emptyWidget
-  where
-    (selectedAddr, blockList) = sBlockList s
--}
 drawAppShell :: S arch s -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w = [B.vBox [ B.padBottom B.Max w
                            , drawStatusBar s
@@ -133,7 +117,7 @@ drawUIMode binFileName binfo s uim =
     Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
     Summary -> drawAppShell s (drawSummary binFileName binfo)
     ListFunctions -> drawAppShell s B.emptyWidget -- drawAppShell s (drawFunctionList s binfo)
-    BlockSelector -> drawAppShell s (drawBlockSelector s binfo)
+    BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector s))
 
 appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =
@@ -145,18 +129,6 @@ appAttrMap :: State s -> B.AttrMap
 appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.white)
                                    , (statusBarAttr, B.bg V.black <> B.fg V.white)
                                    ]
-
--- isListEventKey :: V.Key -> Bool
--- isListEventKey k =
---   case k of
---     V.KUp -> True
---     V.KDown -> True
---     V.KHome -> True
---     V.KEnd -> True
---     V.KPageDown -> True
---     V.KPageUp -> True
---     _ -> False
-
 
 appStartEvent :: State s -> B.EventM Names (State s)
 appStartEvent s0 = return s0
@@ -191,6 +163,7 @@ emptyState mfp ng customEventChan = do
            , sUIMode = SomeUIMode Diags
            , sAppState = maybe AwaitingFile (const Loading) mfp
            , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
+           , sBlockSelector = BS.emptyBlockSelector
            , sEmitEvent = B.writeBChan customEventChan
            , sEventChannel = customEventChan
            , sNonceGenerator = ng

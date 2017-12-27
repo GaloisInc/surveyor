@@ -17,6 +17,8 @@ library
                        Surveyor.Architecture
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
+                       Surveyor.BlockSelector
+                       Surveyor.BlockViewer
                        Surveyor.Commands
                        Surveyor.EchoArea
                        Surveyor.Events
@@ -27,6 +29,7 @@ library
                        Surveyor.Loader.RenovateAnalysis
                        Surveyor.Minibuffer
                        Surveyor.Mode
+                       Surveyor.Names
                        Surveyor.State
                        Brick.Command
                        Brick.Keymap

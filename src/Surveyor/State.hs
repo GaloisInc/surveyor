@@ -6,25 +6,21 @@ module Surveyor.State (
   State(..),
   S(..),
 --  FunctionListEntry(..),
-  AppState(..),
-  Names(..),
-  stateFromAnalysisResult
+  AppState(..)
   ) where
 
 import qualified Brick.BChan as B
-import           Data.Monoid
-import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
 import           Brick.Keymap ( Keymap )
 import qualified Surveyor.Architecture as A
-import qualified Surveyor.Commands as C
+import qualified Surveyor.BlockSelector as BS
 import           Surveyor.Events ( Events )
-import qualified Surveyor.Keymap as K
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
+import           Surveyor.Names ( Names )
 import qualified Surveyor.EchoArea as EA
 
 data State s where
@@ -40,7 +36,7 @@ data S arch s =
     -- ^ An area where one-line messages can be displayed
     , sUIMode :: SomeUIMode
     -- ^ The current UI mode, which drives rendering and keybindings available
-    , sMinibuffer :: MB.Minibuffer (MB.Argument arch s) MB.TypeRepr T.Text Names
+    , sMinibuffer :: MB.Minibuffer (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr T.Text Names
     -- ^ The persistent state of the minibuffer
     --
     -- We keep it around so that it doesn't have to re-index the commands
@@ -61,8 +57,8 @@ data S arch s =
     -- equality.
 --    , sFunctionList :: B.List Names (FunctionListEntry w)
     -- ^ Functions available in the function selector
---    , sBlockList :: (MM.MemAddr w, B.List Names (R.ConcreteBlock i w))
-    , sKeymap :: Keymap SomeUIMode (MB.Argument arch s) MB.TypeRepr
+    , sBlockSelector :: BS.BlockSelector arch s
+    , sKeymap :: Keymap SomeUIMode (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr
     , sArch :: NG.Nonce s arch
     }
 
@@ -72,54 +68,3 @@ data AppState = Loading
               | Ready
               | AwaitingFile
 
-data Names = DiagnosticView
-           | DiagnosticContent
-           | FunctionList
-           | BlockList
-           | MinibufferEditor
-           | MinibufferCompletionList
-  deriving (Eq, Ord, Show)
-
-stateFromAnalysisResult :: (A.Architecture arch s)
-                        => S arch0 s
-                        -> A.AnalysisResult arch s
-                        -> Seq.Seq T.Text
-                        -> AppState
-                        -> SomeUIMode
-                        -> S arch s
-stateFromAnalysisResult s0 ares newDiags state uiMode =
-  S { sAnalysisResult = Just ares
---    , sFunctionList = B.list FunctionList funcList 1
-    -- , sBlockList =
-    --   case sBinaryInfo s0 of
-    --     Nothing -> (MM.absoluteAddr 0, B.list BlockList V.empty 1)
-    --     Just bar0 -> do
-    --       let (nonceW0, nonceI0) = rNonces bar0
-    --       let (nonceW1, nonceI1) = rNonces bar
-    --       case (testEquality nonceW0 nonceW1, testEquality nonceI0 nonceI1) of
-    --         (Just Refl, Just Refl) -> sBlockList s0
-    --         _ -> (MM.absoluteAddr 0, B.list BlockList V.empty 1)
-    , sDiagnosticLog = sDiagnosticLog s0 <> newDiags
-    , sEchoArea = sEchoArea s0
-    , sUIMode = uiMode
-    , sInputFile = sInputFile s0
-    , sMinibuffer =
-      case testEquality (sArch s0) (A.archNonce ares) of
-        Just Refl -> sMinibuffer s0
-        Nothing -> MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
-    , sAppState = state
-    , sEmitEvent = sEmitEvent s0
-    , sEventChannel = sEventChannel s0
-    , sNonceGenerator = sNonceGenerator s0
-    , sKeymap =
-      case testEquality (sArch s0) (A.archNonce ares) of
-        Just Refl -> sKeymap s0
-        Nothing -> K.defaultKeymap (sEventChannel s0)
-    , sArch = A.archNonce ares
-    }
-  -- where
-  --   funcList = V.fromList [ FLE addr textName blockCount
-  --                         | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo (rBlockInfo bar))
-  --                         , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
-  --                         , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
-  --                         ]

@@ -14,6 +14,7 @@
 -- instructions, and operands.
 module Surveyor.Architecture (
   Architecture(..),
+  Block(..),
   SomeResult(..),
   mkPPC32Result,
   mkPPC64Result,
@@ -41,14 +42,27 @@ data SomeResult s where
 
 class Architecture (arch :: *) (s :: *) where
   data AnalysisResult arch s :: *
-  data Block arch s :: *
   data Instruction arch s :: *
   data Operand arch s :: *
+  data Opcode arch s :: *
   data Address arch s :: *
 
+  -- | Extract the nonce for the analysis result
   archNonce :: AnalysisResult arch s -> NG.Nonce s arch
+  -- | Return summary information for the artifact being analyzed; the
+  -- information can vary by architecture
   summarizeResult :: AnalysisResult arch s -> [(T.Text, T.Text)]
+  -- | Parse a string into an architecture-specific 'Address'
   parseAddress :: String -> Maybe (Address arch s)
+  -- | Return all of the blocks that contain the given 'Address'
+  containingBlocks :: AnalysisResult arch s -> Address arch s -> [Block arch s]
+  -- | Pretty print an address
+  prettyAddress :: Address arch s -> T.Text
+
+data Block arch s =
+  Block { blockAddress :: Address arch s
+        , blockInstructions :: [(Address arch s, Instruction arch s)]
+        }
 
 mkPPC32Result :: BinaryAnalysisResult s PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32
               -> SomeResult s
@@ -87,20 +101,22 @@ mcParseAddress64 t = (MM.absoluteAddr . fromIntegral) <$> mn
     mn :: Maybe Word64
     mn = readMaybe t
 
+mcPrettyAddress :: (MM.MemWidth w) => MM.MemAddr w -> T.Text
+mcPrettyAddress = T.pack . show
+
 instance Architecture Void s where
   data AnalysisResult Void s = VoidAnalysisResult Void
-  data Block Void s = VoidBlock Void
   data Instruction Void s = VoidInstruction Void
   data Operand Void s = VoidOperand Void
   data Address Void s = VoidAddress Void
   summarizeResult (VoidAnalysisResult v) = absurd v
   archNonce (VoidAnalysisResult v) = absurd v
   parseAddress _ = Nothing
+  prettyAddress (VoidAddress v) = absurd v
 
 instance Architecture PPC.PPC32 s where
   data AnalysisResult PPC.PPC32 s =
     PPC32AnalysisResult (BinaryAnalysisResult s PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32)
-  data Block PPC.PPC32 s = PPC32Block (R.ConcreteBlock PPC.Instruction 32)
   data Instruction PPC.PPC32 s = PPC32Instruction (PPC.Instruction ())
   data Operand PPC.PPC32 s = PPC32Operand (Some DPPC.Operand)
   data Address PPC.PPC32 s = PPC32Address (MM.MemAddr 32)
@@ -108,11 +124,11 @@ instance Architecture PPC.PPC32 s where
   summarizeResult (PPC32AnalysisResult bar) = mcSummarize bar
   archNonce (PPC32AnalysisResult bar) = mcNonce bar
   parseAddress t = PPC32Address <$> mcParseAddress32 t
+  prettyAddress (PPC32Address addr) = mcPrettyAddress addr
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
     PPC64AnalysisResult (BinaryAnalysisResult s PPC.Instruction (PPC.TargetAddress 64) 64 PPC.PPC64)
-  data Block PPC.PPC64 s = PPC64Block (R.ConcreteBlock PPC.Instruction 64)
   data Instruction PPC.PPC64 s = PPC64Instruction (PPC.Instruction ())
   data Operand PPC.PPC64 s = PPC64Operand (Some DPPC.Operand)
   data Address PPC.PPC64 s = PPC64Address (MM.MemAddr 64)
@@ -120,11 +136,11 @@ instance Architecture PPC.PPC64 s where
   summarizeResult (PPC64AnalysisResult bar) = mcSummarize bar
   archNonce (PPC64AnalysisResult bar) = mcNonce bar
   parseAddress t = PPC64Address <$> mcParseAddress64 t
+  prettyAddress (PPC64Address addr) = mcPrettyAddress addr
 
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64)
-  data Block X86.X86_64 s = X86Block (R.ConcreteBlock X86.Instruction 64)
   data Instruction X86.X86_64 s = X86Instruction (X86.Instruction ())
   data Operand X86.X86_64 s = X86Operand FD.Value FD.OperandType
   data Address X86.X86_64 s = X86Address (MM.MemAddr 64)
@@ -132,3 +148,4 @@ instance Architecture X86.X86_64 s where
   summarizeResult (X86AnalysisResult bar) = mcSummarize bar
   archNonce (X86AnalysisResult bar) = mcNonce bar
   parseAddress t = X86Address <$> mcParseAddress64 t
+  prettyAddress (X86Address addr) = mcPrettyAddress addr
