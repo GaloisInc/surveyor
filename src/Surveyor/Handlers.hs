@@ -111,9 +111,11 @@ handleCustomEvent s0 evt =
                 [b] -> do
                   liftIO (sEmitEvent s0 (ViewBlock archNonce b))
                   B.continue (State s0)
-                blocks -> B.continue $ State s0 { sBlockSelector = BS.blockSelector focusedListAttr addr blocks
-                                                , sUIMode = SomeUIMode BlockSelector
-                                                }
+                blocks -> do
+                  let callback b = sEmitEvent s0 (ViewBlock archNonce b)
+                  B.continue $ State s0 { sBlockSelector = BS.blockSelector callback focusedListAttr addr blocks
+                                        , sUIMode = SomeUIMode BlockSelector
+                                        }
         _ -> B.continue (State s0)
     Exit -> B.halt (State s0)
 

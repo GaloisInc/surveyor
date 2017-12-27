@@ -7,15 +7,12 @@ module Surveyor.Loader (
 
 import qualified Brick.BChan as B
 import qualified Control.Concurrent.Async as A
-import qualified Control.Exception as X
 import qualified Data.ByteString as BS
 import qualified Data.ElfEdit as E
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Proxy ( Proxy(..) )
 
-import qualified Data.Macaw.CFG.Core as MC
-import qualified Data.Macaw.Memory as MM
 import qualified Data.Macaw.Memory.ElfLoader as MM
 import qualified Renovate as R
 import qualified Renovate.Arch.X86_64 as X86
@@ -75,7 +72,7 @@ loadElf ng customEventChan someElf = do
       nonceAx86 <- NG.freshNonce ng
       ppc64cfg <- LP.ppcConfig (Proxy @PPC.PPC64) customEventChan ng e64 PPC.config64 A.mkPPC64Result
       let x86cfg0 = X86.config (RA.analysis A.mkX86Result (nonceWx86, nonceIx86, nonceAx86)) undefined
-      let x86callback addr ebi =
+      let x86callback _addr ebi =
             case ebi of
               Left ex -> B.writeBChan customEventChan (AnalysisFailure ex)
               Right bi ->
