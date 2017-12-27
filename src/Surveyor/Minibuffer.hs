@@ -27,13 +27,13 @@ import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import qualified Data.Vector as V
-import           Data.Word ( Word64 )
 import           Numeric.Natural ( Natural )
 import           Text.Read ( readMaybe )
 
 import qualified Brick.Command as C
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.Minibuffer as MB
+import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes
 
 data Type where
@@ -64,14 +64,17 @@ instance TestEquality TypeRepr where
   testEquality WordTypeRepr WordTypeRepr = Just Refl
   testEquality _ _ = Nothing
 
-data Argument tp where
-  CommandArgument :: Some (C.Command Argument TypeRepr) -> Argument CommandType
-  StringArgument :: T.Text -> Argument StringType
-  AddressArgument :: Word64 -> Argument AddressType
-  IntArgument :: Integer -> Argument IntType
-  WordArgument :: Natural -> Argument WordType
+data Argument arch s tp where
+  CommandArgument :: Some (C.Command (Argument arch s) TypeRepr) -> Argument arch s CommandType
+  StringArgument :: T.Text -> Argument arch s StringType
+  AddressArgument :: A.Address arch s -> Argument arch s AddressType
+  IntArgument :: Integer -> Argument arch s IntType
+  WordArgument :: Natural -> Argument arch s WordType
 
-parseArgument :: (Z.GenericTextZipper t) => [Some (C.Command Argument TypeRepr)] -> t -> TypeRepr tp -> Maybe (Argument tp)
+parseArgument :: (A.Architecture arch s, Z.GenericTextZipper t)
+              => [Some (C.Command (Argument arch s) TypeRepr)]
+              -> t
+              -> (TypeRepr tp -> Maybe (Argument arch s tp))
 parseArgument cmds =
   let indexCommand m (Some cmd) = M.insert (C.cmdName cmd) (Some cmd) m
       cmdIndex = F.foldl' indexCommand M.empty cmds
@@ -80,7 +83,7 @@ parseArgument cmds =
       StringTypeRepr -> Just (StringArgument (T.pack txt))
       IntTypeRepr -> IntArgument <$> readMaybe txt
       WordTypeRepr -> WordArgument <$> readMaybe txt
-      AddressTypeRepr -> AddressArgument <$> readMaybe txt
+      AddressTypeRepr -> AddressArgument <$> A.parseAddress txt
       CommandTypeRepr ->
         let t = T.pack txt
         in CommandArgument <$> M.lookup t cmdIndex
@@ -94,7 +97,9 @@ showRepr r =
     WordTypeRepr -> "Word"
     CommandTypeRepr -> "Command"
 
-completeArgument :: (Z.GenericTextZipper t) => [Some (C.Command Argument TypeRepr)] -> t -> TypeRepr tp -> IO (V.Vector t)
+completeArgument :: (Z.GenericTextZipper t)
+                 => [Some (C.Command (Argument arch s) TypeRepr)]
+                 -> (t -> TypeRepr tp -> IO (V.Vector t))
 completeArgument cmds =
   let cmdNames = V.fromList [ C.cmdName cmd | Some cmd <- cmds ]
   in \t r ->
@@ -111,13 +116,13 @@ completeArgument cmds =
             let toGeneric txt = mconcat (map Z.singleton (T.unpack txt))
             return (fmap toGeneric matches)
 
-minibuffer :: (Z.GenericTextZipper t)
+minibuffer :: (Z.GenericTextZipper t, A.Architecture arch s)
            => n
            -- ^ The name of the editor widget
            -> n
            -- ^ The name of the completion list
            -> T.Text
-           -> [Some (C.Command Argument TypeRepr)]
-           -> MB.Minibuffer Argument TypeRepr t n
+           -> [Some (C.Command (Argument arch s) TypeRepr)]
+           -> MB.Minibuffer (Argument arch s) TypeRepr t n
 minibuffer edName compName pfx cmds =
   MB.minibuffer (parseArgument cmds) (completeArgument cmds) showRepr focusedListAttr edName compName pfx cmds

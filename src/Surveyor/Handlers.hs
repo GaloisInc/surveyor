@@ -58,7 +58,7 @@ handleVtyEvent s0@(State s) evt
           B.continue $ State s { sMinibuffer = mb' }
     SomeUIMode _m -> B.continue s0
 
-handleCustomEvent :: (A.Architecture st arch s) => S s st arch -> Events s -> B.EventM Names (B.Next (State s))
+handleCustomEvent :: (A.Architecture arch s) => S arch s -> Events s -> B.EventM Names (B.Next (State s))
 handleCustomEvent s0 evt =
   case evt of
     AnalysisFinished (A.SomeResult bar) diags ->

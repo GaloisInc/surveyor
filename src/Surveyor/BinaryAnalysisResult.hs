@@ -17,7 +17,7 @@ data BinaryAnalysisResult s i a w arch =
                        , rMemory :: MM.Memory w
                        , rISA :: R.ISA i a w
                        , rBlockMap :: IM.IntervalMap (MM.MemAddr w) (R.ConcreteBlock i w)
-                       , rNonces :: (NG.Nonce s w, NG.Nonce s i)
+                       , rNonces :: (NG.Nonce s w, NG.Nonce s i, NG.Nonce s arch)
                        }
 
 indexBlocksByAddress :: (MM.MemWidth w)

@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module Surveyor.State (
   State(..),
@@ -10,25 +11,28 @@ module Surveyor.State (
   stateFromAnalysisResult
   ) where
 
+import qualified Brick.BChan as B
 import           Data.Monoid
+import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
 import           Brick.Keymap ( Keymap )
 import qualified Surveyor.Architecture as A
+import qualified Surveyor.Commands as C
 import           Surveyor.Events ( Events )
+import qualified Surveyor.Keymap as K
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import qualified Surveyor.EchoArea as EA
 
 data State s where
-  State :: (A.Architecture st arch s) => S s st arch -> State s
+  State :: (A.Architecture arch s) => S arch s -> State s
 
-data S s st arch =
+data S arch s =
   S { sInputFile :: Maybe FilePath
-    , sAnalysisResult :: Maybe (A.AnalysisResult st arch s)
---    , sBinaryInfo :: Maybe (BinaryAnalysisResult s i a w arch)
+    , sAnalysisResult :: Maybe (A.AnalysisResult arch s)
     -- ^ Information returned by the binary analysis
     , sDiagnosticLog :: Seq.Seq T.Text
     -- ^ Diagnostics collected over time (displayed in the diagnostic view)
@@ -36,7 +40,7 @@ data S s st arch =
     -- ^ An area where one-line messages can be displayed
     , sUIMode :: SomeUIMode
     -- ^ The current UI mode, which drives rendering and keybindings available
-    , sMinibuffer :: MB.Minibuffer MB.Argument MB.TypeRepr T.Text Names
+    , sMinibuffer :: MB.Minibuffer (MB.Argument arch s) MB.TypeRepr T.Text Names
     -- ^ The persistent state of the minibuffer
     --
     -- We keep it around so that it doesn't have to re-index the commands
@@ -45,6 +49,7 @@ data S s st arch =
     -- status line)
     , sEmitEvent :: Events s -> IO ()
     -- ^ An IO action to emit an event (via the custom event channel)
+    , sEventChannel :: B.BChan (Events s)
     , sNonceGenerator :: NG.NonceGenerator IO s
     -- ^ Nonce source used to correlate related analysis results as they stream
     -- in.  The reporting of analysis results through an existential wrapper
@@ -57,7 +62,8 @@ data S s st arch =
 --    , sFunctionList :: B.List Names (FunctionListEntry w)
     -- ^ Functions available in the function selector
 --    , sBlockList :: (MM.MemAddr w, B.List Names (R.ConcreteBlock i w))
-    , sKeymap :: Keymap SomeUIMode MB.Argument MB.TypeRepr
+    , sKeymap :: Keymap SomeUIMode (MB.Argument arch s) MB.TypeRepr
+    , sArch :: NG.Nonce s arch
     }
 
 -- data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
@@ -74,13 +80,13 @@ data Names = DiagnosticView
            | MinibufferCompletionList
   deriving (Eq, Ord, Show)
 
-stateFromAnalysisResult :: (A.Architecture st arch s)
-                        => S s st0 arch0 -- i0 a0 w0 arch0
-                        -> A.AnalysisResult st arch s -- BinaryAnalysisResult s i a w arch
+stateFromAnalysisResult :: (A.Architecture arch s)
+                        => S arch0 s
+                        -> A.AnalysisResult arch s
                         -> Seq.Seq T.Text
                         -> AppState
                         -> SomeUIMode
-                        -> S s st arch -- i a w arch
+                        -> S arch s
 stateFromAnalysisResult s0 ares newDiags state uiMode =
   S { sAnalysisResult = Just ares
 --    , sFunctionList = B.list FunctionList funcList 1
@@ -97,11 +103,19 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
     , sEchoArea = sEchoArea s0
     , sUIMode = uiMode
     , sInputFile = sInputFile s0
-    , sMinibuffer = sMinibuffer s0
+    , sMinibuffer =
+      case testEquality (sArch s0) (A.archNonce ares) of
+        Just Refl -> sMinibuffer s0
+        Nothing -> MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
     , sAppState = state
     , sEmitEvent = sEmitEvent s0
+    , sEventChannel = sEventChannel s0
     , sNonceGenerator = sNonceGenerator s0
-    , sKeymap = sKeymap s0
+    , sKeymap =
+      case testEquality (sArch s0) (A.archNonce ares) of
+        Just Refl -> sKeymap s0
+        Nothing -> K.defaultKeymap (sEventChannel s0)
+    , sArch = A.archNonce ares
     }
   -- where
   --   funcList = V.fromList [ FLE addr textName blockCount
