@@ -24,7 +24,6 @@ import           Data.Void ( Void )
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
-import qualified Data.Macaw.Memory as MM
 import qualified Renovate as R
 
 import qualified Brick.Keymap as K
