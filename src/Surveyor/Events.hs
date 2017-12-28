@@ -14,7 +14,7 @@ import qualified Renovate as R
 
 import qualified Brick.Command as C
 import qualified Surveyor.Architecture as A
-import qualified Surveyor.EchoArea as EA
+import qualified Surveyor.Widget.EchoArea as EA
 
 data Events s where
   -- Loading events

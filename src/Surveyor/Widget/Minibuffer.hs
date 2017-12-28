@@ -4,7 +4,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ViewPatterns #-}
 -- | An instantiation of the generic minibuffer widget with a specific argument type
-module Surveyor.Minibuffer (
+module Surveyor.Widget.Minibuffer (
   MB.Minibuffer,
   minibuffer,
   MB.MinibufferStatus(..),

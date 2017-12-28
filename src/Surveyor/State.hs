@@ -15,14 +15,14 @@ import qualified Data.Text as T
 
 import           Brick.Keymap ( Keymap )
 import qualified Surveyor.Architecture as A
-import qualified Surveyor.BlockSelector as BS
-import qualified Surveyor.BlockViewer as BV
 import           Surveyor.Events ( Events )
-import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.Names ( Names )
-import qualified Surveyor.EchoArea as EA
+import qualified Surveyor.Widget.BlockSelector as BS
+import qualified Surveyor.Widget.BlockViewer as BV
+import qualified Surveyor.Widget.EchoArea as EA
 import qualified Surveyor.Widget.FunctionSelector as FS
+import qualified Surveyor.Widget.Minibuffer as MB
 
 data State s where
   State :: (A.Architecture arch s) => !(S arch s) -> State s

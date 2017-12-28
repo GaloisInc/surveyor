@@ -17,21 +17,21 @@ library
                        Surveyor.Architecture
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
-                       Surveyor.BlockSelector
-                       Surveyor.BlockViewer
                        Surveyor.Commands
-                       Surveyor.EchoArea
                        Surveyor.Events
                        Surveyor.Handlers
                        Surveyor.Keymap
                        Surveyor.Loader
                        Surveyor.Loader.PPCConfig
                        Surveyor.Loader.RenovateAnalysis
-                       Surveyor.Minibuffer
                        Surveyor.Mode
                        Surveyor.Names
                        Surveyor.State
+                       Surveyor.Widget.BlockSelector
+                       Surveyor.Widget.BlockViewer
+                       Surveyor.Widget.EchoArea
                        Surveyor.Widget.FunctionSelector
+                       Surveyor.Widget.Minibuffer
                        Brick.Command
                        Brick.Keymap
                        Brick.Match.Subword

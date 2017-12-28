@@ -19,7 +19,7 @@ import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
 
 import qualified Brick.Command as C
-import qualified Surveyor.Minibuffer as MB
+import qualified Surveyor.Widget.Minibuffer as MB
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.State
 

@@ -1,4 +1,4 @@
-module Surveyor.BlockViewer (
+module Surveyor.Widget.BlockViewer (
   BlockViewer,
   emptyBlockViewer,
   blockViewer,

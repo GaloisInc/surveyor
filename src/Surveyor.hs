@@ -22,19 +22,19 @@ import qualified Graphics.Vty as V
 
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes
-import qualified Surveyor.BlockSelector as BS
-import qualified Surveyor.BlockViewer as BV
 import qualified Surveyor.Commands as C
-import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Handlers ( appHandleEvent )
 import           Surveyor.Keymap ( defaultKeymap )
 import           Surveyor.Loader ( asynchronouslyLoad )
-import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
+import qualified Surveyor.Widget.BlockSelector as BS
+import qualified Surveyor.Widget.BlockViewer as BV
+import qualified Surveyor.Widget.EchoArea as EA
 import qualified Surveyor.Widget.FunctionSelector as FS
+import qualified Surveyor.Widget.Minibuffer as MB
 
 drawSummary :: (A.Architecture arch s) => FilePath -> A.AnalysisResult arch s -> B.Widget Names
 drawSummary binFileName ares =

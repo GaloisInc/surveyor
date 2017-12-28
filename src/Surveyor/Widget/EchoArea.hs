@@ -1,4 +1,4 @@
-module Surveyor.EchoArea (
+module Surveyor.Widget.EchoArea (
   EchoArea,
   echoArea,
   setText,

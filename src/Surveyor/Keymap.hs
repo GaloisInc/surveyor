@@ -8,7 +8,7 @@ import qualified Graphics.Vty as V
 import qualified Brick.Keymap as K
 import qualified Surveyor.Commands as C
 import           Surveyor.Events
-import qualified Surveyor.Minibuffer as MB
+import qualified Surveyor.Widget.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.State
 

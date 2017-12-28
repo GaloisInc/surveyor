@@ -1,4 +1,4 @@
-module Surveyor.BlockSelector (
+module Surveyor.Widget.BlockSelector (
   BlockSelector,
   emptyBlockSelector,
   blockSelector,

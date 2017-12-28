@@ -19,17 +19,17 @@ import qualified Brick.Command as C
 import qualified Brick.Keymap as K
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes ( focusedListAttr )
-import qualified Surveyor.BlockSelector as BS
-import qualified Surveyor.BlockViewer as BV
 import qualified Surveyor.Commands as C
-import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events
 import qualified Surveyor.Keymap as K
-import qualified Surveyor.Minibuffer as MB
 import qualified Surveyor.Mode as M
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
+import qualified Surveyor.Widget.BlockSelector as BS
+import qualified Surveyor.Widget.BlockViewer as BV
+import qualified Surveyor.Widget.EchoArea as EA
 import qualified Surveyor.Widget.FunctionSelector as FS
+import qualified Surveyor.Widget.Minibuffer as MB
 
 appHandleEvent :: State s -> B.BrickEvent Names (Events s) -> B.EventM Names (B.Next (State s))
 appHandleEvent (State s0) evt =
