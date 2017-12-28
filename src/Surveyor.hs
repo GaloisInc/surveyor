@@ -34,6 +34,7 @@ import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
+import qualified Surveyor.Widget.FunctionSelector as FS
 
 drawSummary :: (A.Architecture arch s) => FilePath -> A.AnalysisResult arch s -> B.Widget Names
 drawSummary binFileName ares =
@@ -45,21 +46,6 @@ drawSummary binFileName ares =
 drawSummaryTableEntry :: Int -> (T.Text, T.Text) -> B.Widget Names
 drawSummaryTableEntry keyColWidth (key, val) =
   B.padRight (B.Pad (keyColWidth - T.length key)) (B.txt key) B.<+> B.txt val
-
--- drawConcreteBlock :: (A.Architecture st arch) => R.ISA i a w -> R.ConcreteBlock i w -> B.Widget Names
--- drawConcreteBlock isa b =
---   B.vBox [ B.str (printf "Block address: %s" (show (R.basicBlockAddress b)))
---          , B.vBox [ B.str (R.isaPrettyInstruction isa i) | i <- R.basicBlockInstructions b ]
---          ]
-
--- drawFunctionList :: (MM.MemWidth w) => S s i a w arch -> BinaryAnalysisResult s i a w arch -> B.Widget Names
--- drawFunctionList S { sFunctionList = flist }
---                  BinaryAnalysisResult { rBlockInfo = binfo, rISA = isa } =
---   B.renderList drawFunctionEntry True flist
---   where
---     drawFunctionEntry isFocused (FLE addr txt blockCount) =
---       let focusedXfrm = if isFocused then B.withAttr focusedListAttr else id
---       in focusedXfrm (B.hBox [B.str (printf "%s: %s (%d blocks)" (show (PP.pretty addr)) (T.unpack txt) blockCount)])
 
 drawDiagnostics :: Seq.Seq T.Text -> B.Widget Names
 drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
@@ -123,7 +109,7 @@ drawUIMode binFileName binfo s uim =
   case uim of
     Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
     Summary -> drawAppShell s (drawSummary binFileName binfo)
-    ListFunctions -> drawAppShell s B.emptyWidget -- drawAppShell s (drawFunctionList s binfo)
+    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector s))
     BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector s))
     BlockViewer -> drawAppShell s (BV.renderBlockViewer (sBlockViewer s))
 
@@ -172,6 +158,7 @@ emptyState mfp ng customEventChan = do
            , sAppState = maybe AwaitingFile (const Loading) mfp
            , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
            , sBlockSelector = BS.emptyBlockSelector
+           , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
            , sBlockViewer = BV.emptyBlockViewer
            , sEmitEvent = B.writeBChan customEventChan
            , sEventChannel = customEventChan

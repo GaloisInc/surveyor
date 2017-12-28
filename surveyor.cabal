@@ -31,6 +31,7 @@ library
                        Surveyor.Mode
                        Surveyor.Names
                        Surveyor.State
+                       Surveyor.Widget.FunctionSelector
                        Brick.Command
                        Brick.Keymap
                        Brick.Match.Subword

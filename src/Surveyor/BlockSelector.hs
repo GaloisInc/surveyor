@@ -64,10 +64,10 @@ handleBlockSelectorEvent evt bsel =
       case evt of
         V.EvKey V.KEnter [] ->
           case FL.selectedItem fl of
-            Nothing -> return (BlockSelector callback fl)
+            Nothing -> return bsel
             Just b -> do
               liftIO (callback b)
-              return (BlockSelector callback fl)
+              return bsel
         _ -> do
           fl' <- FL.handleFilterListEvent return evt fl
           return (BlockSelector callback fl')

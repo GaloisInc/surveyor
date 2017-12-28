@@ -26,9 +26,10 @@ import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events
 import qualified Surveyor.Keymap as K
 import qualified Surveyor.Minibuffer as MB
-import           Surveyor.Mode
+import qualified Surveyor.Mode as M
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
+import qualified Surveyor.Widget.FunctionSelector as FS
 
 appHandleEvent :: State s -> B.BrickEvent Names (Events s) -> B.EventM Names (B.Next (State s))
 appHandleEvent (State s0) evt =
@@ -51,19 +52,22 @@ handleVtyEvent s0@(State s) evt
       B.continue (State s)
   | otherwise =
   case sUIMode s of
-    SomeMiniBuffer (MiniBuffer oldMode) -> do
+    M.SomeMiniBuffer (M.MiniBuffer oldMode) -> do
       mbs <- MB.handleMinibufferEvent evt s (sMinibuffer s)
       case mbs of
         MB.Canceled mb' ->
           B.continue $! State s { sMinibuffer = mb'
-                               , sUIMode = SomeUIMode oldMode
+                               , sUIMode = M.SomeUIMode oldMode
                                }
         MB.Completed mb' ->
           B.continue $! State s { sMinibuffer = mb' }
-    SomeUIMode BlockSelector -> do
+    M.SomeUIMode M.BlockSelector -> do
       bsel' <- BS.handleBlockSelectorEvent evt (sBlockSelector s)
       B.continue $! State s { sBlockSelector = bsel' }
-    SomeUIMode _m -> B.continue s0
+    M.SomeUIMode M.FunctionSelector -> do
+      fsel' <- FS.handleFunctionSelectorEvent evt (sFunctionSelector s)
+      B.continue $! State s { sFunctionSelector = fsel' }
+    M.SomeUIMode _m -> B.continue s0
 
 handleCustomEvent :: (A.Architecture arch s) => S arch s -> Events s -> B.EventM Names (B.Next (State s))
 handleCustomEvent s0 evt =
@@ -71,7 +75,7 @@ handleCustomEvent s0 evt =
     AnalysisFinished (A.SomeResult bar) diags ->
       let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
           notification = "Finished loading file"
-          s1 = stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) Ready (SomeUIMode Diags)
+          s1 = stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) Ready (M.SomeUIMode M.Diags)
       in B.continue (State s1)
     AnalysisProgress (A.SomeResult bar) ->
       let s1 = stateFromAnalysisResult s0 bar Seq.empty Loading (sUIMode s0)
@@ -85,17 +89,17 @@ handleCustomEvent s0 evt =
     ErrorLoadingELF errs ->
       let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
       in B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
-    ShowSummary -> B.continue $! State s0 { sUIMode = SomeUIMode Summary }
-    ShowDiagnostics -> B.continue $! State s0 { sUIMode = SomeUIMode Diags }
+    ShowSummary -> B.continue $! State s0 { sUIMode = M.SomeUIMode M.Summary }
+    ShowDiagnostics -> B.continue $! State s0 { sUIMode = M.SomeUIMode M.Diags }
     DescribeCommand (Some cmd) -> do
       let msg = T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
       liftIO (sEmitEvent s0 (EchoText msg))
       let newMode =
             case sUIMode s0 of
-              SomeMiniBuffer (MiniBuffer oldMode) -> oldMode
-              SomeUIMode mode -> mode
+              M.SomeMiniBuffer (M.MiniBuffer oldMode) -> oldMode
+              M.SomeUIMode mode -> mode
       B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> msg
-                            , sUIMode = SomeUIMode newMode
+                            , sUIMode = M.SomeUIMode newMode
                             }
     EchoText txt -> do
       ea' <- liftIO (EA.setText (sEchoArea s0) txt)
@@ -103,12 +107,12 @@ handleCustomEvent s0 evt =
     UpdateEchoArea ea -> B.continue $! State s0 { sEchoArea = ea }
     OpenMinibuffer ->
       case sUIMode s0 of
-        SomeMiniBuffer _ -> B.continue (State s0)
-        SomeUIMode mode -> B.continue $! State s0 { sUIMode = SomeMiniBuffer (MiniBuffer mode) }
+        M.SomeMiniBuffer _ -> B.continue (State s0)
+        M.SomeUIMode mode -> B.continue $! State s0 { sUIMode = M.SomeMiniBuffer (M.MiniBuffer mode) }
 
     ViewBlock archNonce b
       | Just Refl <- testEquality archNonce (sArch s0) ->
-        B.continue $! State s0 { sUIMode = SomeUIMode BlockViewer
+        B.continue $! State s0 { sUIMode = M.SomeUIMode M.BlockViewer
                               , sBlockViewer = BV.blockViewer b
                               }
       | otherwise -> B.continue (State s0)
@@ -129,9 +133,29 @@ handleCustomEvent s0 evt =
       | Just Refl <- testEquality (sArch s0) archNonce -> do
           let callback b = sEmitEvent s0 (ViewBlock archNonce b)
           B.continue $! State s0 { sBlockSelector = BS.blockSelector callback focusedListAttr blocks
-                                 , sUIMode = SomeUIMode BlockSelector
+                                 , sUIMode = M.SomeUIMode M.BlockSelector
                                  }
        | otherwise -> B.continue (State s0)
+
+    FindFunctionsContaining archNonce maddr
+      | Just Refl <- testEquality (sArch s0) archNonce ->
+        case sAnalysisResult s0 of
+          Nothing -> B.continue $! State s0
+          Just ares ->
+            case maddr of
+              Nothing -> do
+                liftIO (sEmitEvent s0 (ListFunctions archNonce (A.functions ares)))
+                B.continue $! State s0
+      | otherwise -> B.continue $! State s0
+
+    ListFunctions archNonce funcs
+      | Just Refl <- testEquality (sArch s0) archNonce -> do
+          let callback f = sEmitEvent s0 (ViewFunction archNonce f)
+          B.continue $! State s0 { sFunctionSelector = FS.functionSelector callback focusedListAttr funcs
+                                 , sUIMode = M.SomeUIMode M.FunctionSelector
+                                 }
+      | otherwise -> B.continue (State s0)
+
     LogDiagnostic t ->
       B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
     Exit -> B.halt (State s0)
@@ -141,11 +165,14 @@ stateFromAnalysisResult :: (A.Architecture arch s)
                         -> A.AnalysisResult arch s
                         -> Seq.Seq T.Text
                         -> AppState
-                        -> SomeUIMode
+                        -> M.SomeUIMode
                         -> S arch s
 stateFromAnalysisResult s0 ares newDiags state uiMode =
   S { sAnalysisResult = Just ares
---    , sFunctionList = B.list FunctionList funcList 1
+    , sFunctionSelector =
+      case testEquality (sArch s0) (A.archNonce ares) of
+        Just Refl -> sFunctionSelector s0
+        Nothing -> FS.functionSelector (const (return ())) focusedListAttr []
     , sDiagnosticLog = sDiagnosticLog s0 <> newDiags
     , sEchoArea = sEchoArea s0
     , sUIMode = uiMode
@@ -172,9 +199,3 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
         Nothing -> K.defaultKeymap (sEventChannel s0)
     , sArch = A.archNonce ares
     }
-  -- where
-  --   funcList = V.fromList [ FLE addr textName blockCount
-  --                         | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo (rBlockInfo bar))
-  --                         , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
-  --                         , let blockCount = M.size (dfi L.^. MD.parsedBlocks)
-  --                         ]

@@ -5,7 +5,6 @@
 module Surveyor.State (
   State(..),
   S(..),
---  FunctionListEntry(..),
   AppState(..)
   ) where
 
@@ -23,6 +22,7 @@ import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
 import           Surveyor.Names ( Names )
 import qualified Surveyor.EchoArea as EA
+import qualified Surveyor.Widget.FunctionSelector as FS
 
 data State s where
   State :: (A.Architecture arch s) => !(S arch s) -> State s
@@ -56,15 +56,14 @@ data S arch s =
     -- streamed analysis result is of the same type as the last one.  We use
     -- nonces to track that; their 'TestEquality' instance lets us recover type
     -- equality.
---    , sFunctionList :: B.List Names (FunctionListEntry w)
+    , sFunctionSelector :: !(FS.FunctionSelector arch s)
     -- ^ Functions available in the function selector
     , sBlockSelector :: !(BS.BlockSelector arch s)
     , sBlockViewer :: !(BV.BlockViewer arch s)
     , sKeymap :: !(Keymap SomeUIMode (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr)
     , sArch :: !(NG.Nonce s arch)
+    -- ^ A nonce used to check to see if the arch type has changed between runs
     }
-
--- data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
 
 data AppState = Loading
               | Ready

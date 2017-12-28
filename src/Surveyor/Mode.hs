@@ -25,7 +25,7 @@ data UIMode s where
   -- ^ A window containing the history of diagnostic information
   Summary :: UIMode NormalK
   -- ^ Summary information returned by the binary analysis
-  ListFunctions :: UIMode NormalK
+  FunctionSelector :: UIMode NormalK
   -- ^ A list of all of the discovered functions (which allows for
   -- drilling down and displaying blocks)
   BlockSelector :: UIMode NormalK
@@ -42,7 +42,7 @@ prettyMode m =
   case m of
     Diags -> "Diagnostics"
     Summary -> "Summary"
-    ListFunctions -> "Function Selector"
+    FunctionSelector -> "Function Selector"
     BlockSelector -> "Block Selector"
     BlockViewer -> "Block Viewer"
 
@@ -60,9 +60,9 @@ deriving instance Show (UIMode s)
 instance TestEquality UIMode where
   testEquality Diags Diags = Just Refl
   testEquality Summary Summary = Just Refl
-  testEquality ListFunctions ListFunctions = Just Refl
+  testEquality FunctionSelector FunctionSelector = Just Refl
   testEquality BlockSelector BlockSelector = Just Refl
   testEquality (MiniBuffer a) (MiniBuffer b) = do
-    _ <- testEquality a b
+    Refl <- testEquality a b
     return Refl
   testEquality _ _ = Nothing

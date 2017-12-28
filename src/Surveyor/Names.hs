@@ -10,4 +10,6 @@ data Names = DiagnosticView
            | MinibufferCompletionList
            | BlockSelectEditor
            | BlockSelectList
+           | FunctionSelectEditor
+           | FunctionSelectList
   deriving (Eq, Ord, Show)

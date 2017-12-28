@@ -25,6 +25,11 @@ data Events s where
   AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
   AnalysisProgress :: A.SomeResult s -> Events s
 
+  -- Function-related events
+  FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s
+  ListFunctions :: PN.Nonce s arch -> [A.Function arch s] -> Events s
+  ViewFunction :: PN.Nonce s arch -> A.Function arch s -> Events s
+
   -- Block-related events
   FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> Events s
   ListBlocks :: PN.Nonce s arch -> [A.Block arch s] -> Events s

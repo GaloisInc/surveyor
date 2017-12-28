@@ -7,6 +7,7 @@ module Surveyor.Commands (
   showSummaryC,
   showDiagnosticsC,
   findBlockC,
+  listFunctionsC,
   describeCommandC,
   minibufferC,
   allCommands
@@ -28,6 +29,7 @@ allCommands customEventChan =
   , Some (exitC customEventChan)
   , Some (showDiagnosticsC customEventChan)
   , Some (findBlockC customEventChan)
+  , Some (listFunctionsC customEventChan)
   , Some (describeCommandC customEventChan)
   ]
 
@@ -51,6 +53,13 @@ showDiagnosticsC customEventChan =
   where
     doc = "Show a log of the diagnostics produced by the analysis and UI"
     callback = \_ PL.Nil -> B.writeBChan customEventChan ShowDiagnostics
+
+listFunctionsC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[]
+listFunctionsC customEventChan =
+  C.Command "list-functions" doc PL.Nil PL.Nil callback
+  where
+    doc = "List all of the discovered functions"
+    callback = \st PL.Nil -> B.writeBChan customEventChan (FindFunctionsContaining (sArch st) Nothing)
 
 findBlockC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[MB.AddressType]
 findBlockC customEventChan =

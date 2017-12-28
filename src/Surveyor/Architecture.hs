@@ -22,14 +22,18 @@ module Surveyor.Architecture (
   mkX86Result
   ) where
 
+import qualified Data.Map as M
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.Prettyprint.Doc as PP
 import           Data.Word ( Word32, Word64 )
 import           Data.Void
 import           Text.Read ( readMaybe )
 
+import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Memory as MM
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
@@ -126,6 +130,16 @@ mcContainingBlocks :: (R.ConcreteBlock i w -> Block arch s)
                    -> [Block arch s]
 mcContainingBlocks toBlock bar addr = map toBlock (blocksContaining bar addr)
 
+mcFunctions :: (MM.MemWidth w)
+            => (MM.MemAddr w -> Address arch s)
+            -> BinaryAnalysisResult s i a w arch
+            -> [Function arch s]
+mcFunctions toAddr bar =
+  [ Function (toAddr (MM.absoluteAddr (R.absoluteAddress addr))) textName
+  | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo (rBlockInfo bar))
+  , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
+  ]
+
 toInstPPC32 :: (PPC.Instruction (), R.ConcreteAddress 32) -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
 toInstPPC32 (i, addr) = (PPC32Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC32Instruction i)
@@ -157,6 +171,8 @@ instance Architecture Void s where
   parseAddress _ = Nothing
   prettyAddress (VoidAddress v) = absurd v
   containingBlocks (VoidAnalysisResult v) _ = absurd v
+  functions (VoidAnalysisResult v) = absurd v
+  prettyInstruction (VoidInstruction v) = absurd v
 
 data Some2 x where
   Some2 :: !(x a b) -> Some2 x
@@ -176,6 +192,7 @@ instance Architecture PPC.PPC32 s where
   prettyInstruction (PPC32Instruction i) = mcPrettyInstruction i
   containingBlocks (PPC32AnalysisResult bar) (PPC32Address addr) =
     mcContainingBlocks (toBlockPPC32 bar) bar addr
+  functions (PPC32AnalysisResult bar) = mcFunctions PPC32Address bar
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
@@ -192,6 +209,7 @@ instance Architecture PPC.PPC64 s where
   prettyInstruction (PPC64Instruction i) = mcPrettyInstruction i
   containingBlocks (PPC64AnalysisResult bar) (PPC64Address addr) =
     mcContainingBlocks (toBlockPPC64 bar) bar addr
+  functions (PPC64AnalysisResult bar) = mcFunctions PPC64Address bar
 
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
