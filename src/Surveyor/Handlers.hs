@@ -20,6 +20,7 @@ import qualified Brick.Keymap as K
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes ( focusedListAttr )
 import qualified Surveyor.BlockSelector as BS
+import qualified Surveyor.BlockViewer as BV
 import qualified Surveyor.Commands as C
 import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events
@@ -54,14 +55,14 @@ handleVtyEvent s0@(State s) evt
       mbs <- MB.handleMinibufferEvent evt s (sMinibuffer s)
       case mbs of
         MB.Canceled mb' ->
-          B.continue $ State s { sMinibuffer = mb'
+          B.continue $! State s { sMinibuffer = mb'
                                , sUIMode = SomeUIMode oldMode
                                }
         MB.Completed mb' ->
-          B.continue $ State s { sMinibuffer = mb' }
+          B.continue $! State s { sMinibuffer = mb' }
     SomeUIMode BlockSelector -> do
       bsel' <- BS.handleBlockSelectorEvent evt (sBlockSelector s)
-      B.continue $ State s { sBlockSelector = bsel' }
+      B.continue $! State s { sBlockSelector = bsel' }
     SomeUIMode _m -> B.continue s0
 
 handleCustomEvent :: (A.Architecture arch s) => S arch s -> Events s -> B.EventM Names (B.Next (State s))
@@ -76,15 +77,15 @@ handleCustomEvent s0 evt =
       let s1 = stateFromAnalysisResult s0 bar Seq.empty Loading (sUIMode s0)
       in B.continue (State s1)
     AnalysisFailure exn ->
-      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
+      B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
     ErrorLoadingELFHeader off msg ->
       let t = T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)
-      in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
+      in B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
     ErrorLoadingELF errs ->
       let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
-      in B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
-    ShowSummary -> B.continue $ State s0 { sUIMode = SomeUIMode Summary }
-    ShowDiagnostics -> B.continue $ State s0 { sUIMode = SomeUIMode Diags }
+      in B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 <> Seq.fromList newDiags }
+    ShowSummary -> B.continue $! State s0 { sUIMode = SomeUIMode Summary }
+    ShowDiagnostics -> B.continue $! State s0 { sUIMode = SomeUIMode Diags }
     DescribeCommand (Some cmd) -> do
       let msg = T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
       liftIO (sEmitEvent s0 (EchoText msg))
@@ -92,17 +93,24 @@ handleCustomEvent s0 evt =
             case sUIMode s0 of
               SomeMiniBuffer (MiniBuffer oldMode) -> oldMode
               SomeUIMode mode -> mode
-      B.continue $ State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> msg
+      B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> msg
                             , sUIMode = SomeUIMode newMode
                             }
     EchoText txt -> do
       ea' <- liftIO (EA.setText (sEchoArea s0) txt)
-      B.continue $ State s0 { sEchoArea = ea' }
-    UpdateEchoArea ea -> B.continue $ State s0 { sEchoArea = ea }
+      B.continue $! State s0 { sEchoArea = ea' }
+    UpdateEchoArea ea -> B.continue $! State s0 { sEchoArea = ea }
     OpenMinibuffer ->
       case sUIMode s0 of
         SomeMiniBuffer _ -> B.continue (State s0)
-        SomeUIMode mode -> B.continue $ State s0 { sUIMode = SomeMiniBuffer (MiniBuffer mode) }
+        SomeUIMode mode -> B.continue $! State s0 { sUIMode = SomeMiniBuffer (MiniBuffer mode) }
+
+    ViewBlock archNonce b
+      | Just Refl <- testEquality archNonce (sArch s0) ->
+        B.continue $! State s0 { sUIMode = SomeUIMode BlockViewer
+                              , sBlockViewer = BV.blockViewer b
+                              }
+      | otherwise -> B.continue (State s0)
     FindBlockContaining archNonce addr ->
       case sAnalysisResult s0 of
         Just ares
@@ -112,11 +120,16 @@ handleCustomEvent s0 evt =
                   liftIO (sEmitEvent s0 (ViewBlock archNonce b))
                   B.continue (State s0)
                 blocks -> do
-                  let callback b = sEmitEvent s0 (ViewBlock archNonce b)
-                  B.continue $ State s0 { sBlockSelector = BS.blockSelector callback focusedListAttr addr blocks
-                                        , sUIMode = SomeUIMode BlockSelector
-                                        }
+                  liftIO (sEmitEvent s0 (ListBlocks archNonce blocks))
+                  B.continue (State s0)
         _ -> B.continue (State s0)
+    ListBlocks archNonce blocks
+      | Just Refl <- testEquality (sArch s0) archNonce -> do
+          let callback b = sEmitEvent s0 (ViewBlock archNonce b)
+          B.continue $! State s0 { sBlockSelector = BS.blockSelector callback focusedListAttr blocks
+                                , sUIMode = SomeUIMode BlockSelector
+                                }
+       | otherwise -> B.continue (State s0)
     Exit -> B.halt (State s0)
 
 stateFromAnalysisResult :: (A.Architecture arch s)
@@ -133,6 +146,10 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
     , sEchoArea = sEchoArea s0
     , sUIMode = uiMode
     , sInputFile = sInputFile s0
+    , sBlockViewer =
+      case testEquality (sArch s0) (A.archNonce ares) of
+        Nothing -> BV.emptyBlockViewer
+        Just Refl -> sBlockViewer s0
     , sBlockSelector =
       case testEquality (sArch s0) (A.archNonce ares) of
         Just Refl -> sBlockSelector s0

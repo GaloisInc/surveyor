@@ -9,6 +9,7 @@ module Surveyor ( surveyor ) where
 
 import qualified Brick as B
 import qualified Brick.BChan as B
+import qualified Brick.Widgets.Border as B
 import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
@@ -22,6 +23,7 @@ import qualified Graphics.Vty as V
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes
 import qualified Surveyor.BlockSelector as BS
+import qualified Surveyor.BlockViewer as BV
 import qualified Surveyor.Commands as C
 import qualified Surveyor.EchoArea as EA
 import           Surveyor.Events ( Events(..) )
@@ -81,12 +83,17 @@ drawStatusBar s =
         AwaitingFile -> B.str "Waiting for file"
 
 drawAppShell :: S arch s -> B.Widget Names -> [B.Widget Names]
-drawAppShell s w = [B.vBox [ B.padBottom B.Max w
-                           , drawStatusBar s
-                           , bottomLine
-                           ]
-                   ]
+drawAppShell s w =
+  [ B.vBox [ B.borderWithLabel (title (sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
+           , drawStatusBar s
+           , bottomLine
+           ]
+  ]
   where
+    title sm =
+      case sm of
+        SomeMiniBuffer (MiniBuffer m') -> title (SomeUIMode m')
+        SomeUIMode m' -> B.txt (prettyMode m')
     bottomLine =
       case sUIMode s of
         SomeMiniBuffer (MiniBuffer _) -> MB.renderMinibuffer True (sMinibuffer s)
@@ -118,6 +125,7 @@ drawUIMode binFileName binfo s uim =
     Summary -> drawAppShell s (drawSummary binFileName binfo)
     ListFunctions -> drawAppShell s B.emptyWidget -- drawAppShell s (drawFunctionList s binfo)
     BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector s))
+    BlockViewer -> drawAppShell s (BV.renderBlockViewer (sBlockViewer s))
 
 appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =
@@ -164,6 +172,7 @@ emptyState mfp ng customEventChan = do
            , sAppState = maybe AwaitingFile (const Loading) mfp
            , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
            , sBlockSelector = BS.emptyBlockSelector
+           , sBlockViewer = BV.emptyBlockViewer
            , sEmitEvent = B.writeBChan customEventChan
            , sEventChannel = customEventChan
            , sNonceGenerator = ng

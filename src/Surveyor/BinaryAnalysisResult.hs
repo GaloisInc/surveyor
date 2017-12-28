@@ -13,11 +13,11 @@ import qualified Data.Parameterized.Nonce as NG
 import qualified Renovate as R
 
 data BinaryAnalysisResult s i a w arch =
-  BinaryAnalysisResult { rBlockInfo :: R.BlockInfo i w arch
-                       , rMemory :: MM.Memory w
+  BinaryAnalysisResult { rBlockInfo :: !(R.BlockInfo i w arch)
+                       , rMemory :: !(MM.Memory w)
                        , rISA :: R.ISA i a w
-                       , rBlockMap :: IM.IntervalMap (MM.MemAddr w) (R.ConcreteBlock i w)
-                       , rNonces :: (NG.Nonce s w, NG.Nonce s i, NG.Nonce s arch)
+                       , rBlockMap :: !(IM.IntervalMap (MM.MemAddr w) (R.ConcreteBlock i w))
+                       , rNonce :: NG.Nonce s arch
                        }
 
 indexBlocksByAddress :: (MM.MemWidth w)

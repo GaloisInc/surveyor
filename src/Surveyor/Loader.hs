@@ -67,11 +67,9 @@ loadElf ng customEventChan someElf = do
              ]
     E.Elf64 e64 -> do
       let Right (_, mem) = MM.memoryForElf elfLoadOpts e64
-      nonceWx86 <- NG.freshNonce ng
-      nonceIx86 <- NG.freshNonce ng
       nonceAx86 <- NG.freshNonce ng
       ppc64cfg <- LP.ppcConfig (Proxy @PPC.PPC64) customEventChan ng e64 PPC.config64 A.mkPPC64Result
-      let x86cfg0 = X86.config (RA.analysis A.mkX86Result (nonceWx86, nonceIx86, nonceAx86)) undefined
+      let x86cfg0 = X86.config (RA.analysis A.mkX86Result nonceAx86) undefined
       let x86callback _addr ebi =
             case ebi of
               Left ex -> B.writeBChan customEventChan (AnalysisFailure ex)
@@ -80,7 +78,7 @@ loadElf ng customEventChan someElf = do
                                                , rMemory = mem
                                                , rISA = R.rcISA x86cfg0
                                                , rBlockMap = indexBlocksByAddress (R.rcISA x86cfg0) mem bi
-                                               , rNonces = (nonceWx86, nonceIx86, nonceAx86)
+                                               , rNonce = nonceAx86
                                                }
                     sr = A.mkX86Result res
                 in B.writeBChan customEventChan (AnalysisProgress sr)

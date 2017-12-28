@@ -17,18 +17,28 @@ import qualified Surveyor.Architecture as A
 import qualified Surveyor.EchoArea as EA
 
 data Events s where
+  -- Loading events
   ErrorLoadingELFHeader :: Int64 -> String -> Events s
   ErrorLoadingELF :: (Eq (E.ElfWordType n), Num (E.ElfWordType n), Show (E.ElfWordType n))
                   => [E.ElfParseError n] -> Events s
   AnalysisFailure :: X.SomeException -> Events s
   AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
   AnalysisProgress :: A.SomeResult s -> Events s
+
+  -- Block-related events
   FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> Events s
+  ListBlocks :: PN.Nonce s arch -> [A.Block arch s] -> Events s
   ViewBlock :: PN.Nonce s arch -> A.Block arch s -> Events s
+
+  -- Informational messages
   DescribeCommand :: Some (C.Command st a r) -> Events s
   EchoText :: T.Text -> Events s
   UpdateEchoArea :: EA.EchoArea -> Events s
+
+  -- UI Modes
   ShowSummary :: Events s
   ShowDiagnostics :: Events s
   OpenMinibuffer :: Events s
+
+  -- Exit
   Exit :: Events s

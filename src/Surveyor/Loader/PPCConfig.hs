@@ -52,11 +52,9 @@ ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
           -> IO (R.SomeConfig (A.SomeResult s))
 ppcConfig proxy customEventChan ng elf mkCfg0 mkRes = do
   let Right (_, mem) = MM.memoryForElf elfLoadOpts elf
-  nonceW <- NG.freshNonce ng
-  nonceI <- NG.freshNonce ng
   nonceA <- NG.freshNonce ng
   let tocBase = PPC.tocBaseForELF proxy elf
-  let cfg0 = mkCfg0 tocBase (RA.analysis mkRes (nonceW, nonceI, nonceA)) undefined
+  let cfg0 = mkCfg0 tocBase (RA.analysis mkRes nonceA) undefined
   let callback _addr ebi =
         case ebi of
           Left ex -> B.writeBChan customEventChan (AnalysisFailure ex)
@@ -66,7 +64,7 @@ ppcConfig proxy customEventChan ng elf mkCfg0 mkRes = do
                                            , rMemory = mem
                                            , rISA = isa
                                            , rBlockMap = indexBlocksByAddress isa mem bi
-                                           , rNonces = (nonceW, nonceI, nonceA)
+                                           , rNonce = nonceA
                                            }
             let sr = mkRes res
             B.writeBChan customEventChan (AnalysisProgress sr)

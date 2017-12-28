@@ -17,6 +17,7 @@ import qualified Data.Text as T
 import           Brick.Keymap ( Keymap )
 import qualified Surveyor.Architecture as A
 import qualified Surveyor.BlockSelector as BS
+import qualified Surveyor.BlockViewer as BV
 import           Surveyor.Events ( Events )
 import qualified Surveyor.Minibuffer as MB
 import           Surveyor.Mode
@@ -24,19 +25,19 @@ import           Surveyor.Names ( Names )
 import qualified Surveyor.EchoArea as EA
 
 data State s where
-  State :: (A.Architecture arch s) => S arch s -> State s
+  State :: (A.Architecture arch s) => !(S arch s) -> State s
 
 data S arch s =
   S { sInputFile :: Maybe FilePath
     , sAnalysisResult :: Maybe (A.AnalysisResult arch s)
     -- ^ Information returned by the binary analysis
-    , sDiagnosticLog :: Seq.Seq T.Text
+    , sDiagnosticLog :: !(Seq.Seq T.Text)
     -- ^ Diagnostics collected over time (displayed in the diagnostic view)
-    , sEchoArea :: EA.EchoArea
+    , sEchoArea :: !EA.EchoArea
     -- ^ An area where one-line messages can be displayed
-    , sUIMode :: SomeUIMode
+    , sUIMode :: !SomeUIMode
     -- ^ The current UI mode, which drives rendering and keybindings available
-    , sMinibuffer :: MB.Minibuffer (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr T.Text Names
+    , sMinibuffer :: !(MB.Minibuffer (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr T.Text Names)
     -- ^ The persistent state of the minibuffer
     --
     -- We keep it around so that it doesn't have to re-index the commands
@@ -57,9 +58,10 @@ data S arch s =
     -- equality.
 --    , sFunctionList :: B.List Names (FunctionListEntry w)
     -- ^ Functions available in the function selector
-    , sBlockSelector :: BS.BlockSelector arch s
-    , sKeymap :: Keymap SomeUIMode (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr
-    , sArch :: NG.Nonce s arch
+    , sBlockSelector :: !(BS.BlockSelector arch s)
+    , sBlockViewer :: !(BV.BlockViewer arch s)
+    , sKeymap :: !(Keymap SomeUIMode (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr)
+    , sArch :: !(NG.Nonce s arch)
     }
 
 -- data FunctionListEntry w = FLE (R.ConcreteAddress w) T.Text Int
