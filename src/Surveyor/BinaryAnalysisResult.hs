@@ -29,7 +29,7 @@ indexBlocksByAddress isa mem bi = F.foldl' indexBlock IM.empty (R.biBlocks bi)
   where
     indexBlock m b =
       let iaddrs = fmap (MM.absoluteAddr . R.absoluteAddress . snd) (R.instructionAddresses isa mem b)
-      in IM.insert (IM.OpenInterval (minimum iaddrs) (maximum iaddrs)) b m
+      in IM.insert (IM.ClosedInterval (minimum iaddrs) (maximum iaddrs)) b m
 
 -- | Look up the basic block containing the given address.
 --
