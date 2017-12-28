@@ -14,6 +14,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
 import           Brick.Keymap ( Keymap )
+import qualified Surveyor.Arguments as AR
 import qualified Surveyor.Architecture as A
 import           Surveyor.Events ( Events )
 import           Surveyor.Mode
@@ -37,7 +38,7 @@ data S arch s =
     -- ^ An area where one-line messages can be displayed
     , sUIMode :: !SomeUIMode
     -- ^ The current UI mode, which drives rendering and keybindings available
-    , sMinibuffer :: !(MB.Minibuffer (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr T.Text Names)
+    , sMinibuffer :: !(MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
     -- ^ The persistent state of the minibuffer
     --
     -- We keep it around so that it doesn't have to re-index the commands
@@ -60,7 +61,7 @@ data S arch s =
     -- ^ Functions available in the function selector
     , sBlockSelector :: !(BS.BlockSelector arch s)
     , sBlockViewer :: !(BV.BlockViewer arch s)
-    , sKeymap :: !(Keymap SomeUIMode (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr)
+    , sKeymap :: !(Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
     , sArch :: !(NG.Nonce s arch)
     -- ^ A nonce used to check to see if the arch type has changed between runs
     }

@@ -1,8 +1,4 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE ViewPatterns #-}
 -- | An instantiation of the generic minibuffer widget with a specific argument type
 module Surveyor.Widget.Minibuffer (
   MB.Minibuffer,
@@ -10,92 +6,19 @@ module Surveyor.Widget.Minibuffer (
   MB.MinibufferStatus(..),
   MB.handleMinibufferEvent,
   MB.renderMinibuffer,
-  Argument(..),
-  Type(..),
-  TypeRepr(..),
-  IntType,
-  WordType,
-  AddressType,
-  StringType,
-  CommandType
   ) where
 
-import qualified Data.Foldable as F
-import qualified Data.Map as M
-import           Data.Parameterized.Classes
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import qualified Data.Vector as V
-import           Numeric.Natural ( Natural )
-import           Text.Read ( readMaybe )
 
 import qualified Brick.Command as C
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Architecture as A
+import           Surveyor.Arguments
 import           Surveyor.Attributes
-
-data Type where
-  StringType :: Type
-  AddressType :: Type
-  IntType :: Type
-  WordType :: Type
-  CommandType :: Type
-
-type StringType = 'StringType
-type AddressType = 'AddressType
-type IntType = 'IntType
-type WordType = 'WordType
-type CommandType = 'CommandType
-
-data TypeRepr tp where
-  CommandTypeRepr :: TypeRepr CommandType
-  StringTypeRepr :: TypeRepr StringType
-  AddressTypeRepr :: TypeRepr AddressType
-  IntTypeRepr :: TypeRepr IntType
-  WordTypeRepr :: TypeRepr WordType
-
-instance TestEquality TypeRepr where
-  testEquality CommandTypeRepr CommandTypeRepr = Just Refl
-  testEquality StringTypeRepr StringTypeRepr = Just Refl
-  testEquality AddressTypeRepr AddressTypeRepr = Just Refl
-  testEquality IntTypeRepr IntTypeRepr = Just Refl
-  testEquality WordTypeRepr WordTypeRepr = Just Refl
-  testEquality _ _ = Nothing
-
-data Argument arch st s tp where
-  CommandArgument :: Some (C.Command st (Argument arch st s) TypeRepr) -> Argument arch st s CommandType
-  StringArgument :: T.Text -> Argument arch st s StringType
-  AddressArgument :: A.Address arch s -> Argument arch st s AddressType
-  IntArgument :: Integer -> Argument arch st s IntType
-  WordArgument :: Natural -> Argument arch st s WordType
-
-parseArgument :: (A.Architecture arch s, Z.GenericTextZipper t)
-              => [Some (C.Command st (Argument arch st s) TypeRepr)]
-              -> t
-              -> (TypeRepr tp -> Maybe (Argument arch st s tp))
-parseArgument cmds =
-  let indexCommand m (Some cmd) = M.insert (C.cmdName cmd) (Some cmd) m
-      cmdIndex = F.foldl' indexCommand M.empty cmds
-  in \(Z.toList -> txt) rep ->
-    case rep of
-      StringTypeRepr -> Just (StringArgument (T.pack txt))
-      IntTypeRepr -> IntArgument <$> readMaybe txt
-      WordTypeRepr -> WordArgument <$> readMaybe txt
-      AddressTypeRepr -> AddressArgument <$> A.parseAddress txt
-      CommandTypeRepr ->
-        let t = T.pack txt
-        in CommandArgument <$> M.lookup t cmdIndex
-
-showRepr :: TypeRepr tp -> T.Text
-showRepr r =
-  case r of
-    StringTypeRepr -> "String"
-    AddressTypeRepr -> "Address"
-    IntTypeRepr -> "Int"
-    WordTypeRepr -> "Word"
-    CommandTypeRepr -> "Command"
 
 completeArgument :: (Z.GenericTextZipper t)
                  => [Some (C.Command st (Argument arch st s) TypeRepr)]

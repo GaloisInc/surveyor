@@ -19,11 +19,11 @@ import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
 
 import qualified Brick.Command as C
-import qualified Surveyor.Widget.Minibuffer as MB
+import qualified Surveyor.Arguments as AR
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.State
 
-allCommands :: B.BChan (Events s) -> [Some (C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr)]
+allCommands :: B.BChan (Events s) -> [Some (C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)]
 allCommands customEventChan =
   [ Some (showSummaryC customEventChan)
   , Some (exitC customEventChan)
@@ -33,57 +33,57 @@ allCommands customEventChan =
   , Some (describeCommandC customEventChan)
   ]
 
-exitC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[]
+exitC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[]
 exitC customEventChan =
   C.Command "exit" doc PL.Nil PL.Nil callback
   where
     doc = "Exit the application"
     callback = \_ PL.Nil -> B.writeBChan customEventChan Exit
 
-showSummaryC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[]
+showSummaryC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[]
 showSummaryC customEventChan =
   C.Command "summary" doc PL.Nil PL.Nil callback
   where
     doc = "Show a summary of the information discovered about the binary"
     callback = \_ PL.Nil -> B.writeBChan customEventChan ShowSummary
 
-showDiagnosticsC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[]
+showDiagnosticsC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[]
 showDiagnosticsC customEventChan =
   C.Command "log" doc PL.Nil PL.Nil callback
   where
     doc = "Show a log of the diagnostics produced by the analysis and UI"
     callback = \_ PL.Nil -> B.writeBChan customEventChan ShowDiagnostics
 
-listFunctionsC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[]
+listFunctionsC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[]
 listFunctionsC customEventChan =
   C.Command "list-functions" doc PL.Nil PL.Nil callback
   where
     doc = "List all of the discovered functions"
     callback = \st PL.Nil -> B.writeBChan customEventChan (FindFunctionsContaining (sArch st) Nothing)
 
-findBlockC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[MB.AddressType]
+findBlockC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.AddressType]
 findBlockC customEventChan =
   C.Command "find-block" doc names rep callback
   where
     doc = "Find the block(s) containing the given address and list them"
     names = C.Const "address" PL.:< PL.Nil
-    rep = MB.AddressTypeRepr PL.:< PL.Nil
-    callback = \st (MB.AddressArgument addr PL.:< PL.Nil) ->
+    rep = AR.AddressTypeRepr PL.:< PL.Nil
+    callback = \st (AR.AddressArgument addr PL.:< PL.Nil) ->
       B.writeBChan customEventChan (FindBlockContaining (sArch st) addr)
 
-describeCommandC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[MB.CommandType]
+describeCommandC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.CommandType]
 describeCommandC customEventChan =
   C.Command "describe-command" doc names rep callback
   where
     doc = "Display the docstring of the named command"
     names = C.Const "command-name" PL.:< PL.Nil
-    rep = MB.CommandTypeRepr PL.:< PL.Nil
-    callback = \_ (MB.CommandArgument cmd PL.:< PL.Nil) ->
+    rep = AR.CommandTypeRepr PL.:< PL.Nil
+    callback = \_ (AR.CommandArgument cmd PL.:< PL.Nil) ->
       B.writeBChan customEventChan (DescribeCommand cmd)
 
 -- | This isn't part of 'allCommands' because we can never productively launch
 -- it from the minibuffer
-minibufferC :: B.BChan (Events s) -> C.Command (S arch s) (MB.Argument arch (S arch s) s) MB.TypeRepr '[]
+minibufferC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[]
 minibufferC customEventChan =
   C.Command "show-minibuffer" doc PL.Nil PL.Nil callback
   where

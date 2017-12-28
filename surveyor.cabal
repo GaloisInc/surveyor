@@ -15,6 +15,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Surveyor
                        Surveyor.Architecture
+                       Surveyor.Arguments
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Commands
