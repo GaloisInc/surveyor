@@ -76,8 +76,9 @@ handleCustomEvent s0 evt =
     AnalysisProgress (A.SomeResult bar) ->
       let s1 = stateFromAnalysisResult s0 bar Seq.empty Loading (sUIMode s0)
       in B.continue (State s1)
-    AnalysisFailure exn ->
-      B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> T.pack ("Analysis failure: " ++ show exn) }
+    AnalysisFailure exn -> do
+      liftIO (sEmitEvent s0 (LogDiagnostic (T.pack ("Analysis failure: " ++ show exn))))
+      B.continue $! State s0
     ErrorLoadingELFHeader off msg ->
       let t = T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)
       in B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
@@ -115,6 +116,7 @@ handleCustomEvent s0 evt =
       case sAnalysisResult s0 of
         Just ares
           | Just Refl <- testEquality (sArch s0) archNonce -> do
+              liftIO (sEmitEvent s0 (LogDiagnostic (T.pack (printf "Finding block at address %s" (A.prettyAddress addr)))))
               case A.containingBlocks ares addr of
                 [b] -> do
                   liftIO (sEmitEvent s0 (ViewBlock archNonce b))
@@ -127,9 +129,11 @@ handleCustomEvent s0 evt =
       | Just Refl <- testEquality (sArch s0) archNonce -> do
           let callback b = sEmitEvent s0 (ViewBlock archNonce b)
           B.continue $! State s0 { sBlockSelector = BS.blockSelector callback focusedListAttr blocks
-                                , sUIMode = SomeUIMode BlockSelector
-                                }
+                                 , sUIMode = SomeUIMode BlockSelector
+                                 }
        | otherwise -> B.continue (State s0)
+    LogDiagnostic t ->
+      B.continue $! State s0 { sDiagnosticLog = sDiagnosticLog s0 Seq.|> t }
     Exit -> B.halt (State s0)
 
 stateFromAnalysisResult :: (A.Architecture arch s)

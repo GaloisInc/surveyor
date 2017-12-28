@@ -32,8 +32,9 @@ data Events s where
 
   -- Informational messages
   DescribeCommand :: Some (C.Command st a r) -> Events s
-  EchoText :: T.Text -> Events s
-  UpdateEchoArea :: EA.EchoArea -> Events s
+  EchoText :: !T.Text -> Events s
+  UpdateEchoArea :: !EA.EchoArea -> Events s
+  LogDiagnostic :: !T.Text -> Events s
 
   -- UI Modes
   ShowSummary :: Events s
