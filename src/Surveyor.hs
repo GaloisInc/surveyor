@@ -82,7 +82,7 @@ drawAppShell s w =
         SomeUIMode m' -> B.txt (prettyMode m')
     bottomLine =
       case sUIMode s of
-        SomeMiniBuffer (MiniBuffer _) -> MB.renderMinibuffer True (sMinibuffer s)
+        SomeMiniBuffer (MiniBuffer _) -> MB.renderMinibuffer True (sMinibuffer (sArchState s))
         _ -> EA.renderEchoArea (sEchoArea s)
 
 appDraw :: State s -> [B.Widget Names]
@@ -90,7 +90,7 @@ appDraw (State s) =
   case sInputFile s of
     Nothing -> drawAppShell s B.emptyWidget
     Just binFileName ->
-      case sAnalysisResult s of
+      case sAnalysisResult (sArchState s) of
         Nothing -> drawAppShell s B.emptyWidget
         Just binfo ->
           case sUIMode s of
@@ -109,9 +109,9 @@ drawUIMode binFileName binfo s uim =
   case uim of
     Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
     Summary -> drawAppShell s (drawSummary binFileName binfo)
-    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector s))
-    BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector s))
-    BlockViewer -> drawAppShell s (BV.renderBlockViewer (sBlockViewer s))
+    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector (sArchState s)))
+    BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector (sArchState s)))
+    BlockViewer -> drawAppShell s (BV.renderBlockViewer (sBlockViewer (sArchState s)))
 
 appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =
@@ -151,18 +151,20 @@ emptyState :: Maybe FilePath -> PN.NonceGenerator IO s -> B.BChan (Events s) -> 
 emptyState mfp ng customEventChan = do
   n0 <- PN.freshNonce ng
   return S { sInputFile = mfp
-           , sAnalysisResult = Nothing
            , sDiagnosticLog = Seq.empty
            , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
            , sUIMode = SomeUIMode Summary
            , sAppState = maybe AwaitingFile (const Loading) mfp
-           , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
-           , sBlockSelector = BS.emptyBlockSelector
-           , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-           , sBlockViewer = BV.emptyBlockViewer
            , sEmitEvent = B.writeBChan customEventChan
            , sEventChannel = customEventChan
            , sNonceGenerator = ng
-           , sKeymap = defaultKeymap customEventChan
-           , sArch = n0
+           , sArchState =
+             ArchState { sNonce = n0
+                       , sAnalysisResult = Nothing
+                       , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
+                       , sBlockSelector = BS.emptyBlockSelector
+                       , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                       , sBlockViewer = BV.emptyBlockViewer
+                       , sKeymap = defaultKeymap customEventChan
+                       }
            }

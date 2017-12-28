@@ -5,6 +5,7 @@
 module Surveyor.State (
   State(..),
   S(..),
+  ArchState(..),
   AppState(..)
   ) where
 
@@ -30,18 +31,12 @@ data State s where
 
 data S arch s =
   S { sInputFile :: Maybe FilePath
-    , sAnalysisResult :: Maybe (A.AnalysisResult arch s)
-    -- ^ Information returned by the binary analysis
     , sDiagnosticLog :: !(Seq.Seq T.Text)
     -- ^ Diagnostics collected over time (displayed in the diagnostic view)
     , sEchoArea :: !EA.EchoArea
     -- ^ An area where one-line messages can be displayed
     , sUIMode :: !SomeUIMode
     -- ^ The current UI mode, which drives rendering and keybindings available
-    , sMinibuffer :: !(MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
-    -- ^ The persistent state of the minibuffer
-    --
-    -- We keep it around so that it doesn't have to re-index the commands
     , sAppState :: AppState
     -- ^ An indicator of the general state of the application (displayed in the
     -- status line)
@@ -57,14 +52,31 @@ data S arch s =
     -- streamed analysis result is of the same type as the last one.  We use
     -- nonces to track that; their 'TestEquality' instance lets us recover type
     -- equality.
-    , sFunctionSelector :: !(FS.FunctionSelector arch s)
-    -- ^ Functions available in the function selector
-    , sBlockSelector :: !(BS.BlockSelector arch s)
-    , sBlockViewer :: !(BV.BlockViewer arch s)
-    , sKeymap :: !(Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
-    , sArch :: !(NG.Nonce s arch)
-    -- ^ A nonce used to check to see if the arch type has changed between runs
+    , sArchState :: !(ArchState arch s)
     }
+
+-- | A sub-component of the state dependent on the arch type variable
+--
+-- This is split out so that it is easier to see these arch-dependent components
+-- and replace them all at once with only one dynamic test during incremental
+-- updates.
+data ArchState arch s =
+  ArchState { sNonce :: !(NG.Nonce s arch)
+            -- ^ A nonce used to check to see if the arch type has changed between runs
+            , sAnalysisResult :: Maybe (A.AnalysisResult arch s)
+            -- ^ Information returned by the binary analysis
+            , sMinibuffer :: !(MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
+            -- ^ The persistent state of the minibuffer
+            --
+            -- We keep it around so that it doesn't have to re-index the commands
+            , sFunctionSelector :: !(FS.FunctionSelector arch s)
+            -- ^ Functions available in the function selector
+            , sBlockSelector :: !(BS.BlockSelector arch s)
+            , sBlockViewer :: !(BV.BlockViewer arch s)
+            , sKeymap :: !(Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
+            }
+
+
 
 data AppState = Loading
               | Ready

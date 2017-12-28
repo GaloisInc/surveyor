@@ -42,7 +42,7 @@ appHandleEvent (State s0) evt =
 handleVtyEvent :: State s -> V.Event -> B.EventM Names (B.Next (State s))
 handleVtyEvent s0@(State s) evt
   | V.EvKey k mods <- evt
-  , Just (Some cmd) <- K.lookupKeyCommand (sUIMode s) (K.Key k mods) (sKeymap s)
+  , Just (Some cmd) <- K.lookupKeyCommand (sUIMode s) (K.Key k mods) (sKeymap (sArchState s))
   , Just Refl <- testEquality (C.cmdArgTypes cmd) PL.Nil = do
       -- First, we try to consult the keymap.  For now, we can only handle
       -- commands that take no arguments.  Later, once we develop a notion of
@@ -53,20 +53,20 @@ handleVtyEvent s0@(State s) evt
   | otherwise =
   case sUIMode s of
     M.SomeMiniBuffer (M.MiniBuffer oldMode) -> do
-      mbs <- MB.handleMinibufferEvent evt s (sMinibuffer s)
+      mbs <- MB.handleMinibufferEvent evt s (sMinibuffer (sArchState s))
       case mbs of
         MB.Canceled mb' ->
-          B.continue $! State s { sMinibuffer = mb'
-                               , sUIMode = M.SomeUIMode oldMode
-                               }
+          B.continue $! State s { sUIMode = M.SomeUIMode oldMode
+                                , sArchState = (sArchState s) { sMinibuffer = mb' }
+                                }
         MB.Completed mb' ->
-          B.continue $! State s { sMinibuffer = mb' }
+          B.continue $! State s { sArchState = (sArchState s) { sMinibuffer = mb' } }
     M.SomeUIMode M.BlockSelector -> do
-      bsel' <- BS.handleBlockSelectorEvent evt (sBlockSelector s)
-      B.continue $! State s { sBlockSelector = bsel' }
+      bsel' <- BS.handleBlockSelectorEvent evt (sBlockSelector (sArchState s))
+      B.continue $! State s { sArchState = (sArchState s) { sBlockSelector = bsel' } }
     M.SomeUIMode M.FunctionSelector -> do
-      fsel' <- FS.handleFunctionSelectorEvent evt (sFunctionSelector s)
-      B.continue $! State s { sFunctionSelector = fsel' }
+      fsel' <- FS.handleFunctionSelectorEvent evt (sFunctionSelector (sArchState s))
+      B.continue $! State s { sArchState = (sArchState s) { sFunctionSelector = fsel' } }
     M.SomeUIMode _m -> B.continue s0
 
 handleCustomEvent :: (A.Architecture arch s) => S arch s -> Events s -> B.EventM Names (B.Next (State s))
@@ -111,15 +111,15 @@ handleCustomEvent s0 evt =
         M.SomeUIMode mode -> B.continue $! State s0 { sUIMode = M.SomeMiniBuffer (M.MiniBuffer mode) }
 
     ViewBlock archNonce b
-      | Just Refl <- testEquality archNonce (sArch s0) ->
+      | Just Refl <- testEquality archNonce (sNonce (sArchState s0)) ->
         B.continue $! State s0 { sUIMode = M.SomeUIMode M.BlockViewer
-                              , sBlockViewer = BV.blockViewer b
+                               , sArchState = (sArchState s0) { sBlockViewer = BV.blockViewer b }
                               }
       | otherwise -> B.continue (State s0)
     FindBlockContaining archNonce addr ->
-      case sAnalysisResult s0 of
+      case sAnalysisResult (sArchState s0) of
         Just ares
-          | Just Refl <- testEquality (sArch s0) archNonce -> do
+          | Just Refl <- testEquality (sNonce (sArchState s0)) archNonce -> do
               liftIO (sEmitEvent s0 (LogDiagnostic (T.pack (printf "Finding block at address %s" (A.prettyAddress addr)))))
               case A.containingBlocks ares addr of
                 [b] -> do
@@ -130,16 +130,17 @@ handleCustomEvent s0 evt =
                   B.continue (State s0)
         _ -> B.continue (State s0)
     ListBlocks archNonce blocks
-      | Just Refl <- testEquality (sArch s0) archNonce -> do
+      | Just Refl <- testEquality (sNonce (sArchState s0)) archNonce -> do
           let callback b = sEmitEvent s0 (ViewBlock archNonce b)
-          B.continue $! State s0 { sBlockSelector = BS.blockSelector callback focusedListAttr blocks
-                                 , sUIMode = M.SomeUIMode M.BlockSelector
+          B.continue $! State s0 { sUIMode = M.SomeUIMode M.BlockSelector
+                                 , sArchState = (sArchState s0) { sBlockSelector = BS.blockSelector callback focusedListAttr blocks
+                                                                }
                                  }
        | otherwise -> B.continue (State s0)
 
     FindFunctionsContaining archNonce maddr
-      | Just Refl <- testEquality (sArch s0) archNonce ->
-        case sAnalysisResult s0 of
+      | Just Refl <- testEquality (sNonce (sArchState s0)) archNonce ->
+        case sAnalysisResult (sArchState s0) of
           Nothing -> B.continue $! State s0
           Just ares ->
             case maddr of
@@ -149,10 +150,11 @@ handleCustomEvent s0 evt =
       | otherwise -> B.continue $! State s0
 
     ListFunctions archNonce funcs
-      | Just Refl <- testEquality (sArch s0) archNonce -> do
+      | Just Refl <- testEquality (sNonce (sArchState s0)) archNonce -> do
           let callback f = sEmitEvent s0 (ViewFunction archNonce f)
-          B.continue $! State s0 { sFunctionSelector = FS.functionSelector callback focusedListAttr funcs
-                                 , sUIMode = M.SomeUIMode M.FunctionSelector
+          B.continue $! State s0 { sUIMode = M.SomeUIMode M.FunctionSelector
+                                 , sArchState = (sArchState s0) { sFunctionSelector = FS.functionSelector callback focusedListAttr funcs
+                                                                }
                                  }
       | otherwise -> B.continue (State s0)
 
@@ -168,34 +170,24 @@ stateFromAnalysisResult :: (A.Architecture arch s)
                         -> M.SomeUIMode
                         -> S arch s
 stateFromAnalysisResult s0 ares newDiags state uiMode =
-  S { sAnalysisResult = Just ares
-    , sFunctionSelector =
-      case testEquality (sArch s0) (A.archNonce ares) of
-        Just Refl -> sFunctionSelector s0
-        Nothing -> FS.functionSelector (const (return ())) focusedListAttr []
-    , sDiagnosticLog = sDiagnosticLog s0 <> newDiags
-    , sEchoArea = sEchoArea s0
+  S { sDiagnosticLog = sDiagnosticLog s0 <> newDiags
     , sUIMode = uiMode
-    , sInputFile = sInputFile s0
-    , sBlockViewer =
-      case testEquality (sArch s0) (A.archNonce ares) of
-        Nothing -> BV.emptyBlockViewer
-        Just Refl -> sBlockViewer s0
-    , sBlockSelector =
-      case testEquality (sArch s0) (A.archNonce ares) of
-        Just Refl -> sBlockSelector s0
-        Nothing -> BS.emptyBlockSelector
-    , sMinibuffer =
-      case testEquality (sArch s0) (A.archNonce ares) of
-        Just Refl -> sMinibuffer s0
-        Nothing -> MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
     , sAppState = state
     , sEmitEvent = sEmitEvent s0
     , sEventChannel = sEventChannel s0
     , sNonceGenerator = sNonceGenerator s0
-    , sKeymap =
-      case testEquality (sArch s0) (A.archNonce ares) of
-        Just Refl -> sKeymap s0
-        Nothing -> K.defaultKeymap (sEventChannel s0)
-    , sArch = A.archNonce ares
+    , sEchoArea = sEchoArea s0
+    , sInputFile = sInputFile s0
+    , sArchState =
+      case testEquality (A.archNonce ares) (sNonce (sArchState s0)) of
+        Just Refl -> (sArchState s0) { sAnalysisResult = Just ares }
+        Nothing ->
+          ArchState { sAnalysisResult = Just ares
+                    , sBlockSelector = BS.emptyBlockSelector
+                    , sBlockViewer = BV.emptyBlockViewer
+                    , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
+                    , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                    , sKeymap = K.defaultKeymap (sEventChannel s0)
+                    , sNonce = A.archNonce ares
+                    }
     }

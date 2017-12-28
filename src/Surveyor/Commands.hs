@@ -59,7 +59,7 @@ listFunctionsC customEventChan =
   C.Command "list-functions" doc PL.Nil PL.Nil callback
   where
     doc = "List all of the discovered functions"
-    callback = \st PL.Nil -> B.writeBChan customEventChan (FindFunctionsContaining (sArch st) Nothing)
+    callback = \st PL.Nil -> B.writeBChan customEventChan (FindFunctionsContaining (sNonce (sArchState st)) Nothing)
 
 findBlockC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.AddressType]
 findBlockC customEventChan =
@@ -69,7 +69,7 @@ findBlockC customEventChan =
     names = C.Const "address" PL.:< PL.Nil
     rep = AR.AddressTypeRepr PL.:< PL.Nil
     callback = \st (AR.AddressArgument addr PL.:< PL.Nil) ->
-      B.writeBChan customEventChan (FindBlockContaining (sArch st) addr)
+      B.writeBChan customEventChan (FindBlockContaining (sNonce (sArchState st)) addr)
 
 describeCommandC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.CommandType]
 describeCommandC customEventChan =
