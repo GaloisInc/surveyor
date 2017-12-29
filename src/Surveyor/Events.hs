@@ -27,8 +27,8 @@ data Events s where
 
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s
-  ListFunctions :: PN.Nonce s arch -> [A.Function arch s] -> Events s
-  ViewFunction :: PN.Nonce s arch -> A.Function arch s -> Events s
+  ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> Events s
+  ViewFunction :: PN.Nonce s arch -> A.FunctionHandle arch s -> Events s
 
   -- Block-related events
   FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> Events s

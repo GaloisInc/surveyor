@@ -19,14 +19,14 @@ import qualified Surveyor.Architecture as A
 import           Surveyor.Names ( Names(..) )
 
 data FunctionSelector arch s =
-  FunctionSelector { callback :: A.Function arch s -> IO ()
-                   , selector :: !(FL.FilterList Names T.Text (A.Function arch s))
+  FunctionSelector { callback :: A.FunctionHandle arch s -> IO ()
+                   , selector :: !(FL.FilterList Names T.Text (A.FunctionHandle arch s))
                    }
 
 functionSelector :: (A.Architecture arch s)
-                 => (A.Function arch s -> IO ())
+                 => (A.FunctionHandle arch s -> IO ())
                  -> B.AttrName
-                 -> [A.Function arch s]
+                 -> [A.FunctionHandle arch s]
                  -> FunctionSelector arch s
 functionSelector cb focAttr funcs =
   FunctionSelector { callback = cb
@@ -42,10 +42,10 @@ functionSelector cb focAttr funcs =
                                 , FL.flRenderEditorContent = renderEditorContent
                                 }
 
-funcToText :: (A.Architecture arch s) => A.Function arch s -> T.Text
-funcToText f = T.pack (printf "%s (%s)" (A.functionName f) (A.prettyAddress (A.functionAddress f)))
+funcToText :: (A.Architecture arch s) => A.FunctionHandle arch s -> T.Text
+funcToText f = T.pack (printf "%s (%s)" (A.fhName f) (A.prettyAddress (A.fhAddress f)))
 
-renderFuncItem :: (A.Architecture arch s) => B.AttrName -> Bool -> A.Function arch s -> B.Widget Names
+renderFuncItem :: (A.Architecture arch s) => B.AttrName -> Bool -> A.FunctionHandle arch s -> B.Widget Names
 renderFuncItem focAttr isFocused f =
   let xfrm = if isFocused then B.withAttr focAttr else id
   in xfrm (B.txt (funcToText f))
@@ -74,6 +74,6 @@ renderFunctionSelector :: (A.Architecture arch s) => FunctionSelector arch s -> 
 renderFunctionSelector fsel =
   FL.renderFilterList (const B.emptyWidget) True (selector fsel)
 
-matchesFunction :: SW.Matcher -> A.Function arch s -> Bool
+matchesFunction :: SW.Matcher -> A.FunctionHandle arch s -> Bool
 matchesFunction matcher f =
-  SW.matches matcher (A.functionName f)
+  SW.matches matcher (A.fhName f)

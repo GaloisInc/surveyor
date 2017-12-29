@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
@@ -15,7 +16,7 @@
 module Surveyor.Architecture (
   Architecture(..),
   Block(..),
-  Function(..),
+  FunctionHandle(..),
   SomeResult(..),
   mkPPC32Result,
   mkPPC64Result,
@@ -23,6 +24,7 @@ module Surveyor.Architecture (
   ) where
 
 import qualified Data.Map as M
+import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
@@ -65,17 +67,20 @@ class Architecture (arch :: *) (s :: *) where
   -- | Pretty print an address
   prettyAddress :: Address arch s -> T.Text
   prettyInstruction :: Instruction arch s -> T.Text
-  functions :: AnalysisResult arch s -> [Function arch s]
+  functions :: AnalysisResult arch s -> [FunctionHandle arch s]
+  opcode :: Instruction arch s -> Opcode arch s
+  operands :: Instruction arch s -> [Operand arch s]
+  boundValue :: Instruction arch s -> Maybe (Operand arch s)
 
 data Block arch s =
   Block { blockAddress :: !(Address arch s)
         , blockInstructions :: [(Address arch s, Instruction arch s)]
         }
 
-data Function arch s =
-  Function { functionAddress :: !(Address arch s)
-           , functionName :: T.Text
-           }
+data FunctionHandle arch s =
+  FunctionHandle { fhAddress :: !(Address arch s)
+                 , fhName :: T.Text
+                 }
 
 mkPPC32Result :: BinaryAnalysisResult s PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32
               -> SomeResult s
@@ -133,9 +138,9 @@ mcContainingBlocks toBlock bar addr = map toBlock (blocksContaining bar addr)
 mcFunctions :: (MM.MemWidth w)
             => (MM.MemAddr w -> Address arch s)
             -> BinaryAnalysisResult s i a w arch
-            -> [Function arch s]
+            -> [FunctionHandle arch s]
 mcFunctions toAddr bar =
-  [ Function (toAddr (MM.absoluteAddr (R.absoluteAddress addr))) textName
+  [ FunctionHandle (toAddr (MM.absoluteAddr (R.absoluteAddress addr))) textName
   | (addr, Some dfi) <- M.toList (R.biDiscoveryFunInfo (rBlockInfo bar))
   , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
   ]
@@ -173,16 +178,16 @@ instance Architecture Void s where
   containingBlocks (VoidAnalysisResult v) _ = absurd v
   functions (VoidAnalysisResult v) = absurd v
   prettyInstruction (VoidInstruction v) = absurd v
-
-data Some2 x where
-  Some2 :: !(x a b) -> Some2 x
+  opcode (VoidInstruction v) = absurd v
+  operands (VoidInstruction v) = absurd v
+  boundValue (VoidInstruction v) = absurd v
 
 instance Architecture PPC.PPC32 s where
   data AnalysisResult PPC.PPC32 s =
     PPC32AnalysisResult !(BinaryAnalysisResult s PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32)
   data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction ())
-  data Operand PPC.PPC32 s = PPC32Operand !(Some DPPC.Operand)
-  data Opcode PPC.PPC32 s = PPC32Opcode !(Some2 DPPC.Opcode)
+  data Operand PPC.PPC32 s = forall x . PPC32Operand !(DPPC.Operand x)
+  data Opcode PPC.PPC32 s = forall x y . PPC32Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC32 s = PPC32Address !(MM.MemAddr 32)
 
   summarizeResult (PPC32AnalysisResult bar) = mcSummarize bar
@@ -193,13 +198,20 @@ instance Architecture PPC.PPC32 s where
   containingBlocks (PPC32AnalysisResult bar) (PPC32Address addr) =
     mcContainingBlocks (toBlockPPC32 bar) bar addr
   functions (PPC32AnalysisResult bar) = mcFunctions PPC32Address bar
+  opcode (PPC32Instruction i) =
+    case PPC.toInst i of
+      DPPC.Instruction opc _ -> PPC32Opcode opc
+  operands (PPC32Instruction i) =
+    case PPC.toInst i of
+      DPPC.Instruction _ ops -> FC.toListFC PPC32Operand ops
+  boundValue _ = Nothing
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
     PPC64AnalysisResult !(BinaryAnalysisResult s PPC.Instruction (PPC.TargetAddress 64) 64 PPC.PPC64)
   data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction ())
-  data Operand PPC.PPC64 s = PPC64Operand !(Some DPPC.Operand)
-  data Opcode PPC.PPC64 s = PPC64Opcode !(Some2 DPPC.Opcode)
+  data Operand PPC.PPC64 s = forall x . PPC64Operand !(DPPC.Operand x)
+  data Opcode PPC.PPC64 s = forall x y . PPC64Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC64 s = PPC64Address !(MM.MemAddr 64)
 
   summarizeResult (PPC64AnalysisResult bar) = mcSummarize bar
@@ -210,6 +222,13 @@ instance Architecture PPC.PPC64 s where
   containingBlocks (PPC64AnalysisResult bar) (PPC64Address addr) =
     mcContainingBlocks (toBlockPPC64 bar) bar addr
   functions (PPC64AnalysisResult bar) = mcFunctions PPC64Address bar
+  opcode (PPC64Instruction i) =
+    case PPC.toInst i of
+      DPPC.Instruction opc _ -> PPC64Opcode opc
+  operands (PPC64Instruction i) =
+    case PPC.toInst i of
+      DPPC.Instruction _ ops -> FC.toListFC PPC64Operand ops
+  boundValue _ = Nothing
 
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
@@ -223,4 +242,7 @@ instance Architecture X86.X86_64 s where
   archNonce (X86AnalysisResult bar) = mcNonce bar
   parseAddress t = X86Address <$> mcParseAddress64 t
   prettyAddress (X86Address addr) = mcPrettyAddress addr
+  opcode (X86Instruction i) = X86Opcode (X86.instrOpcode i)
+  operands (X86Instruction i) = map (uncurry X86Operand) (X86.instrOperands i)
+  boundValue _ = Nothing
 --  containingBlocks (X86AnalysisResult bar) (X86Address addr) = mcContainingBlocks bar addr
