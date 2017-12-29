@@ -123,17 +123,11 @@ data ArchState arch s =
 lNonce :: L.Lens' (S arch s) (NG.Nonce s arch)
 lNonce = lArchState . GL.field @"sNonce"
 
-lAnalysisResult' :: L.Lens' (ArchState arch s) (Maybe (A.AnalysisResult arch s))
-lAnalysisResult' f a = fmap (\ar' -> a { sAnalysisResult = ar' }) (f (sAnalysisResult a))
-
 lAnalysisResult :: L.Lens' (S arch s) (Maybe (A.AnalysisResult arch s))
-lAnalysisResult = lArchState . lAnalysisResult'
-
-lMinibuffer' :: L.Lens' (ArchState arch s) (MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
-lMinibuffer' f a = fmap (\mb' -> a { sMinibuffer = mb' }) (f (sMinibuffer a))
+lAnalysisResult = lArchState . GL.field @"sAnalysisResult"
 
 lMinibuffer :: L.Lens' (S arch s) (MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
-lMinibuffer = lArchState . lMinibuffer'
+lMinibuffer = lArchState . GL.field @"sMinibuffer"
 
 lFunctionSelector :: L.Lens' (S arch s) (FS.FunctionSelector arch s)
 lFunctionSelector = lArchState . GL.field @"sFunctionSelector"
@@ -144,11 +138,8 @@ lBlockSelector = lArchState . GL.field @"sBlockSelector"
 lBlockViewer :: L.Lens' (S arch s) (BV.BlockViewer arch s)
 lBlockViewer = lArchState . GL.field @"sBlockViewer"
 
-lKeymap' :: L.Lens' (ArchState arch s) (Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
-lKeymap' f a = fmap (\km' -> a { sKeymap = km' }) (f (sKeymap a))
-
 lKeymap :: L.Lens' (S arch s) (Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
-lKeymap = lArchState . lKeymap'
+lKeymap = lArchState . GL.field @"sKeymap"
 
 data AppState = Loading
               | Ready
