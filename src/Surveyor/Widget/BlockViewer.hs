@@ -8,6 +8,7 @@ module Surveyor.Widget.BlockViewer (
 
 import qualified Brick as B
 import qualified Brick.Widgets.Border as B
+import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 

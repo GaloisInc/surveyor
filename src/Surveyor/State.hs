@@ -1,15 +1,36 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 module Surveyor.State (
   State(..),
   S(..),
   ArchState(..),
-  AppState(..)
+  AppState(..),
+  -- * Lenses
+  lInputFile,
+  lDiagnosticLog,
+  lEchoArea,
+  lUIMode,
+  lAppState,
+  lNonceGenerator,
+  lArchState,
+  lNonce,
+  lAnalysisResult,
+  lMinibuffer,
+  lFunctionSelector,
+  lBlockSelector,
+  lBlockViewer,
+  lKeymap
   ) where
 
+import           GHC.Generics ( Generic )
+
 import qualified Brick.BChan as B
+import qualified Control.Lens as L
+import qualified Data.Generics.Product as GL
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -54,6 +75,28 @@ data S arch s =
     -- equality.
     , sArchState :: !(ArchState arch s)
     }
+  deriving (Generic)
+
+lInputFile :: L.Lens' (S arch s) (Maybe FilePath)
+lInputFile = GL.field @"sInputFile"
+
+lDiagnosticLog :: L.Lens' (S arch s) (Seq.Seq T.Text)
+lDiagnosticLog = GL.field @"sDiagnosticLog"
+
+lEchoArea :: L.Lens' (S arch s) EA.EchoArea
+lEchoArea = GL.field @"sEchoArea"
+
+lUIMode :: L.Lens' (S arch s) SomeUIMode
+lUIMode = GL.field @"sUIMode"
+
+lAppState :: L.Lens' (S arch s) AppState
+lAppState = GL.field @"sAppState"
+
+lNonceGenerator :: L.Lens' (S arch s) (NG.NonceGenerator IO s)
+lNonceGenerator = GL.field @"sNonceGenerator"
+
+lArchState :: L.Lens' (S arch s) (ArchState arch s)
+lArchState = GL.field @"sArchState"
 
 -- | A sub-component of the state dependent on the arch type variable
 --
@@ -75,8 +118,37 @@ data ArchState arch s =
             , sBlockViewer :: !(BV.BlockViewer arch s)
             , sKeymap :: !(Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
             }
+  deriving (Generic)
 
+lNonce :: L.Lens' (S arch s) (NG.Nonce s arch)
+lNonce = lArchState . GL.field @"sNonce"
 
+lAnalysisResult' :: L.Lens' (ArchState arch s) (Maybe (A.AnalysisResult arch s))
+lAnalysisResult' f a = fmap (\ar' -> a { sAnalysisResult = ar' }) (f (sAnalysisResult a))
+
+lAnalysisResult :: L.Lens' (S arch s) (Maybe (A.AnalysisResult arch s))
+lAnalysisResult = lArchState . lAnalysisResult'
+
+lMinibuffer' :: L.Lens' (ArchState arch s) (MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
+lMinibuffer' f a = fmap (\mb' -> a { sMinibuffer = mb' }) (f (sMinibuffer a))
+
+lMinibuffer :: L.Lens' (S arch s) (MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
+lMinibuffer = lArchState . lMinibuffer'
+
+lFunctionSelector :: L.Lens' (S arch s) (FS.FunctionSelector arch s)
+lFunctionSelector = lArchState . GL.field @"sFunctionSelector"
+
+lBlockSelector :: L.Lens' (S arch s) (BS.BlockSelector arch s)
+lBlockSelector = lArchState . GL.field @"sBlockSelector"
+
+lBlockViewer :: L.Lens' (S arch s) (BV.BlockViewer arch s)
+lBlockViewer = lArchState . GL.field @"sBlockViewer"
+
+lKeymap' :: L.Lens' (ArchState arch s) (Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
+lKeymap' f a = fmap (\km' -> a { sKeymap = km' }) (f (sKeymap a))
+
+lKeymap :: L.Lens' (S arch s) (Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
+lKeymap = lArchState . lKeymap'
 
 data AppState = Loading
               | Ready
