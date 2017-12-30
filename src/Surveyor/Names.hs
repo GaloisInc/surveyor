@@ -12,4 +12,5 @@ data Names = DiagnosticView
            | BlockSelectList
            | FunctionSelectEditor
            | FunctionSelectList
+           | BlockViewerList
   deriving (Eq, Ord, Show)

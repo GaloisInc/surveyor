@@ -67,6 +67,10 @@ handleVtyEvent s0@(State s) evt
       bsel' <- BS.handleBlockSelectorEvent evt (s ^. lBlockSelector)
       let s' = s & lBlockSelector .~ bsel'
       B.continue $! State s'
+    M.SomeUIMode M.BlockViewer -> do
+      bv' <- BV.handleBlockViewerEvent evt (s ^. lBlockViewer)
+      let s' = s & lBlockViewer .~ bv'
+      B.continue $! (State s')
     M.SomeUIMode M.FunctionSelector -> do
       fsel' <- FS.handleFunctionSelectorEvent evt (s ^. lFunctionSelector)
       let s' = s & lFunctionSelector .~ fsel'

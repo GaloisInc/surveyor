@@ -33,6 +33,7 @@ import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.Prettyprint.Doc as PP
 import           Data.Word ( Word32, Word64 )
 import           Data.Void
+import qualified Text.PrettyPrint.HughesPJClass as HPJ
 import           Text.Read ( readMaybe )
 
 import qualified Data.Macaw.Discovery as MD
@@ -67,6 +68,9 @@ class Architecture (arch :: *) (s :: *) where
   -- | Pretty print an address
   prettyAddress :: Address arch s -> T.Text
   prettyInstruction :: Instruction arch s -> T.Text
+  prettyOperand :: Address arch s -> Operand arch s -> T.Text
+  prettyOpcode :: Opcode arch s -> T.Text
+
   functions :: AnalysisResult arch s -> [FunctionHandle arch s]
   opcode :: Instruction arch s -> Opcode arch s
   operands :: Instruction arch s -> [Operand arch s]
@@ -165,6 +169,45 @@ toBlockPPC64 bar cb =
         , blockInstructions = map toInstPPC64 (R.instructionAddresses (rISA bar) (rMemory bar) cb)
         }
 
+ppcPrettyOperand :: (MM.MemWidth w) => MM.MemAddr w -> DPPC.Operand tp -> T.Text
+ppcPrettyOperand _addr op =
+  case op of
+    DPPC.Abscondbrtarget off -> T.pack (show (HPJ.pPrint off))
+    DPPC.Absdirectbrtarget off -> T.pack (show (HPJ.pPrint off))
+    DPPC.Condbrtarget off -> T.pack (show (HPJ.pPrint off))
+    DPPC.Directbrtarget off -> T.pack (show (HPJ.pPrint off))
+    DPPC.Calltarget off -> T.pack (show (HPJ.pPrint off))
+    DPPC.Abscalltarget off -> T.pack (show (HPJ.pPrint off))
+    DPPC.Crbitm cr -> T.pack (show (HPJ.pPrint cr))
+    DPPC.Crbitrc cr -> T.pack (show (HPJ.pPrint cr))
+    DPPC.Crrc cr -> T.pack (show (HPJ.pPrint cr))
+    DPPC.Fprc fp -> T.pack (show (HPJ.pPrint fp))
+    DPPC.Gprc gp -> T.pack (show (HPJ.pPrint gp))
+    DPPC.Gprc_nor0 gp -> T.pack (show (HPJ.pPrint gp))
+    DPPC.I1imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.I32imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.S16imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.S16imm64 i -> T.pack (show (HPJ.pPrint i))
+    DPPC.S17imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.S17imm64 i -> T.pack (show (HPJ.pPrint i))
+    DPPC.S5imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U1imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U2imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U4imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U5imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U6imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U7imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U8imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U10imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U16imm i -> T.pack (show (HPJ.pPrint i))
+    DPPC.U16imm64 i -> T.pack (show (HPJ.pPrint i))
+    DPPC.Memrr m -> T.pack (show (HPJ.pPrint m))
+    DPPC.Memri m -> T.pack (show (HPJ.pPrint m))
+    DPPC.Memrix m -> T.pack (show (HPJ.pPrint m))
+    DPPC.Memrix16 m -> T.pack (show (HPJ.pPrint m))
+    DPPC.Vrrc vr -> T.pack (show (HPJ.pPrint vr))
+    DPPC.Vsrc vr -> T.pack (show (HPJ.pPrint vr))
+
 instance Architecture Void s where
   data AnalysisResult Void s = VoidAnalysisResult Void
   data Instruction Void s = VoidInstruction Void
@@ -181,6 +224,8 @@ instance Architecture Void s where
   opcode (VoidInstruction v) = absurd v
   operands (VoidInstruction v) = absurd v
   boundValue (VoidInstruction v) = absurd v
+  prettyOperand _ (VoidOperand v) = absurd v
+  prettyOpcode (VoidOpcode v) = absurd v
 
 instance Architecture PPC.PPC32 s where
   data AnalysisResult PPC.PPC32 s =
@@ -205,6 +250,9 @@ instance Architecture PPC.PPC32 s where
     case PPC.toInst i of
       DPPC.Instruction _ ops -> FC.toListFC PPC32Operand ops
   boundValue _ = Nothing
+  prettyOperand (PPC32Address addr) (PPC32Operand op) =
+    ppcPrettyOperand addr op
+  prettyOpcode (PPC32Opcode opc) = T.pack (show opc)
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
@@ -229,6 +277,9 @@ instance Architecture PPC.PPC64 s where
     case PPC.toInst i of
       DPPC.Instruction _ ops -> FC.toListFC PPC64Operand ops
   boundValue _ = Nothing
+  prettyOperand (PPC64Address addr) (PPC64Operand op) =
+    ppcPrettyOperand addr op
+  prettyOpcode (PPC64Opcode opc) = T.pack (show opc)
 
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
