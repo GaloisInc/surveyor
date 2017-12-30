@@ -64,8 +64,11 @@ library
                        renovate-x86,
                        flexdis86,
                        macaw-ppc,
+                       semmc,
                        semmc-ppc,
-                       dismantle-ppc
+                       dismantle-tablegen,
+                       dismantle-ppc,
+                       crucible
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options: -Wall

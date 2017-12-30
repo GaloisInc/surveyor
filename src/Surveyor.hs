@@ -111,7 +111,7 @@ drawUIMode binFileName binfo s uim =
     Summary -> drawAppShell s (drawSummary binFileName binfo)
     FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector (sArchState s)))
     BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector (sArchState s)))
-    BlockViewer -> drawAppShell s (BV.renderBlockViewer (sBlockViewer (sArchState s)))
+    BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (sBlockViewer (sArchState s)))
 
 appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =

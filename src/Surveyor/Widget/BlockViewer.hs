@@ -23,9 +23,10 @@ import           GHC.Generics ( Generic )
 import qualified Brick as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
-import           Control.Lens ( Lens', (^.), (&), (.~), (%~), _3, ix )
+import           Control.Lens ( Lens', (^.), (&), (.~), (%~), _2, _3, ix, (^?) )
 import qualified Data.Generics.Product as GL
 import qualified Data.List as L
+import           Data.Maybe ( fromMaybe )
 import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
@@ -95,9 +96,14 @@ handleBlockViewerEvent evt bv =
         Just i -> return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorNext
     _ -> return bv
 
-renderBlockViewer :: (A.Architecture arch s) => BlockViewer arch s -> B.Widget Names
-renderBlockViewer bv =
-  B.borderWithLabel header (B.renderList renderListItem False (instructionList bv))
+renderBlockViewer :: (A.Architecture arch s)
+                  => A.AnalysisResult arch s
+                  -> BlockViewer arch s
+                  -> B.Widget Names
+renderBlockViewer ares bv =
+  B.borderWithLabel header $ B.vBox [ B.renderList renderListItem False (instructionList bv)
+                                    , semanticsDisplay
+                                    ]
   where
     renderListItem isFocused (addr, _i, os) =
       B.hBox [ B.padRight (B.Pad 2) (B.txt (A.prettyAddress addr))
@@ -107,6 +113,11 @@ renderBlockViewer bv =
       case bvBlock bv of
         Nothing -> B.txt "No Block"
         Just b -> B.str (printf "Basic Block %s" (A.prettyAddress (A.blockAddress b)))
+    semanticsDisplay = fromMaybe B.emptyWidget $ do
+      selectedIdx <- bv ^. instructionListL . B.listSelectedL
+      insn <- bv ^? instructionListL . B.listElementsL . ix selectedIdx . _2
+      f <- A.genericSemantics ares insn
+      return (B.txtWrap (A.prettyParameterizedFormula f))
 
 operandSelector :: (A.Architecture arch s) => A.Address arch s -> A.Instruction arch s -> OperandSelector arch s
 operandSelector addr i =
