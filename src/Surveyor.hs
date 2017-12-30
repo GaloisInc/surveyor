@@ -10,9 +10,9 @@ module Surveyor ( surveyor ) where
 import qualified Brick as B
 import qualified Brick.BChan as B
 import qualified Brick.Widgets.Border as B
+import qualified Brick.Widgets.List as B
 import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
-import           Data.Monoid
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -120,8 +120,9 @@ appChooseCursor _ cursors =
     _ -> Nothing
 
 appAttrMap :: State s -> B.AttrMap
-appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, B.bg V.blue <> B.fg V.white)
-                                   , (statusBarAttr, B.bg V.black <> B.fg V.white)
+appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
+                                   , (statusBarAttr, V.black `B.on` V.white)
+                                   , (B.listSelectedFocusedAttr, V.blue `B.on` V.white)
                                    ]
 
 appStartEvent :: State s -> B.EventM Names (State s)
