@@ -9,10 +9,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Surveyor.Architecture.LLVM (
-  LLVM,
-  mkLLVMResult
-  ) where
+module Surveyor.Architecture.LLVM ( mkLLVMResult ) where
 
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
