@@ -26,7 +26,7 @@ import qualified Surveyor.Commands as C
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Handlers ( appHandleEvent )
 import           Surveyor.Keymap ( defaultKeymap )
-import           Surveyor.Loader ( asynchronouslyLoad )
+import           Surveyor.Loader ( AsyncLoader, asynchronouslyLoad )
 import           Surveyor.Mode
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
@@ -141,17 +141,18 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  _ <- T.traverse (asynchronouslyLoad ng customEventChan) mExePath
-  s0 <- emptyState mExePath ng customEventChan
+  mloader <- T.traverse (asynchronouslyLoad ng customEventChan) mExePath
+  s0 <- emptyState mExePath mloader ng customEventChan
   let initialState = State s0
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
 
 
-emptyState :: Maybe FilePath -> PN.NonceGenerator IO s -> B.BChan (Events s) -> IO (S Void s)
-emptyState mfp ng customEventChan = do
+emptyState :: Maybe FilePath -> Maybe AsyncLoader -> PN.NonceGenerator IO s -> B.BChan (Events s) -> IO (S Void s)
+emptyState mfp mloader ng customEventChan = do
   n0 <- PN.freshNonce ng
   return S { sInputFile = mfp
+           , sLoader = mloader
            , sDiagnosticLog = Seq.empty
            , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
            , sUIMode = SomeUIMode Summary

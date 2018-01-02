@@ -39,6 +39,7 @@ import           Brick.Keymap ( Keymap )
 import qualified Surveyor.Arguments as AR
 import qualified Surveyor.Architecture as A
 import           Surveyor.Events ( Events )
+import           Surveyor.Loader ( AsyncLoader )
 import           Surveyor.Mode
 import           Surveyor.Names ( Names )
 import qualified Surveyor.Widget.BlockSelector as BS
@@ -52,6 +53,7 @@ data State s where
 
 data S arch s =
   S { sInputFile :: Maybe FilePath
+    , sLoader :: Maybe AsyncLoader
     , sDiagnosticLog :: !(Seq.Seq T.Text)
     -- ^ Diagnostics collected over time (displayed in the diagnostic view)
     , sEchoArea :: !EA.EchoArea

@@ -7,6 +7,7 @@ module Surveyor.Handlers (
 import qualified Brick as B
 import           Control.Lens ( (&), (^.), (.~), (%~) )
 import           Control.Monad.IO.Class ( liftIO )
+import qualified Data.Foldable as F
 import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
@@ -23,6 +24,7 @@ import           Surveyor.Attributes ( focusedListAttr )
 import qualified Surveyor.Commands as C
 import           Surveyor.Events
 import qualified Surveyor.Keymap as K
+import           Surveyor.Loader ( cancelLoader )
 import qualified Surveyor.Mode as M
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
@@ -99,6 +101,10 @@ handleCustomEvent s0 evt =
       let newDiags = map (\d -> T.pack (printf "ELF Loading error: %s" (show d))) errs
       let s1 = s0 & lDiagnosticLog %~ (<> Seq.fromList newDiags)
       B.continue $! State s1
+    ErrorLoadingLLVM s -> do
+      let t = T.pack (printf "Error loading LLVM bitcode: %s" s)
+      let s1 = s0 & lDiagnosticLog %~ (Seq.|> t)
+      B.continue $! State s1
     ShowSummary -> B.continue $! State (s0 & lUIMode .~ M.SomeUIMode M.Summary)
     ShowDiagnostics -> B.continue $! State (s0 & lUIMode .~ M.SomeUIMode M.Diags)
     DescribeCommand (Some cmd) -> do
@@ -168,7 +174,9 @@ handleCustomEvent s0 evt =
 
     LogDiagnostic t ->
       B.continue $! State (s0 & lDiagnosticLog %~ (Seq.|> t))
-    Exit -> B.halt (State s0)
+    Exit -> do
+      liftIO (F.traverse_ cancelLoader (sLoader s0))
+      B.halt (State s0)
 
 stateFromAnalysisResult :: (A.Architecture arch s)
                         => S arch0 s
@@ -186,6 +194,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
     , sNonceGenerator = sNonceGenerator s0
     , sEchoArea = sEchoArea s0
     , sInputFile = sInputFile s0
+    , sLoader = sLoader s0
     , sArchState =
       case testEquality (A.archNonce ares) (s0 ^. lNonce) of
         Just Refl -> (sArchState s0) { sAnalysisResult = Just ares }

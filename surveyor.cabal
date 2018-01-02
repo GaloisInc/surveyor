@@ -49,6 +49,7 @@ library
                        bytestring,
                        text,
                        vector,
+                       filepath,
                        prettyprinter,
                        pretty,
                        lens >= 4.15 && < 5,

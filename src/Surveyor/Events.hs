@@ -21,6 +21,7 @@ data Events s where
   ErrorLoadingELFHeader :: Int64 -> String -> Events s
   ErrorLoadingELF :: (Eq (E.ElfWordType n), Num (E.ElfWordType n), Show (E.ElfWordType n))
                   => [E.ElfParseError n] -> Events s
+  ErrorLoadingLLVM :: String -> Events s
   AnalysisFailure :: X.SomeException -> Events s
   AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
   AnalysisProgress :: A.SomeResult s -> Events s

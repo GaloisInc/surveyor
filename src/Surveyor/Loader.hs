@@ -1,21 +1,28 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Loader (
+  AsyncLoader,
+  cancelLoader,
   asynchronouslyLoad,
+  asynchronouslyLoadElf,
+  asynchronouslyLoadLLVM,
   loadElf
   ) where
 
 import qualified Brick.BChan as B
 import qualified Control.Concurrent.Async as A
+import qualified Control.Concurrent.MVar as C
 import qualified Data.ByteString as BS
 import qualified Data.ElfEdit as E
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Proxy ( Proxy(..) )
+import           System.FilePath ( takeExtension)
 
 import qualified SemMC.Architecture.PPC32.Opcodes as PPC32
 import qualified SemMC.Architecture.PPC64.Opcodes as PPC64
 
+import qualified Data.LLVM.BitCode as LL
 import qualified Data.Macaw.Memory.ElfLoader as MM
 import qualified Renovate as R
 import qualified Renovate.Arch.X86_64 as X86
@@ -30,13 +37,54 @@ import qualified Surveyor.Loader.PPCConfig as LP
 import Data.Macaw.PPC.PPCReg ()
 import Data.Macaw.PPC.Arch ()
 
+data AsyncLoader =
+  AsyncLoader { errorCatcher :: A.Async ()
+              , workerThread :: A.Async ()
+              }
+
+cancelLoader :: AsyncLoader -> IO ()
+cancelLoader al = do
+  A.cancel (errorCatcher al)
+  A.cancel (workerThread al)
+
+-- | Try to load the given file, attempting to determine its type based on the
+-- filename
+asynchronouslyLoad :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoad ng customEventChan path
+  | takeExtension path == ".bc" = asynchronouslyLoadLLVM ng customEventChan path
+  | otherwise = asynchronouslyLoadElf ng customEventChan path
+
+asynchronouslyLoadLLVM :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadLLVM ng customEventChan bcPath = do
+  mv <- C.newEmptyMVar
+  errThread <- A.async $ do
+    worker <- A.async $ do
+      bs <- BS.readFile bcPath
+      em <- LL.parseBitCode bs
+      case em of
+        Left err ->
+          B.writeBChan customEventChan (ErrorLoadingLLVM (LL.formatError err))
+        Right m -> do
+          nonce <- NG.freshNonce ng
+          B.writeBChan customEventChan (AnalysisFinished (A.mkLLVMResult nonce m) [])
+    C.putMVar mv worker
+    eres <- A.waitCatch worker
+    case eres of
+      Right () -> return ()
+      Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
+  worker <- C.takeMVar mv
+  return AsyncLoader { errorCatcher = errThread
+                     , workerThread = worker
+                     }
+
 -- | Start a thread to load an input file in the background
 --
 -- The thread sends the result of loading to the main thread through the
 -- provided event channel
-asynchronouslyLoad :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO ()
-asynchronouslyLoad ng customEventChan exePath = do
-  _thread <- A.async $ do
+asynchronouslyLoadElf :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadElf ng customEventChan exePath = do
+  mv <- C.newEmptyMVar
+  thread <- A.async $ do
     -- We spawn off a second worker so that we can catch any exceptions it
     -- throws without blocking the caller.
     worker <- A.async $ do
@@ -48,11 +96,15 @@ asynchronouslyLoad ng customEventChan exePath = do
         E.Elf64Res [] e64 -> loadElf ng customEventChan (E.Elf64 e64)
         E.Elf32Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
         E.Elf64Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
+    C.putMVar mv worker
     eres <- A.waitCatch worker
     case eres of
       Right () -> return ()
       Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
-  return ()
+  worker <- C.takeMVar mv
+  return AsyncLoader { errorCatcher = thread
+                     , workerThread = worker
+                     }
 
 -- | We generate one nonce at the beginning of a single load and re-use it
 -- across all of the streamed results for the same executable.  We need to
