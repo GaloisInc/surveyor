@@ -10,6 +10,9 @@ module Surveyor.Commands (
   listFunctionsC,
   describeCommandC,
   minibufferC,
+  loadFileC,
+  loadLLVMC,
+  loadELFC,
   allCommands
   ) where
 
@@ -31,6 +34,9 @@ allCommands customEventChan =
   , Some (findBlockC customEventChan)
   , Some (listFunctionsC customEventChan)
   , Some (describeCommandC customEventChan)
+  , Some (loadFileC customEventChan)
+  , Some (loadELFC customEventChan)
+  , Some (loadLLVMC customEventChan)
   ]
 
 exitC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[]
@@ -89,3 +95,33 @@ minibufferC customEventChan =
   where
     doc = "Open the minibuffer"
     callback = \_ PL.Nil -> B.writeBChan customEventChan OpenMinibuffer
+
+loadFileC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.FilePathType]
+loadFileC customEventChan =
+  C.Command "load-file" doc names rep callback
+  where
+    doc = "Load a file, attempting to determine its type automatically"
+    names = C.Const "file-name" PL.:< PL.Nil
+    rep = AR.FilePathTypeRepr PL.:< PL.Nil
+    callback = \_ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
+      B.writeBChan customEventChan (LoadFile filepath)
+
+loadELFC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.FilePathType]
+loadELFC customEventChan =
+  C.Command "load-elf" doc names rep callback
+  where
+    doc = "Load an ELF file"
+    names = C.Const "file-name" PL.:< PL.Nil
+    rep = AR.FilePathTypeRepr PL.:< PL.Nil
+    callback = \_ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
+      B.writeBChan customEventChan (LoadELF filepath)
+
+loadLLVMC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.FilePathType]
+loadLLVMC customEventChan =
+  C.Command "load-llvm" doc names rep callback
+  where
+    doc = "Load an LLVM bitcode file"
+    names = C.Const "file-name" PL.:< PL.Nil
+    rep = AR.FilePathTypeRepr PL.:< PL.Nil
+    callback = \_ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
+      B.writeBChan customEventChan (LoadLLVM filepath)

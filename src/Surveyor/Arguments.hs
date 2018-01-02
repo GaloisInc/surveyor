@@ -13,6 +13,7 @@ module Surveyor.Arguments (
   AddressType,
   StringType,
   CommandType,
+  FilePathType,
   showRepr,
   parseArgument
   ) where
@@ -35,12 +36,14 @@ data Type where
   IntType :: Type
   WordType :: Type
   CommandType :: Type
+  FilePathType :: Type
 
 type StringType = 'StringType
 type AddressType = 'AddressType
 type IntType = 'IntType
 type WordType = 'WordType
 type CommandType = 'CommandType
+type FilePathType = 'FilePathType
 
 data TypeRepr tp where
   CommandTypeRepr :: TypeRepr CommandType
@@ -48,6 +51,7 @@ data TypeRepr tp where
   AddressTypeRepr :: TypeRepr AddressType
   IntTypeRepr :: TypeRepr IntType
   WordTypeRepr :: TypeRepr WordType
+  FilePathTypeRepr :: TypeRepr FilePathType
 
 instance TestEquality TypeRepr where
   testEquality CommandTypeRepr CommandTypeRepr = Just Refl
@@ -55,6 +59,7 @@ instance TestEquality TypeRepr where
   testEquality AddressTypeRepr AddressTypeRepr = Just Refl
   testEquality IntTypeRepr IntTypeRepr = Just Refl
   testEquality WordTypeRepr WordTypeRepr = Just Refl
+  testEquality FilePathTypeRepr FilePathTypeRepr = Just Refl
   testEquality _ _ = Nothing
 
 data Argument arch st s tp where
@@ -63,6 +68,7 @@ data Argument arch st s tp where
   AddressArgument :: A.Address arch s -> Argument arch st s AddressType
   IntArgument :: Integer -> Argument arch st s IntType
   WordArgument :: Natural -> Argument arch st s WordType
+  FilePathArgument :: FilePath -> Argument arch st s FilePathType
 
 parseArgument :: (A.Architecture arch s, Z.GenericTextZipper t)
               => [Some (C.Command st (Argument arch st s) TypeRepr)]
@@ -80,6 +86,7 @@ parseArgument cmds =
       CommandTypeRepr ->
         let t = T.pack txt
         in CommandArgument <$> M.lookup t cmdIndex
+      FilePathTypeRepr -> Just (FilePathArgument txt)
 
 showRepr :: TypeRepr tp -> T.Text
 showRepr r =
@@ -89,3 +96,4 @@ showRepr r =
     IntTypeRepr -> "Int"
     WordTypeRepr -> "Word"
     CommandTypeRepr -> "Command"
+    FilePathTypeRepr -> "FilePath"

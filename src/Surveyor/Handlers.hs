@@ -24,7 +24,7 @@ import           Surveyor.Attributes ( focusedListAttr )
 import qualified Surveyor.Commands as C
 import           Surveyor.Events
 import qualified Surveyor.Keymap as K
-import           Surveyor.Loader ( cancelLoader )
+import qualified Surveyor.Loader as SL
 import qualified Surveyor.Mode as M
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
@@ -105,6 +105,24 @@ handleCustomEvent s0 evt =
       let t = T.pack (printf "Error loading LLVM bitcode: %s" s)
       let s1 = s0 & lDiagnosticLog %~ (Seq.|> t)
       B.continue $! State s1
+    LoadFile filename -> do
+      liftIO (F.traverse_ SL.cancelLoader (sLoader s0))
+      loader <- liftIO $ SL.asynchronouslyLoad (sNonceGenerator s0) (sEventChannel s0) filename
+      let s1 = s0 & lLoader .~ Just loader
+                  & lInputFile .~ Just filename
+      B.continue $! State s1
+    LoadELF filename -> do
+      liftIO (F.traverse_ SL.cancelLoader (sLoader s0))
+      loader <- liftIO $ SL.asynchronouslyLoadElf (sNonceGenerator s0) (sEventChannel s0) filename
+      let s1 = s0 & lLoader .~ Just loader
+                  & lInputFile .~ Just filename
+      B.continue $! State s1
+    LoadLLVM filename -> do
+      liftIO (F.traverse_ SL.cancelLoader (sLoader s0))
+      loader <- liftIO $ SL.asynchronouslyLoadLLVM (sNonceGenerator s0) (sEventChannel s0) filename
+      let s1 = s0 & lLoader .~ Just loader
+                  & lInputFile .~ Just filename
+      B.continue $! State s1
     ShowSummary -> B.continue $! State (s0 & lUIMode .~ M.SomeUIMode M.Summary)
     ShowDiagnostics -> B.continue $! State (s0 & lUIMode .~ M.SomeUIMode M.Diags)
     DescribeCommand (Some cmd) -> do
@@ -175,7 +193,7 @@ handleCustomEvent s0 evt =
     LogDiagnostic t ->
       B.continue $! State (s0 & lDiagnosticLog %~ (Seq.|> t))
     Exit -> do
-      liftIO (F.traverse_ cancelLoader (sLoader s0))
+      liftIO (F.traverse_ SL.cancelLoader (sLoader s0))
       B.halt (State s0)
 
 stateFromAnalysisResult :: (A.Architecture arch s)

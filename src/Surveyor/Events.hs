@@ -26,6 +26,11 @@ data Events s where
   AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
   AnalysisProgress :: A.SomeResult s -> Events s
 
+  LoadELF :: FilePath -> Events s
+  LoadLLVM :: FilePath -> Events s
+  -- | Attempt to load a file by detecting its type automatically
+  LoadFile :: FilePath -> Events s
+
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s
   ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> Events s

@@ -11,6 +11,7 @@ module Surveyor.State (
   AppState(..),
   -- * Lenses
   lInputFile,
+  lLoader,
   lDiagnosticLog,
   lEchoArea,
   lUIMode,
@@ -96,6 +97,9 @@ lAppState = GL.field @"sAppState"
 
 lNonceGenerator :: L.Lens' (S arch s) (NG.NonceGenerator IO s)
 lNonceGenerator = GL.field @"sNonceGenerator"
+
+lLoader :: L.Lens' (S arch s) (Maybe AsyncLoader)
+lLoader = GL.field @"sLoader"
 
 lArchState :: L.Lens' (S arch s) (ArchState arch s)
 lArchState = GL.field @"sArchState"

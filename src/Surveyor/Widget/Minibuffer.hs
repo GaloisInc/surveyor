@@ -31,6 +31,8 @@ completeArgument cmds =
       AddressTypeRepr -> return V.empty
       IntTypeRepr -> return V.empty
       WordTypeRepr -> return V.empty
+      -- FIXME: We can actually do file path completion
+      FilePathTypeRepr -> return V.empty
       CommandTypeRepr ->
         case SW.matcher (Z.toList t) of
           Nothing -> return V.empty
