@@ -13,7 +13,9 @@ module Surveyor.Architecture.MC (
   ) where
 
 import qualified Data.Functor.Const as C
+import           Data.Int ( Int16, Int64 )
 import qualified Data.Map as M
+import           Data.Monoid ( (<>) )
 import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as NG
@@ -24,6 +26,7 @@ import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.Prettyprint.Doc as PP
 import           Data.Word ( Word32, Word64 )
 import           Data.Void
+import           Numeric ( showHex )
 import qualified Text.PrettyPrint.HughesPJClass as HPJ
 import           Text.Read ( readMaybe )
 
@@ -102,6 +105,18 @@ mcFunctions toAddr bar =
   , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
   ]
 
+mcFunctionBlocks :: (R.ConcreteBlock i w -> b)
+                 -> BinaryAnalysisResult s o i a w arch
+                 -> R.ConcreteAddress w
+                 -> [b]
+mcFunctionBlocks toBlock bar concAddr =
+  case M.lookup concAddr fb of
+    Nothing -> []
+    Just cbs -> map toBlock cbs
+  where
+    bi = rBlockInfo bar
+    fb = R.biFunctionBlocks bi
+
 toInstPPC32 :: (PPC.Instruction (), R.ConcreteAddress 32) -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
 toInstPPC32 (i, addr) = (PPC32Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC32Instruction i)
@@ -121,6 +136,18 @@ toBlockPPC64 bar cb =
   Block { blockAddress = PPC64Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
         , blockInstructions = map toInstPPC64 (R.instructionAddresses (rISA bar) (rMemory bar) cb)
         }
+
+toBlockX86 :: BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64
+           -> R.ConcreteBlock X86.Instruction 64
+           -> Block X86.X86_64 s
+toBlockX86 bar cb =
+  Block { blockAddress = X86Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
+        , blockInstructions = map toInstX86 (R.instructionAddresses (rISA bar) (rMemory bar) cb)
+        }
+
+toInstX86 :: (X86.Instruction (), R.ConcreteAddress 64) -> (Address X86.X86_64 s, Instruction X86.X86_64 s)
+toInstX86 (i, addr) = (X86Address (MM.absoluteAddr (R.absoluteAddress addr)),
+                       X86Instruction i)
 
 ppcPrettyOperand :: (MM.MemWidth w) => MM.MemAddr w -> DPPC.Operand tp -> T.Text
 ppcPrettyOperand _addr op =
@@ -173,13 +200,14 @@ instance Architecture Void s where
   prettyAddress (VoidAddress v) = absurd v
   containingBlocks (VoidAnalysisResult v) _ = absurd v
   functions (VoidAnalysisResult v) = absurd v
-  prettyInstruction (VoidInstruction v) = absurd v
+  prettyInstruction _ (VoidInstruction v) = absurd v
   opcode (VoidInstruction v) = absurd v
   operands (VoidInstruction v) = absurd v
   boundValue (VoidInstruction v) = absurd v
   prettyOperand _ (VoidOperand v) = absurd v
   prettyOpcode (VoidOpcode v) = absurd v
   genericSemantics (VoidAnalysisResult v) _ = absurd v
+  functionBlocks (VoidAnalysisResult v) _ = absurd v
 
 instance Architecture PPC.PPC32 s where
   data AnalysisResult PPC.PPC32 s =
@@ -193,7 +221,7 @@ instance Architecture PPC.PPC32 s where
   archNonce (PPC32AnalysisResult bar) = mcNonce bar
   parseAddress t = PPC32Address <$> mcParseAddress32 t
   prettyAddress (PPC32Address addr) = mcPrettyAddress addr
-  prettyInstruction (PPC32Instruction i) = mcPrettyInstruction i
+  prettyInstruction _ (PPC32Instruction i) = mcPrettyInstruction i
   containingBlocks (PPC32AnalysisResult bar) (PPC32Address addr) =
     mcContainingBlocks (toBlockPPC32 bar) bar addr
   functions (PPC32AnalysisResult bar) = mcFunctions PPC32Address bar
@@ -212,6 +240,11 @@ instance Architecture PPC.PPC32 s where
       DPPC.Instruction opc _ -> do
         formulas <- rSemantics ares
         ParameterizedFormula (HR.typeRepr opc) <$> MapF.lookup opc formulas
+  functionBlocks (PPC32AnalysisResult ares) fh =
+    let PPC32Address addr0 = fhAddress fh
+        addr1 = MM.addrOffset addr0
+        addr2 = R.concreteFromAbsolute addr1
+    in mcFunctionBlocks (toBlockPPC32 ares) ares addr2
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
@@ -225,7 +258,7 @@ instance Architecture PPC.PPC64 s where
   archNonce (PPC64AnalysisResult bar) = mcNonce bar
   parseAddress t = PPC64Address <$> mcParseAddress64 t
   prettyAddress (PPC64Address addr) = mcPrettyAddress addr
-  prettyInstruction (PPC64Instruction i) = mcPrettyInstruction i
+  prettyInstruction _ (PPC64Instruction i) = mcPrettyInstruction i
   containingBlocks (PPC64AnalysisResult bar) (PPC64Address addr) =
     mcContainingBlocks (toBlockPPC64 bar) bar addr
   functions (PPC64AnalysisResult bar) = mcFunctions PPC64Address bar
@@ -244,6 +277,11 @@ instance Architecture PPC.PPC64 s where
       DPPC.Instruction opc _ -> do
         formulas <- rSemantics ares
         ParameterizedFormula (HR.typeRepr opc) <$> MapF.lookup opc formulas
+  functionBlocks (PPC64AnalysisResult ares) fh =
+    let PPC64Address addr0 = fhAddress fh
+        addr1 = MM.addrOffset addr0
+        addr2 = R.concreteFromAbsolute addr1
+    in mcFunctionBlocks (toBlockPPC64 ares) ares addr2
 
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
@@ -261,4 +299,128 @@ instance Architecture X86.X86_64 s where
   operands (X86Instruction i) = map (uncurry X86Operand) (X86.instrOperands i)
   boundValue _ = Nothing
   genericSemantics _ _ = Nothing
---  containingBlocks (X86AnalysisResult bar) (X86Address addr) = mcContainingBlocks bar addr
+  functions (X86AnalysisResult bar) = mcFunctions X86Address bar
+  prettyOpcode (X86Opcode s) = T.pack s
+  prettyOperand (X86Address addr) (X86Operand v _) =
+    let waddr = fromIntegral (MM.addrOffset addr)
+    in T.pack (show (ppValue waddr v))
+  prettyInstruction (X86Address addr) (X86Instruction i) =
+    T.pack (show (FD.ppInstruction (fromIntegral (MM.addrOffset addr)) (X86.toFlexInst i)))
+  containingBlocks (X86AnalysisResult bar) (X86Address addr) =
+    mcContainingBlocks (toBlockX86 bar) bar addr
+  functionBlocks (X86AnalysisResult ares) fh =
+    let X86Address addr0 = fhAddress fh
+        addr1 = MM.addrOffset addr0
+        addr2 = R.concreteFromAbsolute addr1
+    in mcFunctionBlocks (toBlockX86 ares) ares addr2
+
+
+-- This whole bit is unfortunate - we can probably export ppValue from flexdis
+ppShowReg :: Show r => r -> HPJ.Doc
+ppShowReg r = HPJ.text (show r)
+
+ppValue :: Word64 -- ^ Base address for offset printing.
+                  -- This should be the address of the next instruction.
+        -> FD.Value
+        -> HPJ.Doc
+ppValue base v =
+  case v of
+    FD.ControlReg   r    -> HPJ.text (show r)
+    FD.DebugReg     r    -> HPJ.text (show r)
+    FD.MMXReg       r    -> HPJ.text (show r)
+    FD.XMMReg       r    -> HPJ.text (show r)
+    FD.X87Register  n    -> HPJ.text "st" <> if n == 0 then HPJ.empty else HPJ.parens (HPJ.int n)
+    FD.SegmentValue r    -> ppShowReg    r
+    -- do the "*" belong here or in ppAddrRef?
+    FD.FarPointer   addr -> HPJ.text "??FAR PTR??"            HPJ.<+> ppAddrRef    addr
+    FD.VoidMem      addr -> ppAddrRef addr
+    FD.Mem8         addr -> HPJ.text "BYTE PTR"    HPJ.<+> ppAddrRef addr
+    FD.Mem16        addr -> HPJ.text "WORD PTR"    HPJ.<+> ppAddrRef addr
+    FD.Mem32        addr -> HPJ.text "DWORD PTR"   HPJ.<+> ppAddrRef addr
+    FD.Mem64        addr -> HPJ.text "QWORD PTR"   HPJ.<+> ppAddrRef addr
+    FD.Mem128       addr -> HPJ.text "XMMWORD PTR" HPJ.<+> ppAddrRef addr
+    FD.FPMem32      addr -> HPJ.text "DWORD PTR"   HPJ.<+> ppAddrRef addr
+    FD.FPMem64      addr -> HPJ.text "QWORD PTR"   HPJ.<+> ppAddrRef addr
+    FD.FPMem80      addr -> HPJ.text "TBYTE PTR"   HPJ.<+> ppAddrRef addr
+    FD.ByteImm      imm  -> ppImm imm
+    FD.WordImm      imm  -> ppImm imm
+    FD.DWordImm     imm  -> ppImm imm
+    FD.QWordImm     imm  -> ppImm imm
+    FD.ByteReg      r    -> ppShowReg    r
+    FD.WordReg      r    -> ppShowReg    r
+    FD.DWordReg     r    -> ppShowReg    r
+    FD.QWordReg     r    -> ppShowReg    r
+    FD.JumpOffset _ off  -> HPJ.text (showHex (base+fromIntegral off) "")
+
+
+ppImm :: (Integral w, Show w) => w -> HPJ.Doc
+ppImm i | i >= 0 = HPJ.text "0x" <> HPJ.text (showHex i "")
+          -- Print negation after converting to integer
+          -- Recall that  "negate minBound = minBound" with types like Int16, Int32, Int64.
+        | otherwise = HPJ.text "-0x" <> HPJ.text (showHex (negate (toInteger i)) "")
+
+ppAddrRef :: FD.AddrRef -> HPJ.Doc
+ppAddrRef addr =
+  case addr of
+    FD.Addr_32 seg base roff off ->
+       case base of
+         Just r | FD.isDefaultSeg32 seg r -> a
+                | seg == FD.FS -> HPJ.text (show seg) <> (HPJ.colon HPJ.<+> a)
+                | seg == FD.GS -> HPJ.text (show seg) <> (HPJ.colon HPJ.<+> a)
+                | otherwise -> a -- ((HPJ.text (show seg) <> colon) <+>)
+         _ -> a
+      where a = ppAddr base roff off
+                                                          -- or rip? this is 32 bits ...
+    FD.IP_Offset_32 _seg off     -> HPJ.brackets $ HPJ.text "ip" <> appendDisplacement off
+    FD.Offset_32 seg off         -> prefix seg off
+    FD.Offset_64 seg off         -> prefix seg off
+    FD.Addr_64 seg base roff off
+        | seg == FD.FS || seg == FD.GS -> HPJ.text (show seg) <> HPJ.colon <> a
+        | isDef     -> a
+        | otherwise -> a
+      where a = ppAddr base roff off
+            isDef = maybe False (FD.isDefaultSeg64 seg) base
+
+    FD.IP_Offset_64 _seg off -> HPJ.brackets $ HPJ.text "rip" <> appendDisplacement off
+  where
+    prefix seg off = ppShowReg seg <> HPJ.colon <> HPJ.text (show off)
+
+    ppAddr :: Show r
+           => Maybe r -- Base value
+           -> Maybe (Int, r) -- Relative offset
+           -> FD.Displacement -- Offset
+           -> HPJ.Doc
+    ppAddr base roff off =
+      case (base, roff) of
+         (Nothing, Nothing)     -> prettyDisplacement off
+         (Nothing, Just (n, r)) ->
+           HPJ.brackets (HPJ.text (show r) <> HPJ.text "*" <> HPJ.int n <> appendDisplacement off)
+         (Just r, Nothing)      -> HPJ.brackets $
+           HPJ.text (show r) <> appendDisplacement off
+         (Just r, Just (n, r')) ->
+           HPJ.brackets $
+             HPJ.text (show r) <> HPJ.text "+" <> HPJ.text (show r') <> HPJ.text "*" <> HPJ.int n <> appendDisplacement off
+
+appendDisplacement :: FD.Displacement -> HPJ.Doc
+appendDisplacement FD.NoDisplacement = HPJ.text ""
+appendDisplacement (FD.Disp32 x)
+  | x >  0    = HPJ.text ("+0x" ++ showHex x "")
+  | x == 0    = HPJ.text ""
+  | otherwise = HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int64)) "")
+appendDisplacement (FD.Disp8 x)
+  | x >  0    = HPJ.text ("+0x" ++ showHex x "")
+  | x == 0    = HPJ.text ""
+  | otherwise = HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int16)) "")
+
+prettyDisplacement :: FD.Displacement -> HPJ.Doc
+prettyDisplacement FD.NoDisplacement = HPJ.text "0"
+prettyDisplacement (FD.Disp32 x) =
+  if x >= 0 then
+    HPJ.text ("0x" ++ showHex x "")
+   else
+    HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int64)) "")
+prettyDisplacement (FD.Disp8 x) =
+  if x >= 0 then
+    HPJ.text ("0x" ++ showHex x "")
+   else
+    HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int16)) "")

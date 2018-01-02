@@ -150,6 +150,16 @@ handleCustomEvent s0 evt =
                       & lBlockViewer .~ BV.blockViewer b
           B.continue $! State s1
       | otherwise -> B.continue (State s0)
+    ViewFunction archNonce fh
+      | Just ares <- (s0 ^. lAnalysisResult)
+      , Just Refl <- testEquality archNonce (s0 ^. lNonce)
+      , b0 : _ <- A.functionBlocks ares fh -> do
+          -- FIXME: We need a real function viewer - for now, we just view the
+          -- entry block of the function.
+          let s1 = s0 & lUIMode .~ M.SomeUIMode M.BlockViewer
+                      & lBlockViewer .~ BV.blockViewer b0
+          B.continue $! State s1
+      | otherwise -> B.continue (State s0)
     FindBlockContaining archNonce addr ->
       case s0 ^. lAnalysisResult of
         Just ares

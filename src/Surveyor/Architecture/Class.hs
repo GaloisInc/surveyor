@@ -39,7 +39,7 @@ class Architecture (arch :: *) (s :: *) where
   containingBlocks :: AnalysisResult arch s -> Address arch s -> [Block arch s]
   -- | Pretty print an address
   prettyAddress :: Address arch s -> T.Text
-  prettyInstruction :: Instruction arch s -> T.Text
+  prettyInstruction :: Address arch s -> Instruction arch s -> T.Text
   prettyOperand :: Address arch s -> Operand arch s -> T.Text
   prettyOpcode :: Opcode arch s -> T.Text
 
@@ -48,6 +48,7 @@ class Architecture (arch :: *) (s :: *) where
   operands :: Instruction arch s -> [Operand arch s]
   boundValue :: Instruction arch s -> Maybe (Operand arch s)
   genericSemantics :: AnalysisResult arch s -> Instruction arch s -> Maybe (ParameterizedFormula arch s)
+  functionBlocks :: AnalysisResult arch s -> FunctionHandle arch s -> [Block arch s]
 
 -- | A formula describing the semantics of an instruction
 data ParameterizedFormula arch s where

@@ -96,7 +96,7 @@ instance Architecture LLVM s where
   -- Will work on what this means - we can probably do something if we also pass
   -- in the analysisresult
   parseAddress _ = Nothing
-  prettyInstruction (LLVMInstruction stmt) =
+  prettyInstruction _ (LLVMInstruction stmt) =
     let ?config = llvmConfig
     in T.pack (show (LL.ppStmt stmt))
   opcode (LLVMInstruction stmt) =
@@ -111,6 +111,8 @@ instance Architecture LLVM s where
     llvmContainingBlocks lr addr
   summarizeResult (LLVMAnalysisResult lr) =
     summarizeModule (llvmModule lr)
+  functionBlocks (LLVMAnalysisResult lr) fh =
+    llvmFunctionBlocks lr fh
 
 ppOperand :: (?config :: LL.Config) => LLVMOperand' -> PP.Doc
 ppOperand op =
@@ -315,6 +317,13 @@ llvmContainingBlocks lr addr =
       bb <- M.lookup lab bix
       return [toBlock sym bb]
 
+llvmFunctionBlocks :: LLVMResult s -> FunctionHandle LLVM s -> [Block LLVM s]
+llvmFunctionBlocks lr fh =
+  case M.lookup sym (llvmFunctionIndex lr) of
+    Nothing -> []
+    Just (def, _) -> map (toBlock sym) (LL.defBody def)
+  where
+    sym = LL.Symbol (T.unpack (fhName fh))
 
 toBlock :: LL.Symbol -> LL.BasicBlock -> Block LLVM s
 toBlock sym b =
