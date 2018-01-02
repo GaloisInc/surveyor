@@ -15,6 +15,9 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Surveyor
                        Surveyor.Architecture
+                       Surveyor.Architecture.Class
+                       Surveyor.Architecture.LLVM
+                       Surveyor.Architecture.MC
                        Surveyor.Arguments
                        Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
@@ -58,6 +61,8 @@ library
                        brick >= 0.30 && < 1,
                        vty,
                        elf-edit,
+                       llvm-pretty >= 0.7 && < 0.8,
+                       llvm-pretty-bc-parser,
                        macaw-base,
                        renovate,
                        renovate-ppc,
