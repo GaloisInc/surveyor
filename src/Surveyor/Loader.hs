@@ -114,6 +114,7 @@ loadElf :: NG.NonceGenerator IO s -> B.BChan (Events s) -> E.SomeElf E.Elf -> IO
 loadElf ng customEventChan someElf = do
   let elfLoadOpts = MM.LoadOptions { MM.loadStyle = MM.LoadBySegment
                                    , MM.includeBSS = False
+                                   , MM.loadRegionIndex = 0
                                    }
   rcfgs <- case someElf of
     E.Elf32 e32 -> do

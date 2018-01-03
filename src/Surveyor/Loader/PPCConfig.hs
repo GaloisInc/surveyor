@@ -14,6 +14,7 @@ import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Memory as MM
 import qualified Data.Macaw.Memory.ElfLoader as MM
 import qualified Data.Macaw.Types as MT
+import qualified Data.Parameterized.TraversableF as TF
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
@@ -34,12 +35,14 @@ import qualified Surveyor.Loader.RenovateAnalysis as RA
 elfLoadOpts :: MM.LoadOptions
 elfLoadOpts = MM.LoadOptions { MM.loadStyle = MM.LoadBySegment
                              , MM.includeBSS = False
+                             , MM.loadRegionIndex = 0
                              }
 
 ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
               MM.MemWidth w,
               A.Architecture arch s,
               KnownNat w,
+              TF.FoldableF (MC.ArchStmt arch),
               R.InstructionConstraints i a,
               MC.IsArchStmt (MC.ArchStmt arch),
               MC.PrettyF (MC.ArchTermStmt arch),
