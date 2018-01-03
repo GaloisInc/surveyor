@@ -55,7 +55,7 @@ data ParameterizedFormula arch s where
   ParameterizedFormula :: (SA.Architecture arch) => SA.ShapeRepr arch tp -> F.ParameterizedFormula (SB.SimpleBackend s) arch tp -> ParameterizedFormula arch s
 
 prettyParameterizedFormula :: ParameterizedFormula arch s -> T.Text
-prettyParameterizedFormula (ParameterizedFormula repr f) = F.printFormula repr f
+prettyParameterizedFormula (ParameterizedFormula repr f) = F.printParameterizedFormula repr f
 
 -- | A container for instructions
 data Block arch s =
