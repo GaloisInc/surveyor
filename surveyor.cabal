@@ -35,6 +35,7 @@ library
                        Surveyor.Widget.BlockViewer
                        Surveyor.Widget.EchoArea
                        Surveyor.Widget.FunctionSelector
+                       Surveyor.Widget.FunctionViewer
                        Surveyor.Widget.Minibuffer
                        Brick.Command
                        Brick.Keymap
