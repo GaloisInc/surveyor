@@ -19,21 +19,23 @@ module Surveyor.Widget.FunctionViewer (
 import           GHC.Generics ( Generic )
 
 import qualified Brick as B
-import           Control.Lens ( Lens' )
+import           Control.Lens ( Lens', (^.) )
 import qualified Data.Foldable as F
 import qualified Data.Generics.Product as GL
+import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Architecture as A
-import           Surveyor.Names ( Names )
+import           Surveyor.Names ( Names(..) )
+import qualified Surveyor.Widget.BlockViewer as BV
 
 data FunctionViewer arch s =
   FunctionViewer { funcHandle :: A.FunctionHandle arch s
                  -- ^ A pointer to the function being displayed
                  , analysisResult :: A.AnalysisResult arch s
                  -- ^ The analysis result to find blocks in
-                 , funcBlocks :: [A.Block arch s]
+                 , funcBlocks :: [BV.BlockViewer arch s]
                  -- ^ The blocks in the function
                  , focusedBlock :: Maybe (A.Address arch s)
                  -- ^ The currently-focused block, if any
@@ -53,7 +55,7 @@ functionViewer :: (Ord (A.Address arch s), A.Architecture arch s)
 functionViewer fh ar =
   FunctionViewer { funcHandle = fh
                  , analysisResult = ar
-                 , funcBlocks = blocks
+                 , funcBlocks = map BV.blockViewer (L.sortOn A.blockAddress blocks)
                  , focusedBlock = Nothing
                  , blockMap = F.foldl' indexBlock M.empty blocks
                  }
@@ -65,9 +67,17 @@ handleFunctionViewerEvent :: (A.Architecture arch s)
                           => V.Event
                           -> FunctionViewer arch s
                           -> B.EventM Names (FunctionViewer arch s)
-handleFunctionViewerEvent = undefined
+handleFunctionViewerEvent _ fv = return fv
 
-renderFunctionViewer :: (A.Architecture arch s)
+renderFunctionViewer :: (A.Architecture arch s, Eq (A.Address arch s))
                      => FunctionViewer arch s
                      -> B.Widget Names
-renderFunctionViewer = undefined
+renderFunctionViewer fv =
+  B.viewport FunctionViewport B.Both blockList
+  where
+    blockList = B.vBox (map renderWithFocus (funcBlocks fv))
+    renderWithFocus b =
+      let w = B.padBottom (B.Pad 1) (BV.renderBlockViewer (analysisResult fv) b)
+      in case fv ^. focusedBlockL == (A.blockAddress <$> (b ^. BV.blockViewerBlockL)) of
+        True -> B.visible w
+        False -> w

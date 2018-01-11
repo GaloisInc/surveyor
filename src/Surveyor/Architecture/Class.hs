@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -21,7 +22,7 @@ import qualified Lang.Crucible.Solver.SimpleBackend as SB
 data SomeResult s where
   SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s
 
-class Architecture (arch :: *) (s :: *) where
+class (Eq (Address arch s), Ord (Address arch s)) => Architecture (arch :: *) (s :: *) where
   data AnalysisResult arch s :: *
   data Instruction arch s :: *
   data Operand arch s :: *

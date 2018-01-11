@@ -209,6 +209,12 @@ instance Architecture Void s where
   genericSemantics (VoidAnalysisResult v) _ = absurd v
   functionBlocks (VoidAnalysisResult v) _ = absurd v
 
+instance Eq (Address Void s) where
+  VoidAddress v == _ = absurd v
+
+instance Ord (Address Void s) where
+  compare (VoidAddress v) _ = absurd v
+
 instance Architecture PPC.PPC32 s where
   data AnalysisResult PPC.PPC32 s =
     PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32)
@@ -245,6 +251,12 @@ instance Architecture PPC.PPC32 s where
         addr1 = MM.addrOffset addr0
         addr2 = R.concreteFromAbsolute addr1
     in mcFunctionBlocks (toBlockPPC32 ares) ares addr2
+
+instance Eq (Address PPC.PPC32 s) where
+  PPC32Address a1 == PPC32Address a2 = a1 == a2
+
+instance Ord (Address PPC.PPC32 s) where
+  PPC32Address a1 `compare` PPC32Address a2 = a1 `compare` a2
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
@@ -283,6 +295,12 @@ instance Architecture PPC.PPC64 s where
         addr2 = R.concreteFromAbsolute addr1
     in mcFunctionBlocks (toBlockPPC64 ares) ares addr2
 
+instance Eq (Address PPC.PPC64 s) where
+  PPC64Address a1 == PPC64Address a2 = a1 == a2
+
+instance Ord (Address PPC.PPC64 s) where
+  PPC64Address a1 `compare` PPC64Address a2 = a1 `compare` a2
+
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64)
@@ -314,6 +332,12 @@ instance Architecture X86.X86_64 s where
         addr2 = R.concreteFromAbsolute addr1
     in mcFunctionBlocks (toBlockX86 ares) ares addr2
 
+
+instance Eq (Address X86.X86_64 s) where
+  X86Address a1 == X86Address a2 = a1 == a2
+
+instance Ord (Address X86.X86_64 s) where
+  X86Address a1 `compare` X86Address a2 = a1 `compare` a2
 
 -- This whole bit is unfortunate - we can probably export ppValue from flexdis
 ppShowReg :: Show r => r -> HPJ.Doc

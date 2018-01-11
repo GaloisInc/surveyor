@@ -24,6 +24,7 @@ module Surveyor.State (
   lFunctionSelector,
   lBlockSelector,
   lBlockViewer,
+  lFunctionViewer,
   lKeymap
   ) where
 
@@ -47,6 +48,7 @@ import qualified Surveyor.Widget.BlockSelector as BS
 import qualified Surveyor.Widget.BlockViewer as BV
 import qualified Surveyor.Widget.EchoArea as EA
 import qualified Surveyor.Widget.FunctionSelector as FS
+import qualified Surveyor.Widget.FunctionViewer as FV
 import qualified Surveyor.Widget.Minibuffer as MB
 
 data State s where
@@ -76,7 +78,7 @@ data S arch s =
     -- streamed analysis result is of the same type as the last one.  We use
     -- nonces to track that; their 'TestEquality' instance lets us recover type
     -- equality.
-    , sArchState :: !(ArchState arch s)
+    , sArchState :: Maybe (ArchState arch s)
     }
   deriving (Generic)
 
@@ -101,7 +103,7 @@ lNonceGenerator = GL.field @"sNonceGenerator"
 lLoader :: L.Lens' (S arch s) (Maybe AsyncLoader)
 lLoader = GL.field @"sLoader"
 
-lArchState :: L.Lens' (S arch s) (ArchState arch s)
+lArchState :: L.Lens' (S arch s) (Maybe (ArchState arch s))
 lArchState = GL.field @"sArchState"
 
 -- | A sub-component of the state dependent on the arch type variable
@@ -112,7 +114,7 @@ lArchState = GL.field @"sArchState"
 data ArchState arch s =
   ArchState { sNonce :: !(NG.Nonce s arch)
             -- ^ A nonce used to check to see if the arch type has changed between runs
-            , sAnalysisResult :: Maybe (A.AnalysisResult arch s)
+            , sAnalysisResult :: !(A.AnalysisResult arch s)
             -- ^ Information returned by the binary analysis
             , sMinibuffer :: !(MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
             -- ^ The persistent state of the minibuffer
@@ -122,30 +124,34 @@ data ArchState arch s =
             -- ^ Functions available in the function selector
             , sBlockSelector :: !(BS.BlockSelector arch s)
             , sBlockViewer :: !(BV.BlockViewer arch s)
+            , sFunctionViewer :: !(FV.FunctionViewer arch s)
             , sKeymap :: !(Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
             }
   deriving (Generic)
 
-lNonce :: L.Lens' (S arch s) (NG.Nonce s arch)
-lNonce = lArchState . GL.field @"sNonce"
+lNonce :: L.Lens' (ArchState arch s) (NG.Nonce s arch)
+lNonce = GL.field @"sNonce"
 
-lAnalysisResult :: L.Lens' (S arch s) (Maybe (A.AnalysisResult arch s))
-lAnalysisResult = lArchState . GL.field @"sAnalysisResult"
+lAnalysisResult :: L.Lens' (ArchState arch s) (A.AnalysisResult arch s)
+lAnalysisResult = GL.field @"sAnalysisResult"
 
-lMinibuffer :: L.Lens' (S arch s) (MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
-lMinibuffer = lArchState . GL.field @"sMinibuffer"
+lMinibuffer :: L.Lens' (ArchState arch s) (MB.Minibuffer (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr T.Text Names)
+lMinibuffer = GL.field @"sMinibuffer"
 
-lFunctionSelector :: L.Lens' (S arch s) (FS.FunctionSelector arch s)
-lFunctionSelector = lArchState . GL.field @"sFunctionSelector"
+lFunctionSelector :: L.Lens' (ArchState arch s) (FS.FunctionSelector arch s)
+lFunctionSelector = GL.field @"sFunctionSelector"
 
-lBlockSelector :: L.Lens' (S arch s) (BS.BlockSelector arch s)
-lBlockSelector = lArchState . GL.field @"sBlockSelector"
+lBlockSelector :: L.Lens' (ArchState arch s) (BS.BlockSelector arch s)
+lBlockSelector = GL.field @"sBlockSelector"
 
-lBlockViewer :: L.Lens' (S arch s) (BV.BlockViewer arch s)
-lBlockViewer = lArchState . GL.field @"sBlockViewer"
+lBlockViewer :: L.Lens' (ArchState arch s) (BV.BlockViewer arch s)
+lBlockViewer = GL.field @"sBlockViewer"
 
-lKeymap :: L.Lens' (S arch s) (Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
-lKeymap = lArchState . GL.field @"sKeymap"
+lFunctionViewer :: L.Lens' (ArchState arch s) (FV.FunctionViewer arch s)
+lFunctionViewer = GL.field @"sFunctionViewer"
+
+lKeymap :: L.Lens' (ArchState arch s) (Keymap SomeUIMode (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr)
+lKeymap = GL.field @"sKeymap"
 
 data AppState = Loading
               | Ready

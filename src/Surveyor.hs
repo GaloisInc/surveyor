@@ -11,6 +11,7 @@ import qualified Brick as B
 import qualified Brick.BChan as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
+import           Control.Lens ( (^?), _Just )
 import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Nonce as PN
@@ -22,10 +23,8 @@ import qualified Graphics.Vty as V
 
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes
-import qualified Surveyor.Commands as C
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Handlers ( appHandleEvent )
-import           Surveyor.Keymap ( defaultKeymap )
 import           Surveyor.Loader ( AsyncLoader, asynchronouslyLoad )
 import           Surveyor.Mode
 import           Surveyor.Names ( Names(..) )
@@ -82,7 +81,9 @@ drawAppShell s w =
         SomeUIMode m' -> B.txt (prettyMode m')
     bottomLine =
       case sUIMode s of
-        SomeMiniBuffer (MiniBuffer _) -> MB.renderMinibuffer True (sMinibuffer (sArchState s))
+        SomeMiniBuffer (MiniBuffer _)
+          | Just mb <- s ^? lArchState . _Just . lMinibuffer ->
+            MB.renderMinibuffer True mb
         _ -> EA.renderEchoArea (sEchoArea s)
 
 appDraw :: State s -> [B.Widget Names]
@@ -90,28 +91,30 @@ appDraw (State s) =
   case sInputFile s of
     Nothing -> drawAppShell s B.emptyWidget
     Just binFileName ->
-      case sAnalysisResult (sArchState s) of
+      case sArchState s of
         Nothing -> drawAppShell s B.emptyWidget
-        Just binfo ->
+        Just archState ->
           case sUIMode s of
             SomeMiniBuffer (MiniBuffer innerMode) ->
-              drawUIMode binFileName binfo s innerMode
+              drawUIMode binFileName archState s innerMode
             SomeUIMode mode ->
-              drawUIMode binFileName binfo s mode
+              drawUIMode binFileName archState s mode
 
 drawUIMode :: (A.Architecture arch s)
            => FilePath
-           -> A.AnalysisResult arch s
+           -> ArchState arch s
            -> S arch s
            -> UIMode NormalK
            -> [B.Widget Names]
-drawUIMode binFileName binfo s uim =
+drawUIMode binFileName archState s uim =
   case uim of
     Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
     Summary -> drawAppShell s (drawSummary binFileName binfo)
-    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector (sArchState s)))
-    BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector (sArchState s)))
-    BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (sBlockViewer (sArchState s)))
+    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector archState))
+    BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector archState))
+    BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (sBlockViewer archState))
+  where
+    binfo = sAnalysisResult archState
 
 appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =
@@ -150,7 +153,6 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
 
 emptyState :: Maybe FilePath -> Maybe AsyncLoader -> PN.NonceGenerator IO s -> B.BChan (Events s) -> IO (S Void s)
 emptyState mfp mloader ng customEventChan = do
-  n0 <- PN.freshNonce ng
   return S { sInputFile = mfp
            , sLoader = mloader
            , sDiagnosticLog = Seq.empty
@@ -160,13 +162,5 @@ emptyState mfp mloader ng customEventChan = do
            , sEmitEvent = B.writeBChan customEventChan
            , sEventChannel = customEventChan
            , sNonceGenerator = ng
-           , sArchState =
-             ArchState { sNonce = n0
-                       , sAnalysisResult = Nothing
-                       , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands customEventChan)
-                       , sBlockSelector = BS.emptyBlockSelector
-                       , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                       , sBlockViewer = BV.emptyBlockViewer
-                       , sKeymap = defaultKeymap customEventChan
-                       }
+           , sArchState = Nothing
            }

@@ -14,6 +14,7 @@ module Surveyor.Widget.BlockViewer (
   BlockViewer,
   emptyBlockViewer,
   blockViewer,
+  blockViewerBlockL,
   handleBlockViewerEvent,
   renderBlockViewer
   ) where
@@ -42,6 +43,9 @@ data BlockViewer arch s =
 
 instructionListL :: Lens' (BlockViewer arch s) (B.List Names (A.Address arch s, A.Instruction arch s, OperandSelector arch s))
 instructionListL = GL.field @"instructionList"
+
+blockViewerBlockL :: Lens' (BlockViewer arch s) (Maybe (A.Block arch s))
+blockViewerBlockL = GL.field @"bvBlock"
 
 emptyBlockViewer :: BlockViewer arch s
 emptyBlockViewer = BlockViewer { bvBlock = Nothing
