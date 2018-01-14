@@ -8,6 +8,7 @@ import qualified Brick as B
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
+import           Data.Maybe ( listToMaybe )
 import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
@@ -242,16 +243,16 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
         () | Just oldArchState <- sArchState s0
            , Just Refl <- testEquality (sNonce oldArchState) (A.archNonce ares) ->
              Just (oldArchState { sAnalysisResult = ares })
-           | otherwise ->
-             let defFunc = head (A.functions ares)
-                 b0 = head (A.functionBlocks ares defFunc)
-             in Just ArchState { sAnalysisResult = ares
-                               , sBlockSelector = BS.emptyBlockSelector
-                               , sBlockViewer = BV.blockViewer b0
-                               , sFunctionViewer = FV.functionViewer defFunc ares
-                               , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
-                               , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                               , sKeymap = K.defaultKeymap (sEventChannel s0)
-                               , sNonce = A.archNonce ares
-                               }
+           | otherwise -> do
+               defFunc <- listToMaybe (A.functions ares)
+               b0 <- listToMaybe (A.functionBlocks ares defFunc)
+               return ArchState { sAnalysisResult = ares
+                                , sBlockSelector = BS.emptyBlockSelector
+                                , sBlockViewer = BV.blockViewer b0
+                                , sFunctionViewer = FV.functionViewer defFunc ares
+                                , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
+                                , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                , sKeymap = K.defaultKeymap (sEventChannel s0)
+                                , sNonce = A.archNonce ares
+                                }
     }
