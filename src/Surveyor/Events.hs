@@ -19,7 +19,7 @@ import qualified Surveyor.Widget.EchoArea as EA
 data Events s where
   -- Loading events
   ErrorLoadingELFHeader :: Int64 -> String -> Events s
-  ErrorLoadingELF :: (Eq (E.ElfWordType n), Num (E.ElfWordType n), Show (E.ElfWordType n))
+  ErrorLoadingELF :: (Eq (E.ElfWordType n), Num (E.ElfWordType n), Show (E.ElfWordType n), Integral (E.ElfWordType n))
                   => [E.ElfParseError n] -> Events s
   ErrorLoadingLLVM :: String -> Events s
   AnalysisFailure :: X.SomeException -> Events s
