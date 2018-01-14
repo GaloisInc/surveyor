@@ -12,7 +12,6 @@
 -- * Symbolically simulating a range of instructions into a single formula
 module Surveyor.Widget.BlockViewer (
   BlockViewer,
-  emptyBlockViewer,
   blockViewer,
   blockViewerBlockL,
   handleBlockViewerEvent,
@@ -36,7 +35,7 @@ import qualified Surveyor.Architecture as A
 import           Surveyor.Names ( Names(..) )
 
 data BlockViewer arch s =
-  BlockViewer { bvBlock :: Maybe (A.Block arch s)
+  BlockViewer { bvBlock :: !(A.Block arch s)
               , instructionList :: !(B.List Names (A.Address arch s, A.Instruction arch s, OperandSelector arch s))
               }
   deriving (Generic)
@@ -44,16 +43,11 @@ data BlockViewer arch s =
 instructionListL :: Lens' (BlockViewer arch s) (B.List Names (A.Address arch s, A.Instruction arch s, OperandSelector arch s))
 instructionListL = GL.field @"instructionList"
 
-blockViewerBlockL :: Lens' (BlockViewer arch s) (Maybe (A.Block arch s))
+blockViewerBlockL :: Lens' (BlockViewer arch s) (A.Block arch s)
 blockViewerBlockL = GL.field @"bvBlock"
 
-emptyBlockViewer :: BlockViewer arch s
-emptyBlockViewer = BlockViewer { bvBlock = Nothing
-                               , instructionList = B.list BlockViewerList V.empty 1
-                               }
-
 blockViewer :: (A.Architecture arch s) => A.Block arch s -> BlockViewer arch s
-blockViewer b = BlockViewer { bvBlock = Just b
+blockViewer b = BlockViewer { bvBlock = b
                             , instructionList = B.list BlockViewerList (V.fromList insns) 1
                             }
   where
@@ -114,9 +108,8 @@ renderBlockViewer ares bv =
              , renderOperandSelector isFocused os
              ]
     header =
-      case bvBlock bv of
-        Nothing -> B.txt "No Block"
-        Just b -> B.str (printf "Basic Block %s" (A.prettyAddress (A.blockAddress b)))
+      let b = bvBlock bv
+      in B.str (printf "Basic Block %s" (A.prettyAddress (A.blockAddress b)))
     semanticsDisplay = fromMaybe B.emptyWidget $ do
       selectedIdx <- bv ^. instructionListL . B.listSelectedL
       insn <- bv ^? instructionListL . B.listElementsL . ix selectedIdx . _2

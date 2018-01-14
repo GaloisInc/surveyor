@@ -78,6 +78,6 @@ renderFunctionViewer fv =
     blockList = B.vBox (map renderWithFocus (funcBlocks fv))
     renderWithFocus b =
       let w = B.padBottom (B.Pad 1) (BV.renderBlockViewer (analysisResult fv) b)
-      in case fv ^. focusedBlockL == (A.blockAddress <$> (b ^. BV.blockViewerBlockL)) of
+      in case fv ^. focusedBlockL == Just (A.blockAddress (b ^. BV.blockViewerBlockL)) of
         True -> B.visible w
         False -> w

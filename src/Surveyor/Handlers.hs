@@ -243,13 +243,15 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
            , Just Refl <- testEquality (sNonce oldArchState) (A.archNonce ares) ->
              Just (oldArchState { sAnalysisResult = ares })
            | otherwise ->
-               Just ArchState { sAnalysisResult = ares
-                              , sBlockSelector = BS.emptyBlockSelector
-                              , sBlockViewer = BV.emptyBlockViewer
-                              , sFunctionViewer = FV.functionViewer (head (A.functions ares)) ares
-                              , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
-                              , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                              , sKeymap = K.defaultKeymap (sEventChannel s0)
-                              , sNonce = A.archNonce ares
-                              }
+             let defFunc = head (A.functions ares)
+                 b0 = head (A.functionBlocks ares defFunc)
+             in Just ArchState { sAnalysisResult = ares
+                               , sBlockSelector = BS.emptyBlockSelector
+                               , sBlockViewer = BV.blockViewer b0
+                               , sFunctionViewer = FV.functionViewer defFunc ares
+                               , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
+                               , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                               , sKeymap = K.defaultKeymap (sEventChannel s0)
+                               , sNonce = A.archNonce ares
+                               }
     }
