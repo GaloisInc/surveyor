@@ -1,8 +1,11 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Surveyor.Architecture.Class (
   Architecture(..),
   SomeResult(..),
@@ -22,7 +25,11 @@ import qualified Lang.Crucible.Solver.SimpleBackend as SB
 data SomeResult s where
   SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s
 
-class (Eq (Address arch s), Ord (Address arch s)) => Architecture (arch :: *) (s :: *) where
+type ArchConstraints arch s = (Eq (Address arch s),
+                               Ord (Address arch s),
+                               Show (Address arch s))
+
+class (ArchConstraints arch s) => Architecture (arch :: *) (s :: *) where
   data AnalysisResult arch s :: *
   data Instruction arch s :: *
   data Operand arch s :: *
@@ -70,3 +77,5 @@ data FunctionHandle arch s =
   FunctionHandle { fhAddress :: !(Address arch s)
                  , fhName :: T.Text
                  }
+
+deriving instance (Show (Address arch s)) => Show (FunctionHandle arch s)

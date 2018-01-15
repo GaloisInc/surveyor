@@ -105,7 +105,7 @@ mcFunctions toAddr bar =
   , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
   ]
 
-mcFunctionBlocks :: (R.ConcreteBlock i w -> b)
+mcFunctionBlocks :: (MM.MemWidth w) => (R.ConcreteBlock i w -> b)
                  -> BinaryAnalysisResult s o i a w arch
                  -> R.ConcreteAddress w
                  -> [b]
@@ -215,6 +215,9 @@ instance Eq (Address Void s) where
 instance Ord (Address Void s) where
   compare (VoidAddress v) _ = absurd v
 
+instance Show (Address Void s) where
+  show (VoidAddress v) = absurd v
+
 instance Architecture PPC.PPC32 s where
   data AnalysisResult PPC.PPC32 s =
     PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32)
@@ -257,6 +260,9 @@ instance Eq (Address PPC.PPC32 s) where
 
 instance Ord (Address PPC.PPC32 s) where
   PPC32Address a1 `compare` PPC32Address a2 = a1 `compare` a2
+
+instance Show (Address PPC.PPC32 s) where
+  show (PPC32Address a) = show a
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
@@ -301,6 +307,9 @@ instance Eq (Address PPC.PPC64 s) where
 instance Ord (Address PPC.PPC64 s) where
   PPC64Address a1 `compare` PPC64Address a2 = a1 `compare` a2
 
+instance Show (Address PPC.PPC64 s) where
+  show (PPC64Address a) = show a
+
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64)
@@ -338,6 +347,9 @@ instance Eq (Address X86.X86_64 s) where
 
 instance Ord (Address X86.X86_64 s) where
   X86Address a1 `compare` X86Address a2 = a1 `compare` a2
+
+instance Show (Address X86.X86_64 s) where
+  show (X86Address a) = show a
 
 -- This whole bit is unfortunate - we can probably export ppValue from flexdis
 ppShowReg :: Show r => r -> HPJ.Doc

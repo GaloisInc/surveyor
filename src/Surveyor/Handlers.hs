@@ -165,12 +165,9 @@ handleCustomEvent s0 evt =
     ViewFunction archNonce fh
       | Just archState <- s0 ^. lArchState
       , ares <- archState ^. lAnalysisResult
-      , Just Refl <- testEquality archNonce (archState ^. lNonce)
-      , b0 : _ <- A.functionBlocks ares fh -> do
-          -- FIXME: We need a real function viewer - for now, we just view the
-          -- entry block of the function.
-          let s1 = s0 & lUIMode .~ M.SomeUIMode M.BlockViewer
-                      & lArchState . _Just . lBlockViewer .~ BV.blockViewer b0
+      , Just Refl <- testEquality archNonce (archState ^. lNonce) -> do
+          let s1 = s0 & lUIMode .~ M.SomeUIMode M.FunctionViewer
+                      & lArchState . _Just . lFunctionViewer .~ FV.functionViewer fh ares
           B.continue $! State s1
       | otherwise -> B.continue (State s0)
     FindBlockContaining archNonce addr

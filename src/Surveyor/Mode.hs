@@ -33,6 +33,8 @@ data UIMode s where
   -- sBlockList in the State)
   BlockViewer :: UIMode NormalK
   -- ^ View a block
+  FunctionViewer :: UIMode NormalK
+  -- ^ View a function
   MiniBuffer :: UIMode NormalK -> UIMode MiniBufferK
   -- ^ An interactive widget that takes focus and accepts all
   -- keystrokes except for C-g
@@ -45,6 +47,7 @@ prettyMode m =
     FunctionSelector -> "Function Selector"
     BlockSelector -> "Block Selector"
     BlockViewer -> "Block Viewer"
+    FunctionViewer -> "Function Viewer"
 
 data SomeUIMode where
   SomeMiniBuffer :: UIMode MiniBufferK -> SomeUIMode
@@ -62,6 +65,8 @@ instance TestEquality UIMode where
   testEquality Summary Summary = Just Refl
   testEquality FunctionSelector FunctionSelector = Just Refl
   testEquality BlockSelector BlockSelector = Just Refl
+  testEquality FunctionViewer FunctionViewer = Just Refl
+  testEquality BlockViewer BlockViewer = Just Refl
   testEquality (MiniBuffer a) (MiniBuffer b) = do
     Refl <- testEquality a b
     return Refl

@@ -33,6 +33,7 @@ import qualified Surveyor.Widget.BlockSelector as BS
 import qualified Surveyor.Widget.BlockViewer as BV
 import qualified Surveyor.Widget.EchoArea as EA
 import qualified Surveyor.Widget.FunctionSelector as FS
+import qualified Surveyor.Widget.FunctionViewer as FV
 import qualified Surveyor.Widget.Minibuffer as MB
 
 drawSummary :: (A.Architecture arch s) => FilePath -> A.AnalysisResult arch s -> B.Widget Names
@@ -113,6 +114,7 @@ drawUIMode binFileName archState s uim =
     FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector archState))
     BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector archState))
     BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (sBlockViewer archState))
+    FunctionViewer -> drawAppShell s (FV.renderFunctionViewer (sFunctionViewer archState))
   where
     binfo = sAnalysisResult archState
 

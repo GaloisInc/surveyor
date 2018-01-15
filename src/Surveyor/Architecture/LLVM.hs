@@ -64,7 +64,7 @@ mkLLVMResult nonce m =
 data Addr = FunctionAddr !LL.Symbol
           | BlockAddr !LL.Symbol (Maybe LL.BlockLabel)
           | InsnAddr !LL.Symbol (Maybe LL.BlockLabel) !Int
-          deriving (Eq, Ord)
+          deriving (Eq, Ord, Show)
 
 data LLVMOperand' = Value !LL.Value
                   | TypedValue !(LL.Typed LL.Value)
@@ -120,6 +120,9 @@ instance Eq (Address LLVM s) where
 
 instance Ord (Address LLVM s) where
   compare (LLVMAddress a1) (LLVMAddress a2) = compare a1 a2
+
+instance Show (Address LLVM s) where
+  show (LLVMAddress a) = show a
 
 ppOperand :: (?config :: LL.Config) => LLVMOperand' -> PP.Doc
 ppOperand op =
