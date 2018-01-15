@@ -28,3 +28,6 @@
 [submodule "deps/flexdis86"]
 	path = deps/flexdis86
 	url = git@github.com:GaloisInc/flexdis86.git
+[submodule "deps/jvm-parser"]
+	path = deps/jvm-parser
+	url = git@github.com:GaloisInc/jvm-parser.git

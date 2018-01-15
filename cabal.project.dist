@@ -16,3 +16,4 @@ packages: .
           deps/renovate/renovate
           deps/renovate/renovate-x86
           deps/renovate/renovate-ppc
+          deps/jvm-parser
