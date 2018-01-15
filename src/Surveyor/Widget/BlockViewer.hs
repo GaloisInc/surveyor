@@ -99,9 +99,10 @@ renderBlockViewer :: (A.Architecture arch s)
                   -> BlockViewer arch s
                   -> B.Widget Names
 renderBlockViewer ares bv =
-  B.borderWithLabel header $ B.vBox [ B.renderList renderListItem False (instructionList bv)
-                                    , semanticsDisplay
-                                    ]
+  B.borderWithLabel header $
+  B.hBox [ B.renderList renderListItem False (instructionList bv)
+         , B.hLimit 20 semanticsDisplay
+         ]
   where
     renderListItem isFocused (addr, _i, os) =
       B.hBox [ B.padRight (B.Pad 2) (B.txt (A.prettyAddress addr))
