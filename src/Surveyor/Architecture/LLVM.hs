@@ -7,6 +7,7 @@
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Surveyor.Architecture.LLVM ( mkLLVMResult ) where
@@ -14,7 +15,8 @@ module Surveyor.Architecture.LLVM ( mkLLVMResult ) where
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
 import qualified Data.Map.Strict as M
-import           Data.Maybe ( fromMaybe, mapMaybe )
+import           Data.Maybe ( isJust, fromMaybe, mapMaybe )
+import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 import qualified Text.LLVM as LL
@@ -54,6 +56,8 @@ mkLLVMResult nonce m =
                     , llvmFunctionIndex = indexFunctions m
                     }
 
+data AddrType = FuncK | BlockK | InsnK
+
 -- | The type of an LLVM address
 --
 -- There isn't really an address type. Blocks have BlockLabels and the name of
@@ -61,10 +65,66 @@ mkLLVMResult nonce m =
 -- (Symbol, BlockLabel, Int) where the Int is an offset into the block.
 -- Function addresses are just names, since they have to be unique.  For names,
 -- we use the LLVM symbols associated with them, which are uniqued strings.
-data Addr = FunctionAddr !LL.Symbol
-          | BlockAddr !LL.Symbol (Maybe LL.BlockLabel)
-          | InsnAddr !LL.Symbol (Maybe LL.BlockLabel) !Int
-          deriving (Eq, Ord, Show)
+data Addr addrTy where
+  FunctionAddr :: !LL.Symbol -> Addr 'FuncK
+  BlockAddr :: !(Addr 'FuncK) -> Maybe LL.BlockLabel -> Addr 'BlockK
+  InsnAddr :: !(Addr 'BlockK) -> !Int -> Addr 'InsnK
+
+deriving instance Eq (Addr addrTy)
+instance Ord (Addr addrTy) where
+  compare a1 a2 = toOrdering (compareF a1 a2)
+deriving instance Show (Addr addrTy)
+
+instance TestEquality Addr where
+  testEquality a1 a2 =
+    case a1 of
+      FunctionAddr s1 ->
+        case a2 of
+          FunctionAddr s2 -> do
+            guard (s1 == s2)
+            return Refl
+          _ -> Nothing
+      BlockAddr f1 b1 ->
+        case a2 of
+          BlockAddr f2 b2 -> do
+            Refl <- testEquality f1 f2
+            guard (b1 == b2)
+            return Refl
+          _ -> Nothing
+      InsnAddr b1 i1 ->
+        case a2 of
+          InsnAddr b2 i2 -> do
+            Refl <- testEquality b1 b2
+            guard (i1 == i2)
+            return Refl
+          _ -> Nothing
+
+instance OrdF Addr where
+  compareF a1 a2 =
+    case a1 of
+      FunctionAddr s1 ->
+        case a2 of
+          FunctionAddr s2 -> fromOrdering (compare s1 s2)
+          BlockAddr (FunctionAddr _) _ -> GTF
+          InsnAddr {} -> GTF
+      BlockAddr f1 b1 ->
+        case a2 of
+          FunctionAddr {} -> LTF
+          BlockAddr f2 b2 ->
+            case compareF f1 f2 of
+              EQF -> fromOrdering (compare b1 b2)
+              GTF -> GTF
+              LTF -> LTF
+          InsnAddr {} -> GTF
+      InsnAddr b1 i1 ->
+        case a2 of
+          FunctionAddr {} -> LTF
+          BlockAddr {} -> LTF
+          InsnAddr b2 i2 ->
+            case compareF b1 b2 of
+              EQF -> fromOrdering (compare i1 i2)
+              GTF -> GTF
+              LTF -> LTF
 
 data LLVMOperand' = Value !LL.Value
                   | TypedValue !(LL.Typed LL.Value)
@@ -79,7 +139,7 @@ instance Architecture LLVM s where
   data Instruction LLVM s = LLVMInstruction LL.Stmt
   data Operand LLVM s = LLVMOperand LLVMOperand'
   data Opcode LLVM s = LLVMOpcode LL.Instr
-  data Address LLVM s = LLVMAddress Addr
+  data Address LLVM s = forall addrTy . LLVMAddress (Addr addrTy)
   archNonce (LLVMAnalysisResult lr) = llvmNonce lr
   genericSemantics _ _ = Nothing
   boundValue (LLVMInstruction stmt) =
@@ -92,8 +152,9 @@ instance Architecture LLVM s where
   prettyAddress (LLVMAddress addr) =
     case addr of
       FunctionAddr (LL.Symbol name) -> T.pack name
-      BlockAddr (LL.Symbol name) l -> T.pack (printf "%s%s" name (maybe "" (("@"++) . show . LL.ppLabel) l))
-      InsnAddr (LL.Symbol name) l i -> T.pack (printf "%s%s:%d" name (maybe "" (("@"++) . show . LL.ppLabel) l) i)
+      BlockAddr (FunctionAddr (LL.Symbol name)) l ->
+        T.pack (printf "%s%s" name (maybe "" (("@"++) . show . LL.ppLabel) l))
+      InsnAddr (BlockAddr (FunctionAddr (LL.Symbol name)) l) i -> T.pack (printf "%s%s:%d" name (maybe "" (("@"++) . show . LL.ppLabel) l) i)
   -- Will work on what this means - we can probably do something if we also pass
   -- in the analysisresult
   parseAddress _ = Nothing
@@ -116,10 +177,10 @@ instance Architecture LLVM s where
     llvmFunctionBlocks lr fh
 
 instance Eq (Address LLVM s) where
-  LLVMAddress a1 == LLVMAddress a2 = a1 == a2
+  LLVMAddress a1 == LLVMAddress a2 = isJust (testEquality a1 a2)
 
 instance Ord (Address LLVM s) where
-  compare (LLVMAddress a1) (LLVMAddress a2) = compare a1 a2
+  compare (LLVMAddress a1) (LLVMAddress a2) = toOrdering (compareF a1 a2)
 
 instance Show (Address LLVM s) where
   show (LLVMAddress a) = show a
@@ -314,15 +375,15 @@ llvmConfig = LL.Config { LL.cfgLoadImplicitType = True
                        , LL.cfgUseDILocation = False
                        }
 
-llvmContainingBlocks :: LLVMResult s -> Addr -> [Block LLVM s]
+llvmContainingBlocks :: LLVMResult s -> Addr addrTy -> [Block LLVM s]
 llvmContainingBlocks lr addr =
   case addr of
     FunctionAddr _ -> []
-    BlockAddr sym lab -> fromMaybe [] $ do
+    BlockAddr (FunctionAddr sym) lab -> fromMaybe [] $ do
       (_, bix) <- M.lookup sym (llvmFunctionIndex lr)
       bb <- M.lookup lab bix
       return [toBlock sym bb]
-    InsnAddr sym lab _ -> fromMaybe [] $ do
+    InsnAddr (BlockAddr (FunctionAddr sym) lab) _ -> fromMaybe [] $ do
       (_, bix) <- M.lookup sym (llvmFunctionIndex lr)
       bb <- M.lookup lab bix
       return [toBlock sym bb]
@@ -337,12 +398,14 @@ llvmFunctionBlocks lr fh =
 
 toBlock :: LL.Symbol -> LL.BasicBlock -> Block LLVM s
 toBlock sym b =
-  Block { blockAddress = LLVMAddress (BlockAddr sym lab)
+  Block { blockAddress = LLVMAddress (BlockAddr (FunctionAddr sym) lab)
         , blockInstructions = map (toInstruction sym lab) (zip [0..] (LL.bbStmts b))
         }
   where
     lab = LL.bbLabel b
 
 toInstruction :: LL.Symbol -> Maybe LL.BlockLabel -> (Int, LL.Stmt) -> (Address LLVM s, Instruction LLVM s)
-toInstruction sym lab (idx, stmt) = (LLVMAddress (InsnAddr sym lab idx), LLVMInstruction stmt)
+toInstruction sym lab (idx, stmt) = (LLVMAddress addr, LLVMInstruction stmt)
+  where
+    addr = InsnAddr (BlockAddr (FunctionAddr sym) lab) idx
 
