@@ -16,7 +16,7 @@ import           Control.Monad ( guard )
 import qualified Data.Foldable as F
 import           Data.Int ( Int16, Int32 )
 import qualified Data.Map.Strict as M
-import           Data.Maybe ( isJust, fromMaybe, mapMaybe )
+import           Data.Maybe ( fromMaybe, isJust )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
@@ -25,7 +25,6 @@ import qualified Language.JVM.CFG as J
 import qualified Language.JVM.Common as J
 import qualified Language.JVM.JarReader as J
 import qualified Language.JVM.Parser as J
-import qualified Text.PrettyPrint as PP
 import           Text.Printf ( printf )
 
 import           Surveyor.Architecture.Class
@@ -35,15 +34,34 @@ data JVM
 data JVMResult s =
   JVMResult { jvmNonce :: NG.Nonce s JVM
             , jvmJarReader :: J.JarReader
+            , jvmClassIndex :: M.Map String (J.Class, M.Map J.MethodKey J.Method)
             }
 
-mkJVMResult :: NG.Nonce s JVM -> J.JarReader -> SomeResult s
-mkJVMResult nonce jr =
-  SomeResult (JVMAnalysisResult r)
+mkJVMResult :: NG.Nonce s JVM
+            -- ^ The nonce for this analysis run
+            -> J.JarReader
+            -- ^ The underlying JAR reader
+            -> Maybe (AnalysisResult JVM s)
+            -- ^ The previous analysis result (if any)
+            -> [J.Class]
+            -- ^ Newly-discovered classes to add to the old result
+            -> SomeResult s
+mkJVMResult nonce jr oldRes newClasses =
+  SomeResult (JVMAnalysisResult r1)
   where
-    r = JVMResult { jvmNonce = nonce
-                  , jvmJarReader = jr
-                  }
+    r0 = JVMResult { jvmNonce = nonce
+                   , jvmJarReader = jr
+                   , jvmClassIndex = M.empty
+                   }
+    r1 = F.foldl' indexClass (maybe r0 unwrapAnalysis oldRes) newClasses
+    indexClass r k =
+      let midx = F.foldl' indexMethods M.empty (J.classMethods k)
+      in r { jvmClassIndex = M.insert (J.className k) (k, midx) (jvmClassIndex r)
+           }
+    indexMethods idx m = M.insert (J.methodKey m) m idx
+
+unwrapAnalysis :: AnalysisResult JVM s -> JVMResult s
+unwrapAnalysis (JVMAnalysisResult r) = r
 
 data AddrType = ClassK | MethodK | BlockK | InsnK
 
@@ -93,11 +111,42 @@ instance Architecture JVM s where
   -- the stack
   boundValue _ = Nothing
   opcode (JVMInstruction i) = JVMOpcode i
+  functions (JVMAnalysisResult r) =
+    [ FunctionHandle (JVMAddress methodAddr) name
+    | (klass, methods) <- M.elems (jvmClassIndex r)
+    , let classAddr = ClassAddr (J.className klass)
+    , m <- M.elems methods
+    , let methodAddr = MethodAddr classAddr (J.methodKey m)
+    , let name = T.pack (J.methodName m)
+    ]
+  functionBlocks (JVMAnalysisResult r) (FunctionHandle (JVMAddress addr) _) =
+    case addr of
+      maddr@(MethodAddr (ClassAddr klassName) mkey) -> fromMaybe [] $ do
+        (_, midx) <- M.lookup klassName (jvmClassIndex r)
+        method <- M.lookup mkey midx
+        case J.methodBody method of
+          J.Code _ _ cfg _ _ _ _ ->
+            return [ toBlock maddr bb | bb <- J.allBBs cfg ]
+          J.AbstractMethod -> Nothing
+          J.NativeMethod -> Nothing
+      _ -> []
 
   -- TODO
+  containingBlocks _ _ = []
   summarizeResult _ = []
   genericSemantics _ _ = Nothing
   parseAddress _ = Nothing
+
+toBlock :: Addr 'MethodK -> J.BasicBlock -> Block JVM s
+toBlock maddr bb =
+  Block { blockAddress = JVMAddress baddr
+        , blockInstructions = map (toInstruction baddr) (J.bbInsts bb)
+        }
+  where
+    baddr = BlockAddr maddr (J.bbId bb)
+
+toInstruction :: Addr 'BlockK -> (J.PC, J.Instruction) -> (Address JVM s, Instruction JVM s)
+toInstruction baddr (pc, i) = (JVMAddress (InsnAddr baddr pc), JVMInstruction i)
 
 ppAddress :: Addr addrTy -> T.Text
 ppAddress a =
