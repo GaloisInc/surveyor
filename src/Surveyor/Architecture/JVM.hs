@@ -45,9 +45,9 @@ mkJVMResult :: NG.Nonce s JVM
             -- ^ The previous analysis result (if any)
             -> [J.Class]
             -- ^ Newly-discovered classes to add to the old result
-            -> SomeResult s
+            -> AnalysisResult JVM s
 mkJVMResult nonce jr oldRes newClasses =
-  SomeResult (JVMAnalysisResult r1)
+  JVMAnalysisResult r1
   where
     r0 = JVMResult { jvmNonce = nonce
                    , jvmJarReader = jr

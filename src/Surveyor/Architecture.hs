@@ -23,9 +23,11 @@ module Surveyor.Architecture (
   MC.mkPPC32Result,
   MC.mkPPC64Result,
   MC.mkX86Result,
+  J.mkJVMResult,
   LL.mkLLVMResult
   ) where
 
 import           Surveyor.Architecture.Class
+import qualified Surveyor.Architecture.JVM as J
 import qualified Surveyor.Architecture.LLVM as LL
 import qualified Surveyor.Architecture.MC as MC

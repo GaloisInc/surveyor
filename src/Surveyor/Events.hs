@@ -28,6 +28,7 @@ data Events s where
 
   LoadELF :: FilePath -> Events s
   LoadLLVM :: FilePath -> Events s
+  LoadJAR :: FilePath -> Events s
   -- | Attempt to load a file by detecting its type automatically
   LoadFile :: FilePath -> Events s
 

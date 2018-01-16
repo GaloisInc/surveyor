@@ -6,6 +6,7 @@ module Surveyor.Loader (
   asynchronouslyLoad,
   asynchronouslyLoadElf,
   asynchronouslyLoadLLVM,
+  asynchronouslyLoadJAR,
   loadElf
   ) where
 
@@ -13,7 +14,12 @@ import qualified Brick.BChan as B
 import qualified Control.Concurrent.Async as A
 import qualified Control.Concurrent.MVar as C
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy.Char8 as LB8
 import qualified Data.ElfEdit as E
+import qualified Data.Foldable as F
+import qualified Data.List.Split as L
+import qualified Data.Map.Strict as M
+import           Data.Maybe ( catMaybes )
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Proxy ( Proxy(..) )
@@ -24,6 +30,7 @@ import qualified SemMC.Architecture.PPC64.Opcodes as PPC64
 
 import qualified Data.LLVM.BitCode as LL
 import qualified Data.Macaw.Memory.ElfLoader as MM
+import qualified Language.JVM.JarReader as J
 import qualified Renovate as R
 import qualified Renovate.Arch.X86_64 as X86
 import qualified Renovate.Arch.PPC as PPC
@@ -52,7 +59,37 @@ cancelLoader al = do
 asynchronouslyLoad :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
 asynchronouslyLoad ng customEventChan path
   | takeExtension path == ".bc" = asynchronouslyLoadLLVM ng customEventChan path
+  | takeExtension path == ".jar" = asynchronouslyLoadJAR ng customEventChan path
   | otherwise = asynchronouslyLoadElf ng customEventChan path
+
+-- | Load a JAR file
+asynchronouslyLoadJAR :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadJAR ng customEventChan jarPath = do
+  nonce <- NG.freshNonce ng
+  mv <- C.newEmptyMVar
+  errThread <- A.async $ do
+    worker <- A.async $ do
+      jr <- J.newJarReader [jarPath]
+      let chunks = L.chunksOf 10 (M.keys (J.unJR jr))
+      lastRes <- F.foldlM (addJARChunk nonce jr) Nothing chunks
+      let lastRes' = A.mkJVMResult nonce jr lastRes []
+      B.writeBChan customEventChan (AnalysisFinished (A.SomeResult lastRes') [])
+    C.putMVar mv worker
+    eres <- A.waitCatch worker
+    case eres of
+      Right () -> return ()
+      Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
+  worker <- C.takeMVar mv
+  return AsyncLoader { errorCatcher = errThread
+                     , workerThread = worker
+                     }
+  where
+    addJARChunk nonce jr mres classNames = do
+      let readClass className = J.loadClassFromJar (LB8.unpack className) jr
+      classes <- catMaybes <$> mapM readClass classNames
+      let res' = A.mkJVMResult nonce jr mres classes
+      B.writeBChan customEventChan (AnalysisProgress (A.SomeResult res'))
+      return (Just res')
 
 asynchronouslyLoadLLVM :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadLLVM ng customEventChan bcPath = do

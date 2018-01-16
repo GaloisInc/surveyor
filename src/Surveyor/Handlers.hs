@@ -128,6 +128,12 @@ handleCustomEvent s0 evt =
       let s1 = s0 & lLoader .~ Just loader
                   & lInputFile .~ Just filename
       B.continue $! State s1
+    LoadJAR filename -> do
+      liftIO (F.traverse_ SL.cancelLoader (sLoader s0))
+      loader <- liftIO $ SL.asynchronouslyLoadJAR (sNonceGenerator s0) (sEventChannel s0) filename
+      let s1 = s0 & lLoader .~ Just loader
+                  & lInputFile .~ Just filename
+      B.continue $! State s1
     LoadLLVM filename -> do
       liftIO (F.traverse_ SL.cancelLoader (sLoader s0))
       loader <- liftIO $ SL.asynchronouslyLoadLLVM (sNonceGenerator s0) (sEventChannel s0) filename
