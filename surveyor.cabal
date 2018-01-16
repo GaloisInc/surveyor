@@ -16,6 +16,7 @@ library
   exposed-modules:     Surveyor
                        Surveyor.Architecture
                        Surveyor.Architecture.Class
+                       Surveyor.Architecture.JVM
                        Surveyor.Architecture.LLVM
                        Surveyor.Architecture.MC
                        Surveyor.Arguments
