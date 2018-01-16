@@ -70,9 +70,12 @@ data Addr addrTy where
   BlockAddr :: !(Addr 'FuncK) -> Maybe LL.BlockLabel -> Addr 'BlockK
   InsnAddr :: !(Addr 'BlockK) -> !Int -> Addr 'InsnK
 
-deriving instance Eq (Addr addrTy)
+instance Eq (Addr addrTy) where
+  a1 == a2 = isJust (testEquality a1 a2)
+
 instance Ord (Addr addrTy) where
   compare a1 a2 = toOrdering (compareF a1 a2)
+
 deriving instance Show (Addr addrTy)
 
 instance TestEquality Addr where
@@ -105,7 +108,7 @@ instance OrdF Addr where
       FunctionAddr s1 ->
         case a2 of
           FunctionAddr s2 -> fromOrdering (compare s1 s2)
-          BlockAddr (FunctionAddr _) _ -> GTF
+          BlockAddr {} -> GTF
           InsnAddr {} -> GTF
       BlockAddr f1 b1 ->
         case a2 of
