@@ -12,6 +12,7 @@ module Surveyor.Commands (
   minibufferC,
   loadFileC,
   loadLLVMC,
+  loadJARC,
   loadELFC,
   allCommands
   ) where
@@ -37,6 +38,7 @@ allCommands customEventChan =
   , Some (loadFileC customEventChan)
   , Some (loadELFC customEventChan)
   , Some (loadLLVMC customEventChan)
+  , Some (loadJARC customEventChan)
   ]
 
 exitC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[]
@@ -132,3 +134,13 @@ loadLLVMC customEventChan =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback = \_ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
       B.writeBChan customEventChan (LoadLLVM filepath)
+
+loadJARC :: B.BChan (Events s) -> C.Command (S arch s) (AR.Argument arch (S arch s) s) AR.TypeRepr '[AR.FilePathType]
+loadJARC customEventChan =
+  C.Command "load-jar" doc names rep callback
+  where
+    doc = "Load a JAR file"
+    names = C.Const "file-name" PL.:< PL.Nil
+    rep = AR.FilePathTypeRepr PL.:< PL.Nil
+    callback = \_ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
+      B.writeBChan customEventChan (LoadJAR filepath)
