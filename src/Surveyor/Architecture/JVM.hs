@@ -133,12 +133,20 @@ instance Architecture JVM s where
           J.AbstractMethod -> Nothing
           J.NativeMethod -> Nothing
       _ -> []
+  summarizeResult (JVMAnalysisResult r) = jvmSummarize r
 
   -- TODO
   containingBlocks _ _ = []
-  summarizeResult _ = []
   genericSemantics _ _ = Nothing
   parseAddress _ = Nothing
+
+jvmSummarize :: JVMResult s -> [(T.Text, T.Text)]
+jvmSummarize jr =
+  [ ("Classes", t (M.size (jvmClassIndex jr)))
+  , ("Methods", t (sum (map (M.size . snd) (M.elems (jvmClassIndex jr)))))
+  ]
+  where
+    t = T.pack . show
 
 jvmOperands :: J.Instruction -> [Operand JVM s]
 jvmOperands i =
