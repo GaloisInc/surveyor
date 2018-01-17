@@ -20,7 +20,7 @@ import           Data.Maybe ( fromMaybe, isJust )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
-import           Data.Word ( Word8 )
+import           Data.Word ( Word8, Word16 )
 import qualified Language.JVM.CFG as J
 import qualified Language.JVM.Common as J
 import qualified Language.JVM.JarReader as J
@@ -94,6 +94,8 @@ data JVMOperand' = LocalVariableIndex !J.LocalVariableIndex
                  | I16 !Int16
                  | I32 !Int32
                  | W8 !Word8
+                 | W16 !Word16
+                 | PCList [J.PC]
 
 instance Architecture JVM s where
   data AnalysisResult JVM s = JVMAnalysisResult (JVMResult s)
@@ -111,6 +113,7 @@ instance Architecture JVM s where
   -- the stack
   boundValue _ = Nothing
   opcode (JVMInstruction i) = JVMOpcode i
+  operands (JVMInstruction i) = jvmOperands i
   functions (JVMAnalysisResult r) =
     [ FunctionHandle (JVMAddress methodAddr) name
     | (klass, methods) <- M.elems (jvmClassIndex r)
@@ -136,6 +139,155 @@ instance Architecture JVM s where
   summarizeResult _ = []
   genericSemantics _ _ = Nothing
   parseAddress _ = Nothing
+
+jvmOperands :: J.Instruction -> [Operand JVM s]
+jvmOperands i =
+  case i of
+    J.Aaload -> []
+    J.Aastore -> []
+    J.Aconst_null -> []
+    J.Aload ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Areturn -> []
+    J.Arraylength -> []
+    J.Astore ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Athrow -> []
+    J.Baload -> []
+    J.Bastore -> []
+    J.Caload -> []
+    J.Castore -> []
+    J.Checkcast t -> [JVMOperand (Type t)]
+    J.D2f -> []
+    J.D2i -> []
+    J.D2l -> []
+    J.Dadd -> []
+    J.Daload -> []
+    J.Dastore -> []
+    J.Dcmpg -> []
+    J.Dcmpl -> []
+    J.Ddiv -> []
+    J.Dload ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Dmul -> []
+    J.Dneg -> []
+    J.Drem -> []
+    J.Dreturn -> []
+    J.Dstore ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Dsub -> []
+    J.Dup -> []
+    J.Dup_x1 -> []
+    J.Dup_x2 -> []
+    J.Dup2 -> []
+    J.Dup2_x1 -> []
+    J.Dup2_x2 -> []
+    J.F2d -> []
+    J.F2i -> []
+    J.F2l -> []
+    J.Fadd -> []
+    J.Faload -> []
+    J.Fastore -> []
+    J.Fcmpg -> []
+    J.Fcmpl -> []
+    J.Fdiv -> []
+    J.Fload ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Fmul -> []
+    J.Fneg -> []
+    J.Frem -> []
+    J.Freturn -> []
+    J.Fstore ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Fsub -> []
+    J.Getfield fid -> [JVMOperand (FieldId fid)]
+    J.Getstatic fid -> [JVMOperand (FieldId fid)]
+    J.Goto pc -> [JVMOperand (PC pc)]
+    J.I2b -> []
+    J.I2c -> []
+    J.I2d -> []
+    J.I2f -> []
+    J.I2l -> []
+    J.I2s -> []
+    J.Iadd -> []
+    J.Iaload -> []
+    J.Iand -> []
+    J.Iastore -> []
+    J.Idiv -> []
+    J.If_acmpeq pc -> [JVMOperand (PC pc)]
+    J.If_acmpne pc -> [JVMOperand (PC pc)]
+    J.If_icmpeq pc -> [JVMOperand (PC pc)]
+    J.If_icmpne pc -> [JVMOperand (PC pc)]
+    J.If_icmplt pc -> [JVMOperand (PC pc)]
+    J.If_icmpge pc -> [JVMOperand (PC pc)]
+    J.If_icmpgt pc -> [JVMOperand (PC pc)]
+    J.If_icmple pc -> [JVMOperand (PC pc)]
+    J.Ifeq pc -> [JVMOperand (PC pc)]
+    J.Ifne pc -> [JVMOperand (PC pc)]
+    J.Iflt pc -> [JVMOperand (PC pc)]
+    J.Ifge pc -> [JVMOperand (PC pc)]
+    J.Ifgt pc -> [JVMOperand (PC pc)]
+    J.Ifle pc -> [JVMOperand (PC pc)]
+    J.Ifnonnull pc -> [JVMOperand (PC pc)]
+    J.Ifnull pc -> [JVMOperand (PC pc)]
+    J.Iinc ix i16 -> [JVMOperand (LocalVariableIndex ix), JVMOperand (I16 i16)]
+    J.Iload ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Imul -> []
+    J.Ineg -> []
+    J.Instanceof t -> [JVMOperand (Type t)]
+    J.Invokeinterface s mk -> [JVMOperand (StringOp s), JVMOperand (MethodKey mk)]
+    J.Invokespecial t mk -> [JVMOperand (Type t), JVMOperand (MethodKey mk)]
+    J.Invokestatic s mk -> [JVMOperand (StringOp s), JVMOperand (MethodKey mk)]
+    J.Invokevirtual t mk -> [JVMOperand (Type t), JVMOperand (MethodKey mk)]
+    J.Invokedynamic w16 -> [JVMOperand (W16 w16)]
+    J.Ior -> []
+    J.Irem -> []
+    J.Ireturn -> []
+    J.Ishl -> []
+    J.Ishr -> []
+    J.Istore ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Isub -> []
+    J.Iushr -> []
+    J.Ixor -> []
+    J.Jsr pc -> [JVMOperand (PC pc)]
+    J.L2d -> []
+    J.L2f -> []
+    J.L2i -> []
+    J.Ladd -> []
+    J.Laload -> []
+    J.Land -> []
+    J.Lastore -> []
+    J.Lcmp -> []
+    J.Ldc cpv -> [JVMOperand (ConstantPoolValue cpv)]
+    J.Ldiv -> []
+    J.Lload ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Lmul -> []
+    J.Lneg -> []
+    J.Lookupswitch pc tbl -> [JVMOperand (PC pc), JVMOperand (SwitchTable tbl)]
+    J.Lor -> []
+    J.Lrem -> []
+    J.Lreturn -> []
+    J.Lshl -> []
+    J.Lshr -> []
+    J.Lstore ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Lsub -> []
+    J.Lushr -> []
+    J.Lxor -> []
+    J.Monitorenter -> []
+    J.Monitorexit -> []
+    J.Multianewarray t w8 -> [JVMOperand (Type t), JVMOperand (W8 w8)]
+    J.New s -> [JVMOperand (StringOp s)]
+    J.Newarray t -> [JVMOperand (Type t)]
+    J.Nop -> []
+    J.Pop -> []
+    J.Pop2 -> []
+    J.Putfield fid -> [JVMOperand (FieldId fid)]
+    J.Putstatic fid -> [JVMOperand (FieldId fid)]
+    J.Ret ix -> [JVMOperand (LocalVariableIndex ix)]
+    J.Return -> []
+    J.Saload -> []
+    J.Sastore -> []
+    J.Swap -> []
+    J.Tableswitch pc i32_1 i32_2 pcs ->
+      [ JVMOperand (PC pc)
+      , JVMOperand (I32 i32_1)
+      , JVMOperand (I32 i32_2)
+      , JVMOperand (PCList pcs)
+      ]
 
 toBlock :: Addr 'MethodK -> J.BasicBlock -> Block JVM s
 toBlock maddr bb =
@@ -171,6 +323,8 @@ ppOperand op =
     I16 i -> T.pack (show i)
     I32 i -> T.pack (show i)
     W8 w -> T.pack (show w)
+    W16 w -> T.pack (show w)
+    PCList pcs -> T.pack (show pcs)
 
 ppOpcode :: J.Instruction -> T.Text
 ppOpcode i =
