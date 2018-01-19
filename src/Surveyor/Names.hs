@@ -12,6 +12,6 @@ data Names = DiagnosticView
            | BlockSelectList
            | FunctionSelectEditor
            | FunctionSelectList
-           | BlockViewerList
+           | BlockViewerList Int
            | FunctionViewport
   deriving (Eq, Ord, Show)

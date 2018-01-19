@@ -55,11 +55,13 @@ functionViewer :: (Ord (A.Address arch s), A.Architecture arch s)
 functionViewer fh ar =
   FunctionViewer { funcHandle = fh
                  , analysisResult = ar
-                 , funcBlocks = map BV.blockViewer (L.sortOn A.blockAddress blocks)
+                 , funcBlocks = blockViewers
                  , focusedBlock = Nothing
                  , blockMap = F.foldl' indexBlock M.empty blocks
                  }
   where
+    identifiers = map BlockViewerList [0..]
+    blockViewers = map (uncurry BV.blockViewer) (zip identifiers (L.sortOn A.blockAddress blocks))
     blocks = A.functionBlocks ar fh
     indexBlock m b = M.insert (A.blockAddress b) b m
 
@@ -72,8 +74,8 @@ handleFunctionViewerEvent _ fv = return fv
 renderFunctionViewer :: (A.Architecture arch s, Eq (A.Address arch s))
                      => FunctionViewer arch s
                      -> B.Widget Names
-renderFunctionViewer fv =
-  B.viewport FunctionViewport B.Both blockList
+renderFunctionViewer fv = blockList
+--  B.viewport FunctionViewport B.Both blockList
   where
     blockList = B.vBox (map renderWithFocus (funcBlocks fv))
     renderWithFocus b =

@@ -165,7 +165,7 @@ handleCustomEvent s0 evt =
       | Just oldNonce <- s0 ^? lArchState . _Just . lNonce
       , Just Refl <- testEquality archNonce oldNonce -> do
           let s1 = s0 & lUIMode .~ M.SomeUIMode M.BlockViewer
-                      & lArchState . _Just . lBlockViewer .~ BV.blockViewer b
+                      & lArchState . _Just . lBlockViewer .~ BV.blockViewer (BlockViewerList 0) b
           B.continue $! State s1
       | otherwise -> B.continue (State s0)
     ViewFunction archNonce fh
@@ -251,7 +251,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
                b0 <- listToMaybe (A.functionBlocks ares defFunc)
                return ArchState { sAnalysisResult = ares
                                 , sBlockSelector = BS.emptyBlockSelector
-                                , sBlockViewer = BV.blockViewer b0
+                                , sBlockViewer = BV.blockViewer (BlockViewerList 0) b0
                                 , sFunctionViewer = FV.functionViewer defFunc ares
                                 , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
                                 , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []

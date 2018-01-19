@@ -46,10 +46,11 @@ instructionListL = GL.field @"instructionList"
 blockViewerBlockL :: Lens' (BlockViewer arch s) (A.Block arch s)
 blockViewerBlockL = GL.field @"bvBlock"
 
-blockViewer :: (A.Architecture arch s) => A.Block arch s -> BlockViewer arch s
-blockViewer b = BlockViewer { bvBlock = b
-                            , instructionList = B.list BlockViewerList (V.fromList insns) 1
-                            }
+blockViewer :: (A.Architecture arch s) => Names -> A.Block arch s -> BlockViewer arch s
+blockViewer n b =
+  BlockViewer { bvBlock = b
+              , instructionList = B.list n (V.fromList insns) 1
+              }
   where
     insns = [ (a, i, operandSelector a i)
             | (a, i) <- A.blockInstructions b
