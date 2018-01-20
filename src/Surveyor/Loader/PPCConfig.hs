@@ -84,6 +84,6 @@ ppcConfig proxy customEventChan ng semantics elf mkCfg0 mkRes = do
                                            }
             let sr = mkRes res
             B.writeBChan customEventChan (AnalysisProgress sr)
-  let cfg = cfg0 { R.rcFunctionCallback = Just callback }
+  let cfg = cfg0 { R.rcFunctionCallback = Just (100, callback) }
   return (R.SomeConfig NR.knownNat cfg)
 
