@@ -1,5 +1,5 @@
 {-# LANGUAGE PolyKinds #-}
-module Brick.Command (
+module Surveyor.Core.Command (
   Command(..)
   ) where
 

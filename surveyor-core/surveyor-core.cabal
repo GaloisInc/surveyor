@@ -1,7 +1,7 @@
-name:                surveyor
+name:                surveyor-core
 version:             0.1.0.0
-synopsis:            An interactive binary explorer
--- description:         
+synopsis:            An interactive binary explorer (core library)
+description:         This includes core functionality reused among several UIs
 license:             BSD3
 license-file:        LICENSE
 author:              Tristan Ravitch
@@ -13,36 +13,23 @@ extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     Surveyor
-                       Surveyor.Architecture
+  exposed-modules:     Surveyor.Architecture
                        Surveyor.Architecture.Class
                        Surveyor.Architecture.JVM
                        Surveyor.Architecture.LLVM
                        Surveyor.Architecture.MC
                        Surveyor.Arguments
-                       Surveyor.Attributes
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Commands
                        Surveyor.Events
-                       Surveyor.Handlers
                        Surveyor.Keymap
                        Surveyor.Loader
                        Surveyor.Loader.PPCConfig
                        Surveyor.Loader.RenovateAnalysis
                        Surveyor.Mode
-                       Surveyor.Names
-                       Surveyor.State
-                       Surveyor.Widget.BlockSelector
-                       Surveyor.Widget.BlockViewer
+                       Surveyor.Core.Command
+                       Surveyor.Core.Keymap
                        Surveyor.Widget.EchoArea
-                       Surveyor.Widget.FunctionSelector
-                       Surveyor.Widget.FunctionViewer
-                       Surveyor.Widget.Minibuffer
-                       Brick.Command
-                       Brick.Keymap
-                       Brick.Match.Subword
-                       Brick.Widget.FilterList
-                       Brick.Widget.Minibuffer
   -- other-modules:       
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
@@ -82,12 +69,3 @@ library
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options: -Wall
-
-executable surveyor
-  default-language: Haskell2010
-  hs-source-dirs: tools/surveyor
-  main-is: Main.hs
-  ghc-options: -Wall -rtsopts -threaded "-with-rtsopts=-I0"
-  build-depends: surveyor,
-                 base,
-                 optparse-applicative

@@ -13,10 +13,10 @@ import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import qualified Data.Vector as V
 
-import qualified Brick.Command as C
+import qualified Surveyor.Architecture as A
+import qualified Surveyor.Core.Command as C
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.Minibuffer as MB
-import qualified Surveyor.Architecture as A
 import           Surveyor.Arguments
 import           Surveyor.Attributes
 

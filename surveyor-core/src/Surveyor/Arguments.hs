@@ -27,7 +27,7 @@ import qualified Data.Text.Zipper.Generic as Z
 import           Numeric.Natural ( Natural )
 import           Text.Read ( readMaybe )
 
-import qualified Brick.Command as C
+import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Architecture as A
 
 data Type where

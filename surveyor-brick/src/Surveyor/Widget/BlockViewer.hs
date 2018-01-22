@@ -118,6 +118,10 @@ renderBlockViewer ares bv =
       f <- A.genericSemantics ares insn
       return (B.txtWrap (A.prettyParameterizedFormula f))
 
+-- FIXME: Have a separate semantics display widget.  When a new instruction is
+-- selected, send a message to display the semantics, allowing the outer system
+-- to place the widget.
+
 operandSelector :: (A.Architecture arch s) => A.Address arch s -> A.Instruction arch s -> OperandSelector arch s
 operandSelector addr i =
   OperandSelector { selectedIndex = Nothing

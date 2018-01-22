@@ -1,0 +1,62 @@
+name:                surveyor-brick
+version:             0.1.0.0
+synopsis:            An interactive binary explorer
+-- description:         
+license:             BSD3
+license-file:        LICENSE
+author:              Tristan Ravitch
+maintainer:          tristan@nochair.net
+-- copyright:           
+category:            Reverse-Engineering
+build-type:          Simple
+extra-source-files:  ChangeLog.md
+cabal-version:       >=1.10
+
+library
+  exposed-modules:     Surveyor
+                       Surveyor.Attributes
+                       Surveyor.Handlers
+                       Surveyor.Names
+                       Surveyor.State
+                       Surveyor.Widget.BlockSelector
+                       Surveyor.Widget.BlockViewer
+                       Surveyor.Widget.FunctionSelector
+                       Surveyor.Widget.FunctionViewer
+                       Surveyor.Widget.Minibuffer
+                       Brick.Match.Subword
+                       Brick.Widget.FilterList
+                       Brick.Widget.Minibuffer
+  -- other-modules:       
+  -- other-extensions:    
+  build-depends:       base >=4.10 && <5,
+                       containers,
+                       async,
+                       bytestring,
+                       text,
+                       vector,
+                       filepath,
+                       prettyprinter,
+                       pretty,
+                       split >= 0.2 && < 0.3,
+                       lens >= 4.15 && < 5,
+                       generic-lens >= 0.5.1.0 && < 0.6,
+                       parameterized-utils >= 1 && < 2,
+                       text-zipper,
+                       megaparsec >= 6 && < 7,
+                       IntervalMap >= 0.5 && < 0.6,
+                       regex >= 1 && < 2,
+                       brick >= 0.30 && < 1,
+                       vty,
+                       surveyor-core
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+  ghc-options: -Wall
+
+executable surveyor-brick
+  default-language: Haskell2010
+  hs-source-dirs: tools/surveyor
+  main-is: Main.hs
+  ghc-options: -Wall -rtsopts -threaded "-with-rtsopts=-I0"
+  build-depends: surveyor-brick,
+                 base,
+                 optparse-applicative

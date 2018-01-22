@@ -37,7 +37,7 @@ import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
-import           Brick.Keymap ( Keymap )
+import           Surveyor.Core.Keymap ( Keymap )
 import qualified Surveyor.Arguments as AR
 import qualified Surveyor.Architecture as A
 import           Surveyor.Events ( Events )

@@ -12,7 +12,7 @@ import qualified Data.Text as T
 
 import qualified Renovate as R
 
-import qualified Brick.Command as C
+import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Architecture as A
 import qualified Surveyor.Widget.EchoArea as EA
 

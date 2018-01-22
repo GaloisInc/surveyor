@@ -26,7 +26,7 @@ import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
-import           Brick.Command ( Command(..) )
+import           Surveyor.Core.Command ( Command(..) )
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
 

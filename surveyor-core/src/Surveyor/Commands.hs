@@ -25,7 +25,7 @@ import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 
-import qualified Brick.Command as C
+import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Arguments as AR
 import           Surveyor.Events ( Events(..) )
 

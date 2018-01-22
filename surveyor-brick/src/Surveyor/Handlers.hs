@@ -18,8 +18,8 @@ import qualified Data.Text as T
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
-import qualified Brick.Command as C
-import qualified Brick.Keymap as K
+import qualified Surveyor.Core.Command as C
+import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes ( focusedListAttr )
 import qualified Surveyor.Commands as C

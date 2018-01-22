@@ -1,5 +1,5 @@
 {-# LANGUAGE PolyKinds #-}
-module Brick.Keymap (
+module Surveyor.Core.Keymap (
   Key(..),
   Keymap,
   emptyKeymap,
@@ -11,7 +11,7 @@ import qualified Data.Map as M
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Graphics.Vty as V
 
-import qualified Brick.Command as C
+import qualified Surveyor.Core.Command as C
 
 data Key = Key V.Key [V.Modifier]
   deriving (Eq, Ord, Show)

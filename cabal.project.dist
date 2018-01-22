@@ -1,4 +1,5 @@
-packages: .
+packages: surveyor-core
+          surveyor-brick
           deps/elf-edit
           deps/dwarf
           deps/parameterized-utils
