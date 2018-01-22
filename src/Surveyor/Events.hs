@@ -43,7 +43,7 @@ data Events s where
   ViewBlock :: PN.Nonce s arch -> A.Block arch s -> Events s
 
   -- Informational messages
-  DescribeCommand :: Some (C.Command st a r) -> Events s
+  DescribeCommand :: Some (C.Command (Events s) st a r) -> Events s
   EchoText :: !T.Text -> Events s
   UpdateEchoArea :: !EA.EchoArea -> Events s
   LogDiagnostic :: !T.Text -> Events s

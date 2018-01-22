@@ -13,6 +13,7 @@ module Brick.Widget.Minibuffer (
   ) where
 
 import qualified Brick as B
+import qualified Brick.BChan as B
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Functor.Const as C
 import           Data.Maybe ( fromMaybe )
@@ -29,16 +30,16 @@ import           Brick.Command ( Command(..) )
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
 
-data MinibufferState s a r where
+data MinibufferState e s a r where
   CollectingArguments :: PL.List (C.Const T.Text) tps
                       -> PL.List r tps
                       -> PL.List r tps'
                       -> PL.List a tps'
                       -> PL.List r tps0
-                      -> (s -> PL.List a tps0 -> IO ())
-                      -> MinibufferState s a r
+                      -> (B.BChan e -> s -> PL.List a tps0 -> IO ())
+                      -> MinibufferState e s a r
   -- ^ In the process of collecting arguments
-  Editing :: MinibufferState s a r
+  Editing :: MinibufferState e s a r
   -- ^ The input editor has focus
 
 -- | The abstract state of a minibuffer
@@ -52,12 +53,12 @@ data MinibufferState s a r where
 --
 -- The @n@ parameter is the type of the names used to identify widgets in your
 -- application.
-data Minibuffer s a r t n =
+data Minibuffer e s a r t n =
   Minibuffer { prefix :: !T.Text
-             , commandList :: FL.FilterList n t (Some (Command s a r))
+             , commandList :: FL.FilterList n t (Some (Command e s a r))
              , argumentList :: FL.FilterList n t t
-             , allCommands :: !(V.Vector (Some (Command s a r)))
-             , state :: MinibufferState s a r
+             , allCommands :: !(V.Vector (Some (Command e s a r)))
+             , state :: MinibufferState e s a r
              , parseArgument :: forall tp . t -> r tp -> Maybe (a tp)
              , completeArgument :: forall tp . t -> r tp -> IO (V.Vector t)
              , showRepr :: forall tp . r tp -> T.Text
@@ -82,9 +83,9 @@ minibuffer :: (ZG.GenericTextZipper t)
            -- ^ The name to assign to the completion list
            -> T.Text
            -- ^ The prefix to display before the editor widget
-           -> [Some (Command s a r)]
+           -> [Some (Command e s a r)]
            -- ^ The commands supported by the minibuffer
-           -> Minibuffer s a r t n
+           -> Minibuffer e s a r t n
 minibuffer parseArg compArg showRep attr edName compName pfx cmds =
   Minibuffer { prefix = pfx
              , commandList = FL.filterList commandConfig allCmds
@@ -115,8 +116,8 @@ minibuffer parseArg compArg showRep attr edName compName pfx cmds =
                                          , FL.flRenderListItem = renderArgumentCompletionItem attr
                                          }
 
-data MinibufferStatus s a r t n = Completed (Minibuffer s a r t n)
-                                | Canceled (Minibuffer s a r t n)
+data MinibufferStatus e s a r t n = Completed (Minibuffer e s a r t n)
+                                  | Canceled (Minibuffer e s a r t n)
 
 -- | Extract the argument from the argument filter list
 --
@@ -140,10 +141,11 @@ argumentValue argList =
 --    command will deactivate the minibuffer
 handleMinibufferEvent :: (Ord n, Eq t, Monoid t, ZG.GenericTextZipper t, TestEquality r)
                       => V.Event
+                      -> B.BChan e
                       -> s
-                      -> Minibuffer s a r t n
-                      -> B.EventM n (MinibufferStatus s a r t n)
-handleMinibufferEvent evt s mb@(Minibuffer { parseArgument = parseArg }) =
+                      -> Minibuffer e s a r t n
+                      -> B.EventM n (MinibufferStatus e s a r t n)
+handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = parseArg }) =
   case evt of
     V.EvKey V.KEnter [] ->
       case state mb of
@@ -156,7 +158,7 @@ handleMinibufferEvent evt s mb@(Minibuffer { parseArgument = parseArg }) =
             Just (Some (Command _ _ argNames argTypes callback)) ->
               case (argNames, argTypes) of
                 (PL.Nil, PL.Nil) -> do
-                  liftIO (callback s PL.Nil)
+                  liftIO (callback customEventChan s PL.Nil)
                   return (Completed (resetMinibuffer mb))
                 _ ->
                   return $ Completed mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
@@ -169,7 +171,7 @@ handleMinibufferEvent evt s mb@(Minibuffer { parseArgument = parseArg }) =
               withReversedF collectedArgTypes collectedArgValues $ \collectedArgTypes' collectedArgValues' -> do
                 case () of
                   _ | Just Refl <- testEquality callbackType collectedArgTypes' -> do
-                        liftIO (callback s collectedArgValues')
+                        liftIO (callback customEventChan s collectedArgValues')
                         return (Completed (resetMinibuffer mb))
                     | otherwise -> error "impossible"
             (C.Const _expectedArgName PL.:< restArgs, expectedArgType PL.:< restTypes) -> do
@@ -182,7 +184,7 @@ handleMinibufferEvent evt s mb@(Minibuffer { parseArgument = parseArg }) =
                       withReversedF (expectedArgType PL.:< collectedArgTypes) (parsedArg PL.:< collectedArgValues) $ \collectedArgTypes' collectedArgValues' -> do
                         case () of
                           _ | Just Refl <- testEquality callbackType collectedArgTypes' -> do
-                                liftIO (callback s collectedArgValues')
+                                liftIO (callback customEventChan s collectedArgValues')
                                 return (Completed (resetMinibuffer mb))
                             | otherwise -> error "impossible"
                     (_, _) ->
@@ -218,7 +220,7 @@ handleMinibufferEvent evt s mb@(Minibuffer { parseArgument = parseArg }) =
               argList' <- FL.handleFilterListEvent updater evt (argumentList mb)
               return $ Completed mb { argumentList = argList' }
 
-resetMinibuffer :: (ZG.GenericTextZipper t) => Minibuffer s a r t n -> Minibuffer s a r t n
+resetMinibuffer :: (ZG.GenericTextZipper t) => Minibuffer e s a r t n -> Minibuffer e s a r t n
 resetMinibuffer mb = Minibuffer { prefix = prefix mb
                                 , commandList = FL.resetList (commandList mb)
                                 , argumentList = FL.resetList (argumentList mb)
@@ -238,12 +240,12 @@ withReversedF l1 l2 k = go PL.Nil PL.Nil l1 l2
         (PL.Nil, PL.Nil) -> k acc1 acc2
         (x1 PL.:< xs1, x2 PL.:< xs2) -> go (x1 PL.:< acc1) (x2 PL.:< acc2) xs1 xs2
 
-commandMatches :: SW.Matcher -> Some (Command s a r) -> Bool
+commandMatches :: SW.Matcher -> Some (Command e s a r) -> Bool
 commandMatches m (Some cmd) = SW.matches m (cmdName cmd)
 
 renderMinibuffer :: (Ord n, Show n, B.TextWidth t, ZG.GenericTextZipper t)
                  => Bool
-                 -> Minibuffer s a r t n
+                 -> Minibuffer e s a r t n
                  -> B.Widget n
 renderMinibuffer hasFocus mb =
   case state mb of
@@ -257,11 +259,11 @@ renderMinibuffer hasFocus mb =
           let renderPrompt _n = B.str (printf "%s (%s): " name (showRepr mb ty))
           in FL.renderFilterList renderPrompt hasFocus (argumentList mb)
 
-renderCommandCompletionItem :: forall s a r n
+renderCommandCompletionItem :: forall e s a r n
                              . (forall tp . r tp -> T.Text)
                             -> B.AttrName
                             -> Bool
-                            -> Some (Command s a r)
+                            -> Some (Command e s a r)
                             -> B.Widget n
 renderCommandCompletionItem showRep focAttr isFocused (Some (Command name _ argNames argTypes _)) =
   let xfrm = if isFocused then B.withAttr focAttr else id

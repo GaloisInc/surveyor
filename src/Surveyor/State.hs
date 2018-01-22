@@ -116,7 +116,7 @@ data ArchState arch s =
             -- ^ A nonce used to check to see if the arch type has changed between runs
             , sAnalysisResult :: !(A.AnalysisResult arch s)
             -- ^ Information returned by the binary analysis
-            , sMinibuffer :: !(MB.Minibuffer (Maybe (NG.Nonce s arch)) (AR.Argument arch (Maybe (NG.Nonce s arch)) s) AR.TypeRepr T.Text Names)
+            , sMinibuffer :: !(MB.Minibuffer (Events s) (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr T.Text Names)
             -- ^ The persistent state of the minibuffer
             --
             -- We keep it around so that it doesn't have to re-index the commands
@@ -125,7 +125,7 @@ data ArchState arch s =
             , sBlockSelector :: !(BS.BlockSelector arch s)
             , sBlockViewer :: !(BV.BlockViewer arch s)
             , sFunctionViewer :: !(FV.FunctionViewer arch s)
-            , sKeymap :: !(Keymap SomeUIMode (Maybe (NG.Nonce s arch)) (AR.Argument arch (Maybe (NG.Nonce s arch)) s) AR.TypeRepr)
+            , sKeymap :: !(Keymap (Events s) SomeUIMode (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr)
             }
   deriving (Generic)
 
@@ -135,7 +135,7 @@ lNonce = GL.field @"sNonce"
 lAnalysisResult :: L.Lens' (ArchState arch s) (A.AnalysisResult arch s)
 lAnalysisResult = GL.field @"sAnalysisResult"
 
-lMinibuffer :: L.Lens' (ArchState arch s) (MB.Minibuffer (Maybe (NG.Nonce s arch)) (AR.Argument arch (Maybe (NG.Nonce s arch)) s) AR.TypeRepr T.Text Names)
+lMinibuffer :: L.Lens' (ArchState arch s) (MB.Minibuffer (Events s) (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr T.Text Names)
 lMinibuffer = GL.field @"sMinibuffer"
 
 lFunctionSelector :: L.Lens' (ArchState arch s) (FS.FunctionSelector arch s)
@@ -150,7 +150,7 @@ lBlockViewer = GL.field @"sBlockViewer"
 lFunctionViewer :: L.Lens' (ArchState arch s) (FV.FunctionViewer arch s)
 lFunctionViewer = GL.field @"sFunctionViewer"
 
-lKeymap :: L.Lens' (ArchState arch s) (Keymap SomeUIMode (Maybe (NG.Nonce s arch)) (AR.Argument arch (Maybe (NG.Nonce s arch)) s) AR.TypeRepr)
+lKeymap :: L.Lens' (ArchState arch s) (Keymap (Events s) SomeUIMode (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr)
 lKeymap = GL.field @"sKeymap"
 
 data AppState = Loading

@@ -62,18 +62,18 @@ instance TestEquality TypeRepr where
   testEquality FilePathTypeRepr FilePathTypeRepr = Just Refl
   testEquality _ _ = Nothing
 
-data Argument arch st s tp where
-  CommandArgument :: Some (C.Command st (Argument arch st s) TypeRepr) -> Argument arch st s CommandType
-  StringArgument :: T.Text -> Argument arch st s StringType
-  AddressArgument :: A.Address arch s -> Argument arch st s AddressType
-  IntArgument :: Integer -> Argument arch st s IntType
-  WordArgument :: Natural -> Argument arch st s WordType
-  FilePathArgument :: FilePath -> Argument arch st s FilePathType
+data Argument arch e st s tp where
+  CommandArgument :: Some (C.Command e st (Argument arch e st s) TypeRepr) -> Argument arch e st s CommandType
+  StringArgument :: T.Text -> Argument arch e st s StringType
+  AddressArgument :: A.Address arch s -> Argument arch e st s AddressType
+  IntArgument :: Integer -> Argument arch e st s IntType
+  WordArgument :: Natural -> Argument arch e st s WordType
+  FilePathArgument :: FilePath -> Argument arch e st s FilePathType
 
 parseArgument :: (A.Architecture arch s, Z.GenericTextZipper t)
-              => [Some (C.Command st (Argument arch st s) TypeRepr)]
+              => [Some (C.Command e st (Argument arch e st s) TypeRepr)]
               -> t
-              -> (TypeRepr tp -> Maybe (Argument arch st s tp))
+              -> (TypeRepr tp -> Maybe (Argument arch e st s tp))
 parseArgument cmds =
   let indexCommand m (Some cmd) = M.insert (C.cmdName cmd) (Some cmd) m
       cmdIndex = F.foldl' indexCommand M.empty cmds

@@ -21,7 +21,7 @@ import           Surveyor.Arguments
 import           Surveyor.Attributes
 
 completeArgument :: (Z.GenericTextZipper t)
-                 => [Some (C.Command st (Argument arch st s) TypeRepr)]
+                 => [Some (C.Command e st (Argument arch e st s) TypeRepr)]
                  -> (t -> TypeRepr tp -> IO (V.Vector t))
 completeArgument cmds =
   let cmdNames = V.fromList [ C.cmdName cmd | Some cmd <- cmds ]
@@ -47,7 +47,7 @@ minibuffer :: (Z.GenericTextZipper t, A.Architecture arch s)
            -> n
            -- ^ The name of the completion list
            -> T.Text
-           -> [Some (C.Command st (Argument arch st s) TypeRepr)]
-           -> MB.Minibuffer st (Argument arch st s) TypeRepr t n
+           -> [Some (C.Command e st (Argument arch e st s) TypeRepr)]
+           -> MB.Minibuffer e st (Argument arch e st s) TypeRepr t n
 minibuffer edName compName pfx cmds =
   MB.minibuffer (parseArgument cmds) (completeArgument cmds) showRepr focusedListAttr edName compName pfx cmds

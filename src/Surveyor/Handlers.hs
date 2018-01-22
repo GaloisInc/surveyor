@@ -54,13 +54,13 @@ handleVtyEvent s0@(State s) evt
       -- commands that take no arguments.  Later, once we develop a notion of
       -- "current context", we can use that to call commands that take an
       -- argument.
-      liftIO (C.cmdFunc cmd (sNonce <$> sArchState s) PL.Nil)
+      liftIO (C.cmdFunc cmd (sEventChannel s) (sNonce <$> sArchState s) PL.Nil)
       B.continue (State s)
   | otherwise =
   case sUIMode s of
     M.SomeMiniBuffer (M.MiniBuffer oldMode)
       | Just mb <- s ^? lArchState . _Just . lMinibuffer -> do
-          mbs <- MB.handleMinibufferEvent evt (sNonce <$> sArchState s) mb
+          mbs <- MB.handleMinibufferEvent evt (sEventChannel s) (sNonce <$> sArchState s) mb
           case mbs of
             MB.Canceled mb' -> do
               let s' = s & lUIMode .~ M.SomeUIMode oldMode
@@ -253,9 +253,9 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
                                 , sBlockSelector = BS.emptyBlockSelector
                                 , sBlockViewer = BV.blockViewer (BlockViewerList 0) b0
                                 , sFunctionViewer = FV.functionViewer defFunc ares
-                                , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands (sEventChannel s0))
+                                , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" C.allCommands
                                 , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                , sKeymap = K.defaultKeymap (sEventChannel s0)
+                                , sKeymap = K.defaultKeymap
                                 , sNonce = A.archNonce ares
                                 }
     }
