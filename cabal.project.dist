@@ -1,5 +1,6 @@
 packages: surveyor-core
           surveyor-brick
+          surveyor-qml
           deps/elf-edit
           deps/dwarf
           deps/parameterized-utils
