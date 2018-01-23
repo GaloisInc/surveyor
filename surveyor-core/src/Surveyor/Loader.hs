@@ -176,7 +176,7 @@ loadElf ng customEventChan someElf = do
                                                }
                     sr = A.mkX86Result res
                 in B.writeBChan customEventChan (AnalysisProgress sr)
-      let x86cfg = x86cfg0 { R.rcFunctionCallback = Just (100, x86callback) }
+      let x86cfg = x86cfg0 { R.rcFunctionCallback = Just (10, x86callback) }
       return [ (R.PPC64, ppc64cfg)
              , (R.X86_64, R.SomeConfig NR.knownNat x86cfg)
              ]
