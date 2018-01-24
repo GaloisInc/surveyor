@@ -3,7 +3,7 @@ module Main ( main ) where
 import           Data.Monoid
 import qualified Options.Applicative as O
 
-import           Surveyor
+import           Surveyor.Brick
 
 data Options =
   Options { oInputFile :: Maybe FilePath

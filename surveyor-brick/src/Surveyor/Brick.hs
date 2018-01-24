@@ -5,7 +5,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
-module Surveyor ( surveyor ) where
+module Surveyor.Brick ( surveyor ) where
 
 import qualified Brick as B
 import qualified Brick.BChan as B
