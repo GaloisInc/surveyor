@@ -78,7 +78,7 @@ ppcConfig proxy customEventChan ng semantics elf mkCfg0 mkRes = do
             let res = BinaryAnalysisResult { rBlockInfo = bi
                                            , rMemory = mem
                                            , rISA = isa
-                                           , rBlockMap = indexBlocksByAddress isa mem bi
+                                           , rBlockMap = indexBlocksByAddress isa bi
                                            , rNonce = nonceA
                                            , rSemantics = Just formulas
                                            }

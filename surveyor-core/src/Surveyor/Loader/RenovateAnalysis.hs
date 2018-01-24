@@ -25,7 +25,7 @@ analysis con nonce semantics isa mem bi = con r
     r = BinaryAnalysisResult { rBlockInfo = bi
                              , rMemory = mem
                              , rISA = isa
-                             , rBlockMap = indexBlocksByAddress isa mem bi
+                             , rBlockMap = indexBlocksByAddress isa bi
                              , rNonce = nonce
                              , rSemantics = semantics
                              }

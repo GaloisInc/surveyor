@@ -124,7 +124,7 @@ toInstPPC32 (i, addr) = (PPC32Address (MM.absoluteAddr (R.absoluteAddress addr))
 toBlockPPC32 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction a 32 PPC.PPC32 -> R.ConcreteBlock PPC.Instruction 32 -> Block PPC.PPC32 s
 toBlockPPC32 bar cb =
   Block { blockAddress = PPC32Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstPPC32 (R.instructionAddresses (rISA bar) (rMemory bar) cb)
+        , blockInstructions = map toInstPPC32 (R.instructionAddresses (rISA bar) cb)
         }
 
 toInstPPC64 :: (PPC.Instruction (), R.ConcreteAddress 64) -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
@@ -134,7 +134,7 @@ toInstPPC64 (i, addr) = (PPC64Address (MM.absoluteAddr (R.absoluteAddress addr))
 toBlockPPC64 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction a 64 PPC.PPC64 -> R.ConcreteBlock PPC.Instruction 64 -> Block PPC.PPC64 s
 toBlockPPC64 bar cb =
   Block { blockAddress = PPC64Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstPPC64 (R.instructionAddresses (rISA bar) (rMemory bar) cb)
+        , blockInstructions = map toInstPPC64 (R.instructionAddresses (rISA bar) cb)
         }
 
 toBlockX86 :: BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64
@@ -142,7 +142,7 @@ toBlockX86 :: BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetA
            -> Block X86.X86_64 s
 toBlockX86 bar cb =
   Block { blockAddress = X86Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstX86 (R.instructionAddresses (rISA bar) (rMemory bar) cb)
+        , blockInstructions = map toInstX86 (R.instructionAddresses (rISA bar) cb)
         }
 
 toInstX86 :: (X86.Instruction (), R.ConcreteAddress 64) -> (Address X86.X86_64 s, Instruction X86.X86_64 s)

@@ -26,13 +26,12 @@ data BinaryAnalysisResult s o i a w arch =
 
 indexBlocksByAddress :: (MM.MemWidth w)
                      => R.ISA i a w
-                     -> MM.Memory w
                      -> R.BlockInfo i w arch
                      -> IM.IntervalMap (MM.MemAddr w) (R.ConcreteBlock i w)
-indexBlocksByAddress isa mem bi = F.foldl' indexBlock IM.empty (R.biBlocks bi)
+indexBlocksByAddress isa bi = F.foldl' indexBlock IM.empty (R.biBlocks bi)
   where
     indexBlock m b =
-      let iaddrs = fmap (MM.absoluteAddr . R.absoluteAddress . snd) (R.instructionAddresses isa mem b)
+      let iaddrs = fmap (MM.absoluteAddr . R.absoluteAddress . snd) (R.instructionAddresses isa b)
       in IM.insert (IM.ClosedInterval (minimum iaddrs) (maximum iaddrs)) b m
 
 -- | Look up the basic block containing the given address.

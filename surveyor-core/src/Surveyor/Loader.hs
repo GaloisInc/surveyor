@@ -170,7 +170,7 @@ loadElf ng customEventChan someElf = do
                 let res = BinaryAnalysisResult { rBlockInfo = bi
                                                , rMemory = mem
                                                , rISA = R.rcISA x86cfg0
-                                               , rBlockMap = indexBlocksByAddress (R.rcISA x86cfg0) mem bi
+                                               , rBlockMap = indexBlocksByAddress (R.rcISA x86cfg0) bi
                                                , rNonce = nonceAx86
                                                , rSemantics = Nothing
                                                }
