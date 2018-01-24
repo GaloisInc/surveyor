@@ -36,7 +36,7 @@ import qualified Surveyor.Widget.FunctionViewer as FV
 import qualified Surveyor.Widget.FunctionSelector as FS
 import qualified Surveyor.Widget.Minibuffer as MB
 
-appHandleEvent :: State s -> B.BrickEvent Names (Events s) -> B.EventM Names (B.Next (State s))
+appHandleEvent :: State BrickUIState s -> B.BrickEvent Names (Events s) -> B.EventM Names (B.Next (State BrickUIState s))
 appHandleEvent (State s0) evt =
   case evt of
     B.AppEvent ae -> handleCustomEvent s0 ae
@@ -44,7 +44,7 @@ appHandleEvent (State s0) evt =
     B.MouseDown {} -> B.continue (State s0)
     B.MouseUp {} -> B.continue (State s0)
 
-handleVtyEvent :: State s -> V.Event -> B.EventM Names (B.Next (State s))
+handleVtyEvent :: State BrickUIState s -> V.Event -> B.EventM Names (B.Next (State BrickUIState s))
 handleVtyEvent s0@(State s) evt
   | V.EvKey k mods <- evt
   , Just km <- s ^? lArchState . _Just . lKeymap
@@ -90,7 +90,7 @@ handleVtyEvent s0@(State s) evt
       | otherwise -> B.continue s0
     M.SomeUIMode _m -> B.continue s0
 
-handleCustomEvent :: (A.Architecture arch s) => S arch s -> Events s -> B.EventM Names (B.Next (State s))
+handleCustomEvent :: (A.Architecture arch s) => S BrickUIState arch s -> Events s -> B.EventM Names (B.Next (State BrickUIState s))
 handleCustomEvent s0 evt =
   case evt of
     AnalysisFinished (A.SomeResult bar) diags ->
@@ -225,12 +225,12 @@ handleCustomEvent s0 evt =
       B.halt (State s0)
 
 stateFromAnalysisResult :: (A.Architecture arch s)
-                        => S arch0 s
+                        => S BrickUIState arch0 s
                         -> A.AnalysisResult arch s
                         -> Seq.Seq T.Text
                         -> AppState
                         -> M.SomeUIMode
-                        -> S arch s
+                        -> S BrickUIState arch s
 stateFromAnalysisResult s0 ares newDiags state uiMode =
   S { sDiagnosticLog = sDiagnosticLog s0 <> newDiags
     , sUIMode = uiMode
@@ -249,13 +249,15 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
            | otherwise -> do
                defFunc <- listToMaybe (A.functions ares)
                b0 <- listToMaybe (A.functionBlocks ares defFunc)
+               let uiState = BrickUIState { sBlockSelector = BS.emptyBlockSelector
+                                          , sBlockViewer = BV.blockViewer (BlockViewerList 0) b0
+                                          , sFunctionViewer = FV.functionViewer defFunc ares
+                                          , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" C.allCommands
+                                          , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                          }
                return ArchState { sAnalysisResult = ares
-                                , sBlockSelector = BS.emptyBlockSelector
-                                , sBlockViewer = BV.blockViewer (BlockViewerList 0) b0
-                                , sFunctionViewer = FV.functionViewer defFunc ares
-                                , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" C.allCommands
-                                , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
                                 , sKeymap = K.defaultKeymap
                                 , sNonce = A.archNonce ares
+                                , sUIState = uiState
                                 }
     }

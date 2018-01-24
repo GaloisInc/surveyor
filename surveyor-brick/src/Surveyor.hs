@@ -11,7 +11,7 @@ import qualified Brick as B
 import qualified Brick.BChan as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
-import           Control.Lens ( (^?), _Just )
+import           Control.Lens ( (^.), (^?), _Just )
 import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Nonce as PN
@@ -57,7 +57,7 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
 -- The status bar is a line at the bottom of the screen that reflects the
 -- currently-loaded executable (if any) and includes an indicator of the
 -- analysis progress.
-drawStatusBar :: S arch s -> B.Widget Names
+drawStatusBar :: S BrickUIState arch s -> B.Widget Names
 drawStatusBar s =
   B.withAttr statusBarAttr (B.hBox [fileNameWidget, B.padLeft B.Max statusWidget])
   where
@@ -68,7 +68,7 @@ drawStatusBar s =
         Ready -> B.str "Ready"
         AwaitingFile -> B.str "Waiting for file"
 
-drawAppShell :: S arch s -> B.Widget Names -> [B.Widget Names]
+drawAppShell :: S BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w =
   [ B.vBox [ B.borderWithLabel (title (sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
            , drawStatusBar s
@@ -87,7 +87,7 @@ drawAppShell s w =
             MB.renderMinibuffer True mb
         _ -> EA.renderEchoArea (sEchoArea s)
 
-appDraw :: State s -> [B.Widget Names]
+appDraw :: State BrickUIState s -> [B.Widget Names]
 appDraw (State s) =
   case sInputFile s of
     Nothing -> drawAppShell s B.emptyWidget
@@ -103,34 +103,34 @@ appDraw (State s) =
 
 drawUIMode :: (A.Architecture arch s)
            => FilePath
-           -> ArchState arch s
-           -> S arch s
+           -> ArchState BrickUIState arch s
+           -> S BrickUIState arch s
            -> UIMode NormalK
            -> [B.Widget Names]
 drawUIMode binFileName archState s uim =
   case uim of
     Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
     Summary -> drawAppShell s (drawSummary binFileName binfo)
-    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (sFunctionSelector archState))
-    BlockSelector -> drawAppShell s (BS.renderBlockSelector (sBlockSelector archState))
-    BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (sBlockViewer archState))
-    FunctionViewer -> drawAppShell s (FV.renderFunctionViewer (sFunctionViewer archState))
+    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. lFunctionSelector))
+    BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. lBlockSelector))
+    BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (archState ^. lBlockViewer))
+    FunctionViewer -> drawAppShell s (FV.renderFunctionViewer (archState ^. lFunctionViewer ))
   where
     binfo = sAnalysisResult archState
 
-appChooseCursor :: State s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
+appChooseCursor :: State BrickUIState s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =
   case cursors of
     [c] -> Just c
     _ -> Nothing
 
-appAttrMap :: State s -> B.AttrMap
+appAttrMap :: State BrickUIState s -> B.AttrMap
 appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
                                    , (statusBarAttr, V.black `B.on` V.white)
                                    , (B.listSelectedFocusedAttr, V.blue `B.on` V.white)
                                    ]
 
-appStartEvent :: State s -> B.EventM Names (State s)
+appStartEvent :: State BrickUIState s -> B.EventM Names (State BrickUIState s)
 appStartEvent s0 = return s0
 
 updateEchoArea :: B.BChan (Events s) -> EA.EchoArea -> IO ()
@@ -153,7 +153,7 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   return ()
 
 
-emptyState :: Maybe FilePath -> Maybe AsyncLoader -> PN.NonceGenerator IO s -> B.BChan (Events s) -> IO (S Void s)
+emptyState :: Maybe FilePath -> Maybe AsyncLoader -> PN.NonceGenerator IO s -> B.BChan (Events s) -> IO (S BrickUIState Void s)
 emptyState mfp mloader ng customEventChan = do
   return S { sInputFile = mfp
            , sLoader = mloader

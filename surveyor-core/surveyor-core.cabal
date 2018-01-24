@@ -29,6 +29,7 @@ library
                        Surveyor.Mode
                        Surveyor.Core.Command
                        Surveyor.Core.Keymap
+                       Surveyor.Core.State
                        Surveyor.Widget.EchoArea
   -- other-modules:       
   -- other-extensions:    
