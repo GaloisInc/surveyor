@@ -50,9 +50,9 @@ handleEvents chan mv = do
     E.AnalysisFinished (A.SomeResult ar) _ -> updateArchRes mv ar
     E.AnalysisProgress (A.SomeResult ar) -> updateArchRes mv ar
 
-updateArchRes :: (A.Architecture arch PN.GlobalNonceGenerator)
-              => Context
-              -> A.AnalysisResult arch PN.GlobalNonceGenerator
+updateArchRes :: (A.Architecture arch s)
+              => MV.MVar (State QMLUIState s)
+              -> A.AnalysisResult arch s
               -> IO ()
 updateArchRes mv ar = do
   State s <- MV.takeMVar mv
@@ -62,10 +62,10 @@ updateArchRes mv ar = do
         MV.putMVar mv (State (s & lArchState . _Just . lAnalysisResult .~ ar))
       | otherwise -> MV.putMVar mv (State (freshState s ar))
 
-freshState :: (A.Architecture arch1 PN.GlobalNonceGenerator)
-           => S QMLUIState arch2 PN.GlobalNonceGenerator
-           -> A.AnalysisResult arch1 PN.GlobalNonceGenerator
-           -> S QMLUIState arch1 PN.GlobalNonceGenerator
+freshState :: (A.Architecture arch1 s)
+           => S QMLUIState arch2 s
+           -> A.AnalysisResult arch1 s
+           -> S QMLUIState arch1 s
 freshState s ar = S { sInputFile = sInputFile s
                     , sLoader = sLoader s
                     , sDiagnosticLog = sDiagnosticLog s
@@ -78,9 +78,9 @@ freshState s ar = S { sInputFile = sInputFile s
                     , sArchState = Just (freshArchState ar)
                     }
 
-freshArchState :: (A.Architecture arch PN.GlobalNonceGenerator)
-               => A.AnalysisResult arch PN.GlobalNonceGenerator
-               -> ArchState QMLUIState arch PN.GlobalNonceGenerator
+freshArchState :: (A.Architecture arch s)
+               => A.AnalysisResult arch s
+               -> ArchState QMLUIState arch s
 freshArchState ar =
   ArchState { sNonce = A.archNonce ar
             , sAnalysisResult = ar
@@ -90,9 +90,9 @@ freshArchState ar =
 
 emptyState :: Maybe FilePath
            -> Maybe AsyncLoader
-           -> PN.NonceGenerator IO PN.GlobalNonceGenerator
-           -> B.BChan (E.Events PN.GlobalNonceGenerator)
-           -> S QMLUIState Void PN.GlobalNonceGenerator
+           -> PN.NonceGenerator IO s
+           -> B.BChan (E.Events s)
+           -> S QMLUIState Void s
 emptyState mInitialInput mloader ng customEventChan =
   S { sInputFile = mInitialInput
     , sLoader = mloader
@@ -135,6 +135,6 @@ hello _r = do
   print "hello"
   return ()
 
-updateEchoArea :: B.BChan (E.Events PN.GlobalNonceGenerator) -> EA.EchoArea -> IO ()
+updateEchoArea :: B.BChan (E.Events s) -> EA.EchoArea -> IO ()
 updateEchoArea customEventChan ea =
   B.writeBChan customEventChan (E.UpdateEchoArea ea)
