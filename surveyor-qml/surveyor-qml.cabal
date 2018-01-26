@@ -23,6 +23,8 @@ library
                        containers,
                        bytestring,
                        text,
+                       async,
+                       lens,
                        temporary,
                        file-embed,
                        parameterized-utils,
