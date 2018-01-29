@@ -1,5 +1,9 @@
+{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 module Surveyor.QML ( surveyor) where
 
 import qualified Brick.BChan as B
@@ -9,12 +13,20 @@ import           Control.Lens ( (&), (^.), (^?), (.~), _Just )
 import           Control.Monad ( forever )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as PN
+import qualified Data.Parameterized.List as PL
+import           Data.Parameterized.Some ( Some(..) )
+import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
+import qualified Data.Text as T
 import qualified Data.Traversable as T
 import           Data.Void ( Void )
 import qualified Graphics.QML as Q
+import qualified System.Exit as IO
 
 import qualified Surveyor.Architecture as A
+import qualified Surveyor.Arguments as AR
+import qualified Surveyor.Commands as C
+import qualified Surveyor.Core.Command as C
 import           Surveyor.Core.State
 import qualified Surveyor.Events as E
 import qualified Surveyor.Keymap as K
@@ -33,22 +45,32 @@ surveyor mInitialInput mUIFile = do
     Nothing -> error "No UI file"
     Just uiFile -> do
       o <- MV.newMVar (State (emptyState mInitialInput mloader ng customEventChan))
-      hdlr <- A.async $ forever $ handleEvents customEventChan o
-      A.link hdlr
       klass <- defineContextClass
       ctxObj <- Q.newObject klass o
-      let cfg = Q.defaultEngineConfig { Q.initialDocument = Q.fileDocument uiFile
-                                      , Q.contextObject = Just (Q.anyObjRef ctxObj)
-                                      }
-      Q.runEngineLoop cfg
+      hdlrThread <- A.async $ forever $ handleEvents customEventChan ctxObj
+      guiThread <- A.asyncBound $ do
+        let cfg = Q.defaultEngineConfig { Q.initialDocument = Q.fileDocument uiFile
+                                        , Q.contextObject = Just (Q.anyObjRef ctxObj)
+                                        }
+        Q.runEngineLoop cfg
+      eres <- A.waitCatch hdlrThread
+      case eres of
+        Left err -> do
+          print err
+          A.cancel guiThread
+        Right _ -> return ()
   return ()
 
-handleEvents :: B.BChan (E.Events PN.GlobalNonceGenerator) -> Context -> IO ()
-handleEvents chan mv = do
+handleEvents :: B.BChan (E.Events PN.GlobalNonceGenerator) -> Q.ObjRef Context -> IO ()
+handleEvents chan ref = do
+  let mv = Q.fromObjRef ref
   e <- B.readBChan chan
   case e of
     E.AnalysisFinished (A.SomeResult ar) _ -> updateArchRes mv ar
     E.AnalysisProgress (A.SomeResult ar) -> updateArchRes mv ar
+    E.Exit -> do
+      Q.fireSignal (Proxy @ShutdownSignal) ref
+      IO.exitSuccess
 
 updateArchRes :: (A.Architecture arch s)
               => MV.MVar (State QMLUIState s)
@@ -85,7 +107,8 @@ freshArchState ar =
   ArchState { sNonce = A.archNonce ar
             , sAnalysisResult = ar
             , sKeymap = K.defaultKeymap
-            , sUIState = QMLUIState
+            , sUIState = QMLUIState { sMinibuffer = Minibuffer C.allCommands
+                                    }
             }
 
 emptyState :: Maybe FilePath
@@ -109,15 +132,54 @@ emptyState mInitialInput mloader ng customEventChan =
 type Context =
   MV.MVar (State QMLUIState PN.GlobalNonceGenerator)
 
+data Minibuffer e st arch s =
+  Minibuffer { mbCommands :: [Some (C.Command e st (AR.Argument arch e st s) AR.TypeRepr)]
+             }
+
 data QMLUIState arch s =
-  QMLUIState
+  QMLUIState { sMinibuffer :: Minibuffer (E.Events s) (Maybe (PN.Nonce s arch)) arch s
+             }
 
 defineContextClass :: IO (Q.Class Context)
 defineContextClass = do
   Q.newClass [ Q.defMethod' "hello" hello
              , Q.defMethod' "world" world
              , Q.defMethod' "bye" bye
+             , Q.defMethod' "runCommand" runCommand
+             , Q.defSignal "shutdown" (Proxy @ShutdownSignal)
              ]
+
+data ShutdownSignal
+
+instance Q.SignalKeyClass ShutdownSignal where
+  type SignalParams ShutdownSignal = IO ()
+
+runCommand :: Q.ObjRef Context -> T.Text -> IO ()
+runCommand r cmdString = do
+  print cmdString
+  State s <- MV.readMVar (Q.fromObjRef r)
+  case s ^? lArchState . _Just . lUIState of
+    Nothing -> putStrLn "No state" >> return ()
+    Just uis -> do
+      let cmds = mbCommands (sMinibuffer uis)
+      case matchCommand cmdString cmds of
+        Nothing -> putStrLn "No command" >> return ()
+        Just (Some cmd) ->
+          case C.cmdArgTypes cmd of
+            PL.Nil -> do
+              putStrLn "Ran command"
+              C.cmdFunc cmd (s ^. lEventChannel) (s ^? lArchState . _Just . lNonce) PL.Nil
+            _ -> putStrLn "Argument shape" >> return ()
+
+matchCommand :: T.Text
+             -> [Some (C.Command e st (AR.Argument arch e st s) AR.TypeRepr)]
+             -> Maybe (Some (C.Command e st (AR.Argument arch e st s) AR.TypeRepr))
+matchCommand s cmds =
+  case cmds of
+    [] -> Nothing
+    Some cmd : rest
+      | C.cmdName cmd == s -> Just (Some cmd)
+      | otherwise -> matchCommand s rest
 
 bye :: Q.ObjRef Context -> IO ()
 bye _r = do

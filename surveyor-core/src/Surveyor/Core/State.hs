@@ -14,6 +14,7 @@ module Surveyor.Core.State (
   lEchoArea,
   lUIMode,
   lAppState,
+  lEventChannel,
   lNonceGenerator,
   lArchState,
   lNonce,
@@ -81,6 +82,9 @@ lEchoArea = GL.field @"sEchoArea"
 
 lUIMode :: L.Lens' (S u arch s) SomeUIMode
 lUIMode = GL.field @"sUIMode"
+
+lEventChannel :: L.Lens' (S u arch s) (B.BChan (Events s))
+lEventChannel = GL.field @"sEventChannel"
 
 lAppState :: L.Lens' (S u arch s) AppState
 lAppState = GL.field @"sAppState"
