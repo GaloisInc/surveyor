@@ -17,11 +17,13 @@ ApplicationWindow {
         }
 
         Keys.onReturnPressed: {
+            event.accepted = true;
             console.log("onReturnPressed" + minibuffer.text);
             runCommand(minibuffer.text);
         }
 
         Keys.onEscapePressed: {
+            event.accepted = true;
             console.log("onEscapePressed");
             mainWindow.close();
             runCommand(minibuffer.text);
