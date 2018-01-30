@@ -57,6 +57,7 @@ surveyor mInitialInput mUIFile = do
       case eres of
         Left err -> do
           print err
+          Q.fireSignal (Proxy @ShutdownSignal) ctxObj
           A.cancel guiThread
         Right _ -> return ()
   return ()
