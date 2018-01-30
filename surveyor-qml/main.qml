@@ -14,19 +14,18 @@ ApplicationWindow {
 
         Component.onCompleted: {
             shutdown.connect(function() {Qt.quit();});
+            updateStackIndex.connect(function(ix) {
+                layout.currentIndex = ix;
+                console.log('New index is ', ix);
+            });
+            console.log('Connected signals');
         }
 
         Keys.onReturnPressed: {
             event.accepted = true;
             console.log("onReturnPressed" + minibuffer.text);
             runCommand(minibuffer.text);
-        }
-
-        Keys.onEscapePressed: {
-            event.accepted = true;
-            console.log("onEscapePressed");
-            mainWindow.close();
-            runCommand(minibuffer.text);
+            minibuffer.text = '';
         }
 
         StackLayout {
@@ -72,6 +71,15 @@ ApplicationWindow {
                 MouseArea {
                     anchors.fill: parent
                     onClicked: bye();
+                }
+            }
+            Rectangle {
+                id: log
+                color: 'orange'
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Text {
+                    text: "Diagnostics"
                 }
             }
         }

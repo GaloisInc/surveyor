@@ -69,6 +69,18 @@ handleEvents chan ref = do
   case e of
     E.AnalysisFinished (A.SomeResult ar) _ -> updateArchRes mv ar
     E.AnalysisProgress (A.SomeResult ar) -> updateArchRes mv ar
+
+    E.ShowSummary -> do
+      State s <- MV.takeMVar mv
+      MV.putMVar mv (State (s & lUIMode .~ SM.SomeUIMode SM.Summary))
+      ix <- getStackIndex ref
+      Q.fireSignal (Proxy @UpdateStackIndex) ref ix
+    E.ShowDiagnostics -> do
+      State s <- MV.takeMVar mv
+      MV.putMVar mv (State (s & lUIMode .~ SM.SomeUIMode SM.Diags))
+      ix <- getStackIndex ref
+      Q.fireSignal (Proxy @UpdateStackIndex) ref ix
+
     E.Exit -> do
       Q.fireSignal (Proxy @ShutdownSignal) ref
       IO.exitSuccess
@@ -148,12 +160,28 @@ defineContextClass = do
              , Q.defMethod' "bye" bye
              , Q.defMethod' "runCommand" runCommand
              , Q.defSignal "shutdown" (Proxy @ShutdownSignal)
+             , Q.defSignal "updateStackIndex" (Proxy @UpdateStackIndex)
              ]
 
+getStackIndex :: Q.ObjRef Context -> IO Int
+getStackIndex r = do
+  State s <- MV.readMVar (Q.fromObjRef r)
+  case sUIMode s of
+    SM.SomeUIMode uim ->
+      case uim of
+        SM.Diags -> return 4
+        SM.Summary -> return 0
+        SM.FunctionSelector -> return 1
+        SM.FunctionViewer -> return 2
+
 data ShutdownSignal
+data UpdateStackIndex
 
 instance Q.SignalKeyClass ShutdownSignal where
   type SignalParams ShutdownSignal = IO ()
+
+instance Q.SignalKeyClass UpdateStackIndex where
+  type SignalParams UpdateStackIndex = Int -> IO ()
 
 runCommand :: Q.ObjRef Context -> T.Text -> IO ()
 runCommand r cmdString = do
