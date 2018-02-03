@@ -48,30 +48,18 @@ ApplicationWindow {
                 color: "red"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: hello();
-                }
             }
             Rectangle {
                 id: functionViewer
                 color: "blue"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: world();
-                }
             }
             Rectangle {
                 id: callGraph
                 color: "green"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: bye();
-                }
             }
             Rectangle {
                 id: log

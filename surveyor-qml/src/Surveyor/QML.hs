@@ -155,10 +155,7 @@ data QMLUIState arch s =
 
 defineContextClass :: IO (Q.Class Context)
 defineContextClass = do
-  Q.newClass [ Q.defMethod' "hello" hello
-             , Q.defMethod' "world" world
-             , Q.defMethod' "bye" bye
-             , Q.defMethod' "runCommand" runCommand
+  Q.newClass [ Q.defMethod' "runCommand" runCommand
              , Q.defSignal "shutdown" (Proxy @ShutdownSignal)
              , Q.defSignal "updateStackIndex" (Proxy @UpdateStackIndex)
              ]
@@ -209,22 +206,6 @@ matchCommand s cmds =
     Some cmd : rest
       | C.cmdName cmd == s -> Just (Some cmd)
       | otherwise -> matchCommand s rest
-
-bye :: Q.ObjRef Context -> IO ()
-bye _r = do
-  print "bye"
-  return ()
-
-
-world :: Q.ObjRef Context -> IO ()
-world _r = do
-  print "world"
-  return ()
-
-hello :: Q.ObjRef Context -> IO ()
-hello _r = do
-  print "hello"
-  return ()
 
 updateEchoArea :: B.BChan (E.Events s) -> EA.EchoArea -> IO ()
 updateEchoArea customEventChan ea =
