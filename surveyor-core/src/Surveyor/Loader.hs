@@ -149,9 +149,9 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 -- appropriate value of w.
 loadElf :: NG.NonceGenerator IO s -> B.BChan (Events s) -> E.SomeElf E.Elf -> IO ()
 loadElf ng customEventChan someElf = do
-  let elfLoadOpts = MM.LoadOptions { MM.loadStyle = MM.LoadBySegment
+  let elfLoadOpts = MM.LoadOptions { MM.loadStyleOverride = Nothing
                                    , MM.includeBSS = False
-                                   , MM.loadRegionIndex = 0
+                                   , MM.loadRegionIndex = Just 0
                                    }
   rcfgs <- case someElf of
     E.Elf32 e32 -> do

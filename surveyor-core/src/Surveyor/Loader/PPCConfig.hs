@@ -33,9 +33,9 @@ import           Surveyor.Events
 import qualified Surveyor.Loader.RenovateAnalysis as RA
 
 elfLoadOpts :: MM.LoadOptions
-elfLoadOpts = MM.LoadOptions { MM.loadStyle = MM.LoadBySegment
+elfLoadOpts = MM.LoadOptions { MM.loadStyleOverride = Nothing
                              , MM.includeBSS = False
-                             , MM.loadRegionIndex = 0
+                             , MM.loadRegionIndex = Just 0
                              }
 
 ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
