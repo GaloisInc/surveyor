@@ -45,8 +45,9 @@ surveyor mInitialInput mUIFile = do
     Nothing -> error "No UI file"
     Just uiFile -> do
       o <- MV.newMVar (State (emptyState mInitialInput mloader ng customEventChan))
-      klass <- defineContextClass
-      ctxObj <- Q.newObject klass o
+      snapKlass <- defineSnapshotClass
+      ctxKlass <- defineContextClass snapKlass
+      ctxObj <- Q.newObject ctxKlass o
       hdlrThread <- A.async $ forever $ handleEvents customEventChan ctxObj
       guiThread <- A.asyncBound $ do
         let cfg = Q.defaultEngineConfig { Q.initialDocument = Q.fileDocument uiFile
@@ -153,12 +154,16 @@ data QMLUIState arch s =
   QMLUIState { sMinibuffer :: Minibuffer (E.Events s) (Maybe (PN.Nonce s arch)) arch s
              }
 
-defineContextClass :: IO (Q.Class Context)
-defineContextClass = do
+defineContextClass :: Q.Class (State QMLUIState PN.GlobalNonceGenerator) -> IO (Q.Class Context)
+defineContextClass snapshotClass =
   Q.newClass [ Q.defMethod' "runCommand" runCommand
+             , Q.defMethod' "snapshotState" (snapshotState snapshotClass)
              , Q.defSignal "shutdown" (Proxy @ShutdownSignal)
              , Q.defSignal "updateStackIndex" (Proxy @UpdateStackIndex)
              ]
+
+defineSnapshotClass :: IO (Q.Class (State QMLUIState PN.GlobalNonceGenerator))
+defineSnapshotClass = Q.newClass []
 
 getStackIndex :: Q.ObjRef Context -> IO Int
 getStackIndex r = do
@@ -170,6 +175,22 @@ getStackIndex r = do
         SM.Summary -> return 0
         SM.FunctionSelector -> return 1
         SM.FunctionViewer -> return 2
+
+-- | From the context class, take a snapshot of the state of the context object
+--
+-- We want this so that callbacks from QML can look at a constant object state
+-- without having to worry about the value in the underlying MVar (which guards
+-- the canonical state) changing out from under them.  This will let the QML
+-- side issue a sequence of queries against a state snapshot.
+--
+-- This approach will also reduce contention for the MVar, as calls from QML to
+-- Haskell will only have to synchronize once (while taking this snapshot)
+snapshotState :: Q.Class (State QMLUIState PN.GlobalNonceGenerator)
+              ->  Q.ObjRef Context
+              -> IO (Q.ObjRef (State QMLUIState PN.GlobalNonceGenerator))
+snapshotState klass ref = do
+  s <- MV.readMVar (Q.fromObjRef ref)
+  Q.newObject klass s
 
 data ShutdownSignal
 data UpdateStackIndex
