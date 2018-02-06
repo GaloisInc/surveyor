@@ -2,6 +2,7 @@ import QtQuick 2.7
 import QtQuick.Layouts 1.3
 import QtQuick.Window 2.2
 import QtQuick.Controls 2.0
+import HsQML.Model 1.0
 
 ApplicationWindow {
     visible: true
@@ -14,6 +15,7 @@ ApplicationWindow {
 
         Component.onCompleted: {
             shutdown.connect(function() {Qt.quit();});
+            setFunctionList.connect(function (lst) { functionListModel.source = lst; });
             updateStackIndex.connect(function(ix) {
                 layout.currentIndex = ix;
                 console.log('New index is ', ix);
@@ -44,10 +46,25 @@ ApplicationWindow {
                 }
             }
             Rectangle {
-                id: functionList
-                color: "red"
+                id: functionListContainer
+//                color: "red"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                ListView {
+                    id: functionList
+                    anchors.fill: parent
+                    // focus: true
+                    delegate: Text {
+                        text: modelData.address + ": " + modelData.name
+                    }
+                    model: AutoListModel {
+                        id: functionListModel
+                        mode: AutoListModel.ByKey
+                        keyFunction: function(f) {
+                            return f.address;
+                        }
+                    }
+                }
             }
             Rectangle {
                 id: functionViewer

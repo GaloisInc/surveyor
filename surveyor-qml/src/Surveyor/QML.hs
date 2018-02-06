@@ -4,6 +4,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 module Surveyor.QML ( surveyor) where
 
 import qualified Brick.BChan as B
@@ -45,10 +46,11 @@ surveyor mInitialInput mUIFile = do
     Nothing -> error "No UI file"
     Just uiFile -> do
       o <- MV.newMVar (State (emptyState mInitialInput mloader ng customEventChan))
+      funcHandleKlass <- defineFunctionHandleClass
       snapKlass <- defineSnapshotClass
       ctxKlass <- defineContextClass snapKlass
       ctxObj <- Q.newObject ctxKlass o
-      hdlrThread <- A.async $ forever $ handleEvents customEventChan ctxObj
+      hdlrThread <- A.async $ forever $ handleEvents customEventChan funcHandleKlass ctxObj
       guiThread <- A.asyncBound $ do
         let cfg = Q.defaultEngineConfig { Q.initialDocument = Q.fileDocument uiFile
                                         , Q.contextObject = Just (Q.anyObjRef ctxObj)
@@ -63,8 +65,11 @@ surveyor mInitialInput mUIFile = do
         Right _ -> return ()
   return ()
 
-handleEvents :: B.BChan (E.Events PN.GlobalNonceGenerator) -> Q.ObjRef Context -> IO ()
-handleEvents chan ref = do
+handleEvents :: B.BChan (E.Events PN.GlobalNonceGenerator)
+             -> Q.Class SomeFunction
+             -> Q.ObjRef Context
+             -> IO ()
+handleEvents chan funcHandleKlass ref = do
   let mv = Q.fromObjRef ref
   e <- B.readBChan chan
   case e of
@@ -81,6 +86,28 @@ handleEvents chan ref = do
       MV.putMVar mv (State (s & lUIMode .~ SM.SomeUIMode SM.Diags))
       ix <- getStackIndex ref
       Q.fireSignal (Proxy @UpdateStackIndex) ref ix
+
+    E.FindFunctionsContaining archNonce maddr -> do
+      State s <- MV.readMVar mv
+      case s ^? lArchState . _Just . lNonce of
+        Just nonce
+          | Just Refl <- testEquality archNonce nonce
+          , Just ares <- s ^? lArchState . _Just . lAnalysisResult
+          , Nothing <- maddr -> do
+              sEmitEvent s (E.ListFunctions archNonce (A.functions ares))
+        _ -> return ()
+    E.ListFunctions archNonce hdls -> do
+      State s <- MV.readMVar mv
+      case s ^? lArchState . _Just . lNonce of
+        Just nonce
+          | Just Refl <- testEquality archNonce nonce
+          , Just ares <- s ^? lArchState . _Just . lAnalysisResult -> do
+              MV.modifyMVar_ mv (\(State s0) -> return (State (s0 & lUIMode .~ SM.SomeUIMode SM.FunctionSelector)))
+              hdls' <- sequence [ Q.newObject funcHandleKlass (SomeFunction ares fh) | fh <- hdls ]
+              ix <- getStackIndex ref
+              Q.fireSignal (Proxy @UpdateStackIndex) ref ix
+              Q.fireSignal (Proxy @SetFunctionList) ref hdls'
+        _ -> return ()
 
     E.Exit -> do
       Q.fireSignal (Proxy @ShutdownSignal) ref
@@ -154,12 +181,22 @@ data QMLUIState arch s =
   QMLUIState { sMinibuffer :: Minibuffer (E.Events s) (Maybe (PN.Nonce s arch)) arch s
              }
 
+defineFunctionHandleClass :: IO (Q.Class SomeFunction)
+defineFunctionHandleClass =
+  Q.newClass [ Q.defPropertyConst' "name" nameP
+             , Q.defPropertyConst' "address" addressP
+             ]
+  where
+    nameP (Q.fromObjRef -> SomeFunction _ares fh) = return (A.fhName fh)
+    addressP (Q.fromObjRef -> SomeFunction _ares fh) = return (A.prettyAddress (A.fhAddress fh))
+
 defineContextClass :: Q.Class (State QMLUIState PN.GlobalNonceGenerator) -> IO (Q.Class Context)
 defineContextClass snapshotClass =
   Q.newClass [ Q.defMethod' "runCommand" runCommand
              , Q.defMethod' "snapshotState" (snapshotState snapshotClass)
              , Q.defSignal "shutdown" (Proxy @ShutdownSignal)
              , Q.defSignal "updateStackIndex" (Proxy @UpdateStackIndex)
+             , Q.defSignal "setFunctionList" (Proxy @SetFunctionList)
              ]
 
 defineSnapshotClass :: IO (Q.Class (State QMLUIState PN.GlobalNonceGenerator))
@@ -194,6 +231,13 @@ snapshotState klass ref = do
 
 data ShutdownSignal
 data UpdateStackIndex
+data SetFunctionList
+
+data SomeFunction where
+  SomeFunction :: (A.Architecture arch s) => A.AnalysisResult arch s -> A.FunctionHandle arch s -> SomeFunction
+
+instance Q.SignalKeyClass SetFunctionList where
+  type SignalParams SetFunctionList = [Q.ObjRef SomeFunction] -> IO ()
 
 instance Q.SignalKeyClass ShutdownSignal where
   type SignalParams ShutdownSignal = IO ()
