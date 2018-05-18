@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
 module Surveyor.BinaryAnalysisResult (
@@ -8,6 +9,7 @@ module Surveyor.BinaryAnalysisResult (
 
 import qualified Data.Foldable as F
 import qualified Data.IntervalMap as IM
+import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Memory as MM
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as NG
@@ -15,19 +17,19 @@ import qualified Lang.Crucible.Solver.SimpleBackend as SB
 import qualified Renovate as R
 import qualified SemMC.Formula as F
 
-data BinaryAnalysisResult s o i a w arch =
-  BinaryAnalysisResult { rBlockInfo :: !(R.BlockInfo i w arch)
-                       , rMemory :: !(MM.Memory w)
-                       , rISA :: R.ISA i a w
-                       , rBlockMap :: !(IM.IntervalMap (MM.MemAddr w) (R.ConcreteBlock i w))
+data BinaryAnalysisResult s o arch =
+  BinaryAnalysisResult { rBlockInfo :: !(R.BlockInfo arch)
+                       , rMemory :: !(MM.Memory (MC.ArchAddrWidth arch))
+                       , rISA :: R.ISA arch
+                       , rBlockMap :: !(IM.IntervalMap (MM.MemAddr (MC.ArchAddrWidth arch)) (R.ConcreteBlock arch))
                        , rNonce :: NG.Nonce s arch
                        , rSemantics :: Maybe (MapF.MapF o (F.ParameterizedFormula (SB.SimpleBackend s) arch))
                        }
 
-indexBlocksByAddress :: (MM.MemWidth w)
-                     => R.ISA i a w
-                     -> R.BlockInfo i w arch
-                     -> IM.IntervalMap (MM.MemAddr w) (R.ConcreteBlock i w)
+indexBlocksByAddress :: (MM.MemWidth (MC.ArchAddrWidth arch))
+                     => R.ISA arch
+                     -> R.BlockInfo arch
+                     -> IM.IntervalMap (MM.MemAddr (MC.ArchAddrWidth arch)) (R.ConcreteBlock arch)
 indexBlocksByAddress isa bi = F.foldl' indexBlock IM.empty (R.biBlocks bi)
   where
     indexBlock m b =
@@ -37,5 +39,5 @@ indexBlocksByAddress isa bi = F.foldl' indexBlock IM.empty (R.biBlocks bi)
 -- | Look up the basic block containing the given address.
 --
 -- The 'Word64' is converted to a 'MM.MemAddr'.
-blocksContaining :: BinaryAnalysisResult s o i a w arch -> MM.MemAddr w -> [R.ConcreteBlock i w]
+blocksContaining :: BinaryAnalysisResult s o arch -> MM.MemAddr (MC.ArchAddrWidth arch) -> [R.ConcreteBlock arch]
 blocksContaining bar addr = IM.elems (IM.containing (rBlockMap bar) addr)

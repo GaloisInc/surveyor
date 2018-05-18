@@ -22,8 +22,8 @@ import qualified SemMC.Architecture as SA
 import qualified SemMC.Formula as F
 import qualified Lang.Crucible.Solver.SimpleBackend as SB
 
-data SomeResult s where
-  SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s
+data SomeResult s arch where
+  SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s arch
 
 type ArchConstraints arch s = (Eq (Address arch s),
                                Ord (Address arch s),

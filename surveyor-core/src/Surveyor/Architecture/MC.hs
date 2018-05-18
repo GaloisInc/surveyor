@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | Instantiations of the 'Architecture' class for machine code architectures
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
@@ -31,7 +32,7 @@ import qualified Text.PrettyPrint.HughesPJClass as HPJ
 import           Text.Read ( readMaybe )
 
 import qualified Data.Macaw.Discovery as MD
-import qualified Data.Macaw.Memory as MM
+import qualified Data.Macaw.CFG as MM
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
 import qualified Renovate as R
@@ -42,16 +43,16 @@ import qualified Data.Parameterized.HasRepr as HR
 import           Surveyor.Architecture.Class
 import           Surveyor.BinaryAnalysisResult
 
-mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32
-              -> SomeResult s
+mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32
+              -> SomeResult s PPC.PPC32
 mkPPC32Result = SomeResult . PPC32AnalysisResult
 
-mkPPC64Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction (PPC.TargetAddress 64) 64 PPC.PPC64
-              -> SomeResult s
+mkPPC64Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64
+              -> SomeResult s PPC.PPC64
 mkPPC64Result = SomeResult . PPC64AnalysisResult
 
-mkX86Result :: BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64
-            -> SomeResult s
+mkX86Result :: BinaryAnalysisResult s (C.Const Void) X86.X86_64
+            -> SomeResult s X86.X86_64
 mkX86Result = SomeResult . X86AnalysisResult
 
 -- TODO
@@ -60,7 +61,7 @@ mkX86Result = SomeResult . X86AnalysisResult
 -- * Blocks ending with unknowns
 -- * Functions with blocks ending in unknowns
 -- * Unrecognized instructions
-mcSummarize :: BinaryAnalysisResult s o i a w arch -> [(T.Text, T.Text)]
+mcSummarize :: BinaryAnalysisResult s o arch -> [(T.Text, T.Text)]
 mcSummarize bar =
   [ ("Discovered Functions", T.pack (show (length (R.biFunctionEntries binfo))))
   , ("Discovered Blocks", T.pack (show (length (R.biBlocks binfo))))
@@ -68,7 +69,7 @@ mcSummarize bar =
   where
     binfo = rBlockInfo bar
 
-mcNonce :: BinaryAnalysisResult s o i a w arch -> NG.Nonce s arch
+mcNonce :: BinaryAnalysisResult s o arch -> NG.Nonce s arch
 mcNonce = rNonce
 
 mcParseAddress32 :: String -> Maybe (MM.MemAddr 32)
@@ -89,15 +90,15 @@ mcPrettyAddress = T.pack . show
 mcPrettyInstruction :: (PP.Pretty (i ())) => i () -> T.Text
 mcPrettyInstruction = T.pack . show . PP.pretty
 
-mcContainingBlocks :: (R.ConcreteBlock i w -> Block arch s)
-                   -> BinaryAnalysisResult s o i a w arch
-                   -> MM.MemAddr w
+mcContainingBlocks :: (R.ConcreteBlock arch -> Block arch s)
+                   -> BinaryAnalysisResult s o arch
+                   -> MM.MemAddr (MM.ArchAddrWidth arch)
                    -> [Block arch s]
 mcContainingBlocks toBlock bar addr = map toBlock (blocksContaining bar addr)
 
-mcFunctions :: (MM.MemWidth w)
+mcFunctions :: (w ~ MM.ArchAddrWidth arch, MM.MemWidth w)
             => (MM.MemAddr w -> Address arch s)
-            -> BinaryAnalysisResult s o i a w arch
+            -> BinaryAnalysisResult s o arch
             -> [FunctionHandle arch s]
 mcFunctions toAddr bar =
   [ FunctionHandle (toAddr (MM.absoluteAddr (R.absoluteAddress addr))) textName
@@ -105,9 +106,10 @@ mcFunctions toAddr bar =
   , let textName = TE.decodeUtf8With TE.lenientDecode (MD.discoveredFunName dfi)
   ]
 
-mcFunctionBlocks :: (MM.MemWidth w) => (R.ConcreteBlock i w -> b)
-                 -> BinaryAnalysisResult s o i a w arch
-                 -> R.ConcreteAddress w
+mcFunctionBlocks :: (MM.MemWidth (MM.ArchAddrWidth arch))
+                 => (R.ConcreteBlock arch -> b)
+                 -> BinaryAnalysisResult s o arch
+                 -> R.ConcreteAddress arch
                  -> [b]
 mcFunctionBlocks toBlock bar concAddr =
   case M.lookup concAddr fb of
@@ -117,35 +119,35 @@ mcFunctionBlocks toBlock bar concAddr =
     bi = rBlockInfo bar
     fb = R.biFunctionBlocks bi
 
-toInstPPC32 :: (PPC.Instruction (), R.ConcreteAddress 32) -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
+toInstPPC32 :: (PPC.Instruction (), R.ConcreteAddress PPC.PPC32) -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
 toInstPPC32 (i, addr) = (PPC32Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC32Instruction i)
 
-toBlockPPC32 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction a 32 PPC.PPC32 -> R.ConcreteBlock PPC.Instruction 32 -> Block PPC.PPC32 s
+toBlockPPC32 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32 -> R.ConcreteBlock PPC.PPC32 -> Block PPC.PPC32 s
 toBlockPPC32 bar cb =
   Block { blockAddress = PPC32Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
         , blockInstructions = map toInstPPC32 (R.instructionAddresses (rISA bar) cb)
         }
 
-toInstPPC64 :: (PPC.Instruction (), R.ConcreteAddress 64) -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
+toInstPPC64 :: (PPC.Instruction (), R.ConcreteAddress PPC.PPC64) -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
 toInstPPC64 (i, addr) = (PPC64Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC64Instruction i)
 
-toBlockPPC64 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction a 64 PPC.PPC64 -> R.ConcreteBlock PPC.Instruction 64 -> Block PPC.PPC64 s
+toBlockPPC64 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64 -> R.ConcreteBlock PPC.PPC64 -> Block PPC.PPC64 s
 toBlockPPC64 bar cb =
   Block { blockAddress = PPC64Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
         , blockInstructions = map toInstPPC64 (R.instructionAddresses (rISA bar) cb)
         }
 
-toBlockX86 :: BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64
-           -> R.ConcreteBlock X86.Instruction 64
+toBlockX86 :: BinaryAnalysisResult s (C.Const Void) X86.X86_64
+           -> R.ConcreteBlock X86.X86_64
            -> Block X86.X86_64 s
 toBlockX86 bar cb =
   Block { blockAddress = X86Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
         , blockInstructions = map toInstX86 (R.instructionAddresses (rISA bar) cb)
         }
 
-toInstX86 :: (X86.Instruction (), R.ConcreteAddress 64) -> (Address X86.X86_64 s, Instruction X86.X86_64 s)
+toInstX86 :: (X86.Instruction (), R.ConcreteAddress X86.X86_64) -> (Address X86.X86_64 s, Instruction X86.X86_64 s)
 toInstX86 (i, addr) = (X86Address (MM.absoluteAddr (R.absoluteAddress addr)),
                        X86Instruction i)
 
@@ -220,7 +222,7 @@ instance Show (Address Void s) where
 
 instance Architecture PPC.PPC32 s where
   data AnalysisResult PPC.PPC32 s =
-    PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction (PPC.TargetAddress 32) 32 PPC.PPC32)
+    PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32)
   data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction ())
   data Operand PPC.PPC32 s = forall x . PPC32Operand !(DPPC.Operand x)
   data Opcode PPC.PPC32 s = forall x y . PPC32Opcode !(DPPC.Opcode x y)
@@ -266,7 +268,7 @@ instance Show (Address PPC.PPC32 s) where
 
 instance Architecture PPC.PPC64 s where
   data AnalysisResult PPC.PPC64 s =
-    PPC64AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.Instruction (PPC.TargetAddress 64) 64 PPC.PPC64)
+    PPC64AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64)
   data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction ())
   data Operand PPC.PPC64 s = forall x . PPC64Operand !(DPPC.Operand x)
   data Opcode PPC.PPC64 s = forall x y . PPC64Opcode !(DPPC.Opcode x y)
@@ -312,7 +314,7 @@ instance Show (Address PPC.PPC64 s) where
 
 instance Architecture X86.X86_64 s where
   data AnalysisResult X86.X86_64 s =
-    X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.Instruction (X86.TargetAddress 64) 64 X86.X86_64)
+    X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.X86_64)
   data Instruction X86.X86_64 s = X86Instruction (X86.Instruction ())
   data Operand X86.X86_64 s = X86Operand FD.Value FD.OperandType
   data Opcode X86.X86_64 s = X86Opcode String
@@ -365,6 +367,7 @@ ppValue base v =
     FD.DebugReg     r    -> HPJ.text (show r)
     FD.MMXReg       r    -> HPJ.text (show r)
     FD.XMMReg       r    -> HPJ.text (show r)
+    FD.YMMReg       r    -> HPJ.text (show r)
     FD.X87Register  n    -> HPJ.text "st" <> if n == 0 then HPJ.empty else HPJ.parens (HPJ.int n)
     FD.SegmentValue r    -> ppShowReg    r
     -- do the "*" belong here or in ppAddrRef?
@@ -375,18 +378,26 @@ ppValue base v =
     FD.Mem32        addr -> HPJ.text "DWORD PTR"   HPJ.<+> ppAddrRef addr
     FD.Mem64        addr -> HPJ.text "QWORD PTR"   HPJ.<+> ppAddrRef addr
     FD.Mem128       addr -> HPJ.text "XMMWORD PTR" HPJ.<+> ppAddrRef addr
+    FD.Mem256       addr -> HPJ.text "YMMWORD PTR" HPJ.<+> ppAddrRef addr
     FD.FPMem32      addr -> HPJ.text "DWORD PTR"   HPJ.<+> ppAddrRef addr
     FD.FPMem64      addr -> HPJ.text "QWORD PTR"   HPJ.<+> ppAddrRef addr
     FD.FPMem80      addr -> HPJ.text "TBYTE PTR"   HPJ.<+> ppAddrRef addr
     FD.ByteImm      imm  -> ppImm imm
     FD.WordImm      imm  -> ppImm imm
-    FD.DWordImm     imm  -> ppImm imm
+    FD.DWordImm     (FD.Imm32Concrete imm)  -> ppImm imm
+    FD.DWordImm     (FD.Imm32SymbolOffset sym off) ->
+      HPJ.text (show sym) <> HPJ.text "+" <> ppImm off
     FD.QWordImm     imm  -> ppImm imm
+    FD.ByteSignedImm i8 -> ppImm i8
+    FD.WordSignedImm i16 -> ppImm i16
+    FD.DWordSignedImm i32 -> ppImm i32
     FD.ByteReg      r    -> ppShowReg    r
     FD.WordReg      r    -> ppShowReg    r
     FD.DWordReg     r    -> ppShowReg    r
     FD.QWordReg     r    -> ppShowReg    r
-    FD.JumpOffset _ off  -> HPJ.text (showHex (base+fromIntegral off) "")
+    FD.JumpOffset _ (FD.FixedOffset off)  -> HPJ.text (showHex (base+fromIntegral off) "")
+    FD.JumpOffset _ (FD.RelativeOffset sym ioff off) ->
+      HPJ.text (show sym) <> HPJ.text "+" <> HPJ.int (fromIntegral off - fromIntegral (fromIntegral base + ioff))
 
 
 ppImm :: (Integral w, Show w) => w -> HPJ.Doc

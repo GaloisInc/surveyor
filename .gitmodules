@@ -6,13 +6,13 @@
 	url = git@github.com:GaloisInc/macaw.git
 [submodule "deps/macaw-semmc"]
 	path = deps/macaw-semmc
-	url = git@gitlab-ext.galois.com:macaw/macaw-semmc.git
+	url = git@github.com:GaloisInc/macaw-semmc.git
 [submodule "deps/semmc"]
 	path = deps/semmc
 	url = git@github.com:GaloisInc/semmc.git
 [submodule "deps/renovate"]
 	path = deps/renovate
-	url = git@gitlab-int.galois.com:brittle/renovate.git
+	url = git@github.com:GaloisInc/renovate.git
 [submodule "deps/crucible"]
 	path = deps/crucible
 	url = git@github.com:GaloisInc/crucible.git
@@ -31,3 +31,9 @@
 [submodule "deps/jvm-parser"]
 	path = deps/jvm-parser
 	url = git@github.com:GaloisInc/jvm-parser.git
+[submodule "deps/llvm-pretty"]
+	path = deps/llvm-pretty
+	url = git@github.com:elliottt/llvm-pretty.git
+[submodule "deps/llvm-pretty-bc-parser"]
+	path = deps/llvm-pretty-bc-parser
+	url = git@github.com:GaloisInc/llvm-pretty-bc-parser.git

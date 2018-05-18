@@ -15,7 +15,7 @@ module Surveyor.Architecture.LLVM ( mkLLVMResult ) where
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
 import qualified Data.Map.Strict as M
-import           Data.Maybe ( isJust, fromMaybe, mapMaybe )
+import           Data.Maybe ( catMaybes, isJust, fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
@@ -47,7 +47,7 @@ indexFunctions = F.foldl' indexDefine M.empty . LL.modDefines
         in M.insert (LL.defName def) (def, blockIndex) m
     indexBlock m b = M.insert (LL.bbLabel b) b m
 
-mkLLVMResult :: NG.Nonce s LLVM -> LL.Module -> SomeResult s
+mkLLVMResult :: NG.Nonce s LLVM -> LL.Module -> SomeResult s LLVM
 mkLLVMResult nonce m =
   SomeResult (LLVMAnalysisResult lr)
   where
@@ -136,6 +136,8 @@ data LLVMOperand' = Value !LL.Value
                   | BlockLabel !LL.BlockLabel
                   | ConstantString String
                   | SwitchTarget LL.Type (Integer, LL.BlockLabel)
+                  | Ordering LL.AtomicOrdering
+                  | AtomicOp LL.AtomicRWOp
 
 instance Architecture LLVM s where
   data AnalysisResult LLVM s = LLVMAnalysisResult (LLVMResult s)
@@ -198,6 +200,8 @@ ppOperand op =
     BlockLabel l -> LL.ppLabel l
     ConstantString s -> PP.text s
     SwitchTarget t (val, target) -> LL.ppSwitchEntry t (val, target)
+    Ordering ao -> LL.ppAtomicOrdering ao
+    AtomicOp ao -> LL.ppAtomicOp ao
 
 stmtOperands :: LL.Stmt -> [Operand LLVM s]
 stmtOperands stmt =
@@ -226,7 +230,7 @@ instrOperands i =
              , maybe [] ((:[]) . LLVMOperand . TypedValue) nelts
              , maybe [] ((:[]) . LLVMOperand . ConstantInt) align
              ]
-    LL.Load tv align ->
+    LL.Load tv _ align ->
       concat [ [LLVMOperand (TypedValue tv)]
              , maybe [] ((:[]) . LLVMOperand . ConstantInt) align
              ]
@@ -273,10 +277,30 @@ instrOperands i =
     LL.Switch tv lab cases ->
       let ty = LL.typedType tv
       in LLVMOperand (TypedValue tv) : LLVMOperand (BlockLabel lab) : map (LLVMOperand . SwitchTarget ty) cases
-    LL.LandingPad ty tv _ _ -> [ LLVMOperand (Type ty)
-                               , LLVMOperand (TypedValue tv)
-                               ]
+    LL.LandingPad ty mtv _ _ ->
+      catMaybes [ Just (LLVMOperand (Type ty))
+                , (LLVMOperand . TypedValue) <$> mtv
+                ]
     LL.Resume tv -> [ LLVMOperand (TypedValue tv) ]
+    LL.Fence mscope ordering ->
+      catMaybes [ (LLVMOperand . ConstantString) <$> mscope
+                , Just (LLVMOperand (Ordering ordering))
+                ]
+    LL.CmpXchg _weak _volatile ptr cmpVal newVal mscope aoSuccess aoFail ->
+      catMaybes [ Just (LLVMOperand (TypedValue ptr))
+                , Just (LLVMOperand (TypedValue cmpVal))
+                , Just (LLVMOperand (TypedValue newVal))
+                , (LLVMOperand . ConstantString) <$> mscope
+                , Just (LLVMOperand (Ordering aoSuccess))
+                , Just (LLVMOperand (Ordering aoFail))
+                ]
+    LL.AtomicRW _volatile op ptr val mscope ordering ->
+      catMaybes [ Just (LLVMOperand (AtomicOp op))
+                , Just (LLVMOperand (TypedValue ptr))
+                , Just (LLVMOperand (TypedValue val))
+                , (LLVMOperand . ConstantString) <$> mscope
+                , Just (LLVMOperand (Ordering ordering))
+                ]
 
 summarizeModule :: LL.Module -> [(T.Text, T.Text)]
 summarizeModule m =
@@ -317,6 +341,9 @@ ppOpcode i =
     LL.Switch {} -> "switch"
     LL.LandingPad {} -> "landingpad"
     LL.Resume {} -> "resume"
+    LL.Fence {} -> "fence"
+    LL.CmpXchg {} -> "cmpxchg"
+    LL.AtomicRW {} -> "atomicrw"
     LL.Arith LL.FAdd _ _ -> "fadd"
     LL.Arith LL.FSub _ _ -> "fsub"
     LL.Arith LL.FMul _ _ -> "fmul"

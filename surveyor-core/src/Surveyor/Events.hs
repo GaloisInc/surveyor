@@ -23,8 +23,8 @@ data Events s where
                   => [E.ElfParseError n] -> Events s
   ErrorLoadingLLVM :: String -> Events s
   AnalysisFailure :: X.SomeException -> Events s
-  AnalysisFinished :: A.SomeResult s -> [R.Diagnostic] -> Events s
-  AnalysisProgress :: A.SomeResult s -> Events s
+  AnalysisFinished :: A.SomeResult s arch -> [R.Diagnostic] -> Events s
+  AnalysisProgress :: A.SomeResult s arch -> Events s
 
   LoadELF :: FilePath -> Events s
   LoadLLVM :: FilePath -> Events s

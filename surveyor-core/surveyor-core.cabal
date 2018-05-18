@@ -60,6 +60,7 @@ library
                        renovate,
                        renovate-ppc,
                        renovate-x86,
+                       binary-symbols,
                        flexdis86,
                        macaw-ppc,
                        semmc,

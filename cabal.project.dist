@@ -1,20 +1,30 @@
 packages: surveyor-core
           surveyor-brick
           surveyor-qml
+          deps/llvm-pretty
+          deps/llvm-pretty-bc-parser
           deps/elf-edit
           deps/dwarf
           deps/parameterized-utils
           deps/crucible/galois-matlab
           deps/crucible/crucible
+          deps/crucible/crucible-llvm
           deps/dismantle/dismantle-tablegen
           deps/dismantle/dismantle-ppc
+          deps/dismantle/dismantle-arm
+          deps/dismantle/dismantle-thumb
           deps/semmc/semmc
           deps/semmc/semmc-ppc
+          deps/semmc/semmc-arm
           deps/flexdis86
+          deps/flexdis86/binary-symbols
           deps/macaw/base
+          deps/macaw/symbolic
           deps/macaw/x86
+          deps/macaw/x86_symbolic
           deps/macaw-semmc/macaw-semmc
           deps/macaw-semmc/macaw-ppc
+          deps/macaw-semmc/macaw-ppc-symbolic
           deps/renovate/renovate
           deps/renovate/renovate-x86
           deps/renovate/renovate-ppc

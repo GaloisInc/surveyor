@@ -149,8 +149,7 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 -- appropriate value of w.
 loadElf :: NG.NonceGenerator IO s -> B.BChan (Events s) -> E.SomeElf E.Elf -> IO ()
 loadElf ng customEventChan someElf = do
-  let elfLoadOpts = MM.LoadOptions { MM.loadStyleOverride = Nothing
-                                   , MM.includeBSS = False
+  let elfLoadOpts = MM.LoadOptions { MM.loadRegionBaseOffset = 0
                                    , MM.loadRegionIndex = Just 0
                                    }
   rcfgs <- case someElf of
@@ -159,14 +158,11 @@ loadElf ng customEventChan someElf = do
       return [ (R.PPC32, ppc32cfg)
              ]
     E.Elf64 e64 -> do
-      let Right (_, mem) = MM.memoryForElf elfLoadOpts e64
+      let Right (_sim, mem, _warnings) = MM.memoryForElf elfLoadOpts e64
       nonceAx86 <- NG.freshNonce ng
       ppc64cfg <- LP.ppcConfig (Proxy @PPC.PPC64) customEventChan ng PPC64.allSemantics e64 PPC.config64 A.mkPPC64Result
       let x86cfg0 = X86.config (RA.analysis A.mkX86Result nonceAx86 Nothing) undefined
-      let x86callback _addr ebi =
-            case ebi of
-              Left ex -> B.writeBChan customEventChan (AnalysisFailure ex)
-              Right bi ->
+      let x86callback _addr bi =
                 let res = BinaryAnalysisResult { rBlockInfo = bi
                                                , rMemory = mem
                                                , rISA = R.rcISA x86cfg0
