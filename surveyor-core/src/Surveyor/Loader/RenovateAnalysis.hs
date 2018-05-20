@@ -5,8 +5,9 @@ module Surveyor.Loader.RenovateAnalysis (
 
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as NG
+import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MM
-import qualified Lang.Crucible.Solver.SimpleBackend as SB
+import qualified Lang.Crucible.Backend.Simple as SB
 import qualified Renovate as R
 import qualified SemMC.Formula as F
 
@@ -18,13 +19,13 @@ analysis :: (A.Architecture arch s, MM.MemWidth w, w ~ MM.ArchAddrWidth arch)
          -> NG.Nonce s arch
          -> Maybe (MapF.MapF o (F.ParameterizedFormula (SB.SimpleBackend s) arch))
          -> R.ISA arch
-         -> MM.Memory w
+         -> MBL.LoadedBinary arch binFmt
          -> R.BlockInfo arch
          -> A.SomeResult s arch
-analysis con nonce semantics isa mem bi = con r
+analysis con nonce semantics isa loadedBinary bi = con r
   where
     r = BinaryAnalysisResult { rBlockInfo = bi
-                             , rMemory = mem
+                             , rLoadedBinary = loadedBinary
                              , rISA = isa
                              , rBlockMap = indexBlocksByAddress isa bi
                              , rNonce = nonce

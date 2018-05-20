@@ -20,7 +20,7 @@ import qualified Data.Text as T
 
 import qualified SemMC.Architecture as SA
 import qualified SemMC.Formula as F
-import qualified Lang.Crucible.Solver.SimpleBackend as SB
+import qualified Lang.Crucible.Backend.Simple as SB
 
 data SomeResult s arch where
   SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s arch

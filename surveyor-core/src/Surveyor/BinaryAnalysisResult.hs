@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
@@ -9,17 +10,19 @@ module Surveyor.BinaryAnalysisResult (
 
 import qualified Data.Foldable as F
 import qualified Data.IntervalMap as IM
+import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Memory as MM
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as NG
-import qualified Lang.Crucible.Solver.SimpleBackend as SB
+import qualified Lang.Crucible.Backend.Simple as SB
 import qualified Renovate as R
 import qualified SemMC.Formula as F
 
 data BinaryAnalysisResult s o arch =
+  forall binFmt .
   BinaryAnalysisResult { rBlockInfo :: !(R.BlockInfo arch)
-                       , rMemory :: !(MM.Memory (MC.ArchAddrWidth arch))
+                       , rLoadedBinary :: !(MBL.LoadedBinary arch binFmt)
                        , rISA :: R.ISA arch
                        , rBlockMap :: !(IM.IntervalMap (MM.MemAddr (MC.ArchAddrWidth arch)) (R.ConcreteBlock arch))
                        , rNonce :: NG.Nonce s arch

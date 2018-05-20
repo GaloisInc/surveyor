@@ -6,7 +6,7 @@ packages: surveyor-core
           deps/elf-edit
           deps/dwarf
           deps/parameterized-utils
-          deps/crucible/galois-matlab
+          deps/crucible/what4
           deps/crucible/crucible
           deps/crucible/crucible-llvm
           deps/dismantle/dismantle-tablegen
