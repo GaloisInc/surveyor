@@ -15,19 +15,19 @@ import qualified Surveyor.Architecture as A
 import           Surveyor.BinaryAnalysisResult
 
 analysis :: (A.Architecture arch s, MM.MemWidth w, w ~ MM.ArchAddrWidth arch)
-         => (BinaryAnalysisResult s o arch -> A.SomeResult s arch)
+         => R.ISA arch
+         -> (BinaryAnalysisResult s o arch -> A.SomeResult s arch)
          -> NG.Nonce s arch
          -> Maybe (MapF.MapF o (F.ParameterizedFormula (SB.SimpleBackend s) arch))
-         -> R.ISA arch
+         -> R.RewriteEnv arch
          -> MBL.LoadedBinary arch binFmt
-         -> R.BlockInfo arch
          -> A.SomeResult s arch
-analysis con nonce semantics isa loadedBinary bi = con r
+analysis isa con nonce semantics env loadedBinary = con r
   where
-    r = BinaryAnalysisResult { rBlockInfo = bi
+    r = BinaryAnalysisResult { rBlockInfo = R.envBlockInfo env
                              , rLoadedBinary = loadedBinary
                              , rISA = isa
-                             , rBlockMap = indexBlocksByAddress isa bi
+                             , rBlockMap = indexBlocksByAddress isa (R.envBlockInfo env)
                              , rNonce = nonce
                              , rSemantics = semantics
                              }

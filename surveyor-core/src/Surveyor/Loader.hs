@@ -151,7 +151,7 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 loadElf :: NG.NonceGenerator IO s -> C.Chan (Events s) -> E.SomeElf E.Elf -> IO ()
 loadElf ng customEventChan someElf = do
   nonceAx86 <- NG.freshNonce ng
-  let x86cfg0 = X86.config (RA.analysis A.mkX86Result nonceAx86 Nothing) R.nop
+  let x86cfg0 = X86.config (RA.analysis X86.isa A.mkX86Result nonceAx86 Nothing) R.nop
   let x86callback loadedBinary _addr bi =
             let res = BinaryAnalysisResult { rBlockInfo = bi
                                            , rLoadedBinary = loadedBinary

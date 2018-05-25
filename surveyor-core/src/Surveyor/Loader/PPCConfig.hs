@@ -26,6 +26,7 @@ import qualified SemMC.Formula as SF
 import qualified SemMC.Log as SL
 import qualified Dismantle.PPC as DPPC
 import qualified Renovate as R
+import qualified Renovate.Arch.PPC as RP
 
 import qualified Surveyor.Architecture as A
 import           Surveyor.BinaryAnalysisResult
@@ -34,6 +35,8 @@ import           Surveyor.Events
 import qualified Surveyor.Loader.RenovateAnalysis as RA
 
 ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
+              R.InstructionAnnotation arch ~ RP.TargetAddress arch,
+              R.Instruction arch ~ RP.Instruction,
               MM.MemWidth w,
               R.ArchInfo arch,
               A.Architecture arch s,
@@ -53,7 +56,7 @@ ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
           -> C.Chan (Events s)
           -> NG.NonceGenerator IO s
           -> [(Some (DPPC.Opcode DPPC.Operand), BS.ByteString)]
-          -> ((R.ISA arch -> MBL.LoadedBinary arch binFmt -> R.BlockInfo arch -> A.SomeResult s arch) ->
+          -> ((R.RewriteEnv arch -> MBL.LoadedBinary arch binFmt -> A.SomeResult s arch) ->
               (A.SomeResult s arch -> R.ISA arch -> MBL.LoadedBinary arch binFmt -> R.SymbolicBlock arch -> R.RewriteM arch (Maybe [R.TaggedInstruction arch (R.InstructionAnnotation arch)])) ->
               R.RenovateConfig arch binFmt (A.SomeResult s))
           -> (BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) arch -> A.SomeResult s arch)
@@ -64,7 +67,7 @@ ppcConfig binRep customEventChan ng semantics mkCfg0 mkRes = do
   let ?logCfg = logCfg
   formulas <- SF.loadFormulas sym semantics
   nonceA <- NG.freshNonce ng
-  let cfg0 = mkCfg0 (RA.analysis mkRes nonceA (Just formulas)) R.nop
+  let cfg0 = mkCfg0 (RA.analysis RP.isa mkRes nonceA (Just formulas)) R.nop
   let callback loadedBinary _addr bi = do
             let isa = R.rcISA cfg0
             let res = BinaryAnalysisResult { rBlockInfo = bi
