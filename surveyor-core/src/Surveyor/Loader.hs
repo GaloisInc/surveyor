@@ -11,7 +11,6 @@ module Surveyor.Loader (
   loadElf
   ) where
 
-import qualified Brick.BChan as B
 import qualified Control.Concurrent.Async as A
 import qualified Control.Concurrent.MVar as C
 import qualified Data.ByteString as BS
@@ -38,6 +37,7 @@ import qualified Renovate.Arch.PPC as PPC
 
 import qualified Surveyor.Architecture as A
 import           Surveyor.BinaryAnalysisResult
+import qualified Surveyor.Chan as C
 import           Surveyor.Events ( Events(..) )
 import qualified Surveyor.Loader.RenovateAnalysis as RA
 import qualified Surveyor.Loader.PPCConfig as LP
@@ -57,14 +57,14 @@ cancelLoader al = do
 
 -- | Try to load the given file, attempting to determine its type based on the
 -- filename
-asynchronouslyLoad :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoad :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
 asynchronouslyLoad ng customEventChan path
   | takeExtension path == ".bc" = asynchronouslyLoadLLVM ng customEventChan path
   | takeExtension path == ".jar" = asynchronouslyLoadJAR ng customEventChan path
   | otherwise = asynchronouslyLoadElf ng customEventChan path
 
 -- | Load a JAR file
-asynchronouslyLoadJAR :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadJAR :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadJAR ng customEventChan jarPath = do
   nonce <- NG.freshNonce ng
   mv <- C.newEmptyMVar
@@ -74,12 +74,12 @@ asynchronouslyLoadJAR ng customEventChan jarPath = do
       let chunks = L.chunksOf 10 (M.keys (J.unJR jr))
       lastRes <- F.foldlM (addJARChunk nonce jr) Nothing chunks
       let lastRes' = A.mkJVMResult nonce jr lastRes []
-      B.writeBChan customEventChan (AnalysisFinished (A.SomeResult lastRes') [])
+      C.writeChan customEventChan (AnalysisFinished (A.SomeResult lastRes') [])
     C.putMVar mv worker
     eres <- A.waitCatch worker
     case eres of
       Right () -> return ()
-      Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
+      Left exn -> C.writeChan customEventChan (AnalysisFailure exn)
   worker <- C.takeMVar mv
   return AsyncLoader { errorCatcher = errThread
                      , workerThread = worker
@@ -89,10 +89,10 @@ asynchronouslyLoadJAR ng customEventChan jarPath = do
       let readClass className = J.loadClassFromJar (LB8.unpack className) jr
       classes <- catMaybes <$> mapM readClass classNames
       let res' = A.mkJVMResult nonce jr mres classes
-      B.writeBChan customEventChan (AnalysisProgress (A.SomeResult res'))
+      C.writeChan customEventChan (AnalysisProgress (A.SomeResult res'))
       return (Just res')
 
-asynchronouslyLoadLLVM :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadLLVM :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadLLVM ng customEventChan bcPath = do
   mv <- C.newEmptyMVar
   errThread <- A.async $ do
@@ -101,15 +101,15 @@ asynchronouslyLoadLLVM ng customEventChan bcPath = do
       em <- LL.parseBitCode bs
       case em of
         Left err ->
-          B.writeBChan customEventChan (ErrorLoadingLLVM (LL.formatError err))
+          C.writeChan customEventChan (ErrorLoadingLLVM (LL.formatError err))
         Right m -> do
           nonce <- NG.freshNonce ng
-          B.writeBChan customEventChan (AnalysisFinished (A.mkLLVMResult nonce m) [])
+          C.writeChan customEventChan (AnalysisFinished (A.mkLLVMResult nonce m) [])
     C.putMVar mv worker
     eres <- A.waitCatch worker
     case eres of
       Right () -> return ()
-      Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
+      Left exn -> C.writeChan customEventChan (AnalysisFailure exn)
   worker <- C.takeMVar mv
   return AsyncLoader { errorCatcher = errThread
                      , workerThread = worker
@@ -119,7 +119,7 @@ asynchronouslyLoadLLVM ng customEventChan bcPath = do
 --
 -- The thread sends the result of loading to the main thread through the
 -- provided event channel
-asynchronouslyLoadElf :: NG.NonceGenerator IO s -> B.BChan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadElf :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadElf ng customEventChan exePath = do
   mv <- C.newEmptyMVar
   thread <- A.async $ do
@@ -129,16 +129,16 @@ asynchronouslyLoadElf ng customEventChan exePath = do
       bs <- BS.readFile exePath
       case E.parseElf bs of
         E.ElfHeaderError off msg ->
-          B.writeBChan customEventChan (ErrorLoadingELFHeader off msg)
+          C.writeChan customEventChan (ErrorLoadingELFHeader off msg)
         E.Elf32Res [] e32 -> loadElf ng customEventChan (E.Elf32 e32)
         E.Elf64Res [] e64 -> loadElf ng customEventChan (E.Elf64 e64)
-        E.Elf32Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
-        E.Elf64Res errs _ -> B.writeBChan customEventChan (ErrorLoadingELF errs)
+        E.Elf32Res errs _ -> C.writeChan customEventChan (ErrorLoadingELF errs)
+        E.Elf64Res errs _ -> C.writeChan customEventChan (ErrorLoadingELF errs)
     C.putMVar mv worker
     eres <- A.waitCatch worker
     case eres of
       Right () -> return ()
-      Left exn -> B.writeBChan customEventChan (AnalysisFailure exn)
+      Left exn -> C.writeChan customEventChan (AnalysisFailure exn)
   worker <- C.takeMVar mv
   return AsyncLoader { errorCatcher = thread
                      , workerThread = worker
@@ -148,7 +148,7 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 -- across all of the streamed results for the same executable.  We need to
 -- generate the nonce under 'withElfConfig' so that we can capture the
 -- appropriate value of w.
-loadElf :: NG.NonceGenerator IO s -> B.BChan (Events s) -> E.SomeElf E.Elf -> IO ()
+loadElf :: NG.NonceGenerator IO s -> C.Chan (Events s) -> E.SomeElf E.Elf -> IO ()
 loadElf ng customEventChan someElf = do
   nonceAx86 <- NG.freshNonce ng
   let x86cfg0 = X86.config (RA.analysis A.mkX86Result nonceAx86 Nothing) R.nop
@@ -161,7 +161,7 @@ loadElf ng customEventChan someElf = do
                                            , rSemantics = Nothing
                                            }
                 sr = A.mkX86Result res
-            in B.writeBChan customEventChan (AnalysisProgress sr)
+            in C.writeChan customEventChan (AnalysisProgress sr)
   let x86cfg = x86cfg0 { R.rcFunctionCallback = Just (10, x86callback) }
   ppc32cfg <- LP.ppcConfig MBL.Elf32Repr customEventChan ng PPC32.allSemantics PPC.config32 A.mkPPC32Result
   ppc64cfg <- LP.ppcConfig MBL.Elf64Repr customEventChan ng PPC64.allSemantics PPC.config64 A.mkPPC64Result
@@ -171,4 +171,4 @@ loadElf ng customEventChan someElf = do
               ]
   R.withElfConfig someElf rcfgs $ \rc e0 m -> do
     (res, diags) <- R.analyzeElf rc e0 m
-    B.writeBChan customEventChan (AnalysisFinished res diags)
+    C.writeChan customEventChan (AnalysisFinished res diags)

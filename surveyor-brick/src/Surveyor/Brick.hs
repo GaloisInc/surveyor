@@ -23,6 +23,7 @@ import qualified Graphics.Vty as V
 
 import qualified Surveyor.Architecture as A
 import           Surveyor.Attributes
+import qualified Surveyor.Chan as C
 import           Surveyor.Events ( Events(..) )
 import           Surveyor.Handlers ( appHandleEvent )
 import           Surveyor.Loader ( AsyncLoader, asynchronouslyLoad )
@@ -85,7 +86,7 @@ drawAppShell s w =
         SomeMiniBuffer (MiniBuffer _)
           | Just mb <- s ^? lArchState . _Just . lMinibuffer ->
             MB.renderMinibuffer True mb
-        _ -> EA.renderEchoArea (sEchoArea s)
+        _ -> maybe B.emptyWidget B.txt (EA.getText (sEchoArea s))
 
 appDraw :: State BrickUIState s -> [B.Widget Names]
 appDraw (State s) =
@@ -133,27 +134,28 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
 appStartEvent :: State BrickUIState s -> B.EventM Names (State BrickUIState s)
 appStartEvent s0 = return s0
 
-updateEchoArea :: B.BChan (Events s) -> EA.EchoArea -> IO ()
+updateEchoArea :: C.Chan (Events s) -> EA.EchoArea -> IO ()
 updateEchoArea customEventChan ea =
-  B.writeBChan customEventChan (UpdateEchoArea ea)
+  C.writeChan customEventChan (UpdateEchoArea ea)
 
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   customEventChan <- B.newBChan 100
+  let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
   let app = B.App { B.appDraw = appDraw
                   , B.appChooseCursor = appChooseCursor
                   , B.appHandleEvent = appHandleEvent
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  mloader <- T.traverse (asynchronouslyLoad ng customEventChan) mExePath
-  s0 <- emptyState mExePath mloader ng customEventChan
+  mloader <- T.traverse (asynchronouslyLoad ng chan) mExePath
+  s0 <- emptyState mExePath mloader ng chan
   let initialState = State s0
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
 
 
-emptyState :: Maybe FilePath -> Maybe AsyncLoader -> PN.NonceGenerator IO s -> B.BChan (Events s) -> IO (S BrickUIState Void s)
+emptyState :: Maybe FilePath -> Maybe AsyncLoader -> PN.NonceGenerator IO s -> C.Chan (Events s) -> IO (S BrickUIState Void s)
 emptyState mfp mloader ng customEventChan = do
   return S { sInputFile = mfp
            , sLoader = mloader
@@ -161,7 +163,7 @@ emptyState mfp mloader ng customEventChan = do
            , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
            , sUIMode = SomeUIMode Summary
            , sAppState = maybe AwaitingFile (const Loading) mfp
-           , sEmitEvent = B.writeBChan customEventChan
+           , sEmitEvent = C.writeChan customEventChan
            , sEventChannel = customEventChan
            , sNonceGenerator = ng
            , sArchState = Nothing

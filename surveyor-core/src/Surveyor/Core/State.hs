@@ -25,13 +25,13 @@ module Surveyor.Core.State (
 
 import           GHC.Generics ( Generic )
 
-import qualified Brick.BChan as B
 import qualified Control.Lens as L
 import qualified Data.Generics.Product as GL
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
+import qualified Surveyor.Chan as C
 import           Surveyor.Core.Keymap ( Keymap )
 import qualified Surveyor.Arguments as AR
 import qualified Surveyor.Architecture as A
@@ -57,7 +57,7 @@ data S u arch s =
     -- status line)
     , sEmitEvent :: Events s -> IO ()
     -- ^ An IO action to emit an event (via the custom event channel)
-    , sEventChannel :: B.BChan (Events s)
+    , sEventChannel :: C.Chan (Events s)
     , sNonceGenerator :: NG.NonceGenerator IO s
     -- ^ Nonce source used to correlate related analysis results as they stream
     -- in.  The reporting of analysis results through an existential wrapper
@@ -83,7 +83,7 @@ lEchoArea = GL.field @"sEchoArea"
 lUIMode :: L.Lens' (S u arch s) SomeUIMode
 lUIMode = GL.field @"sUIMode"
 
-lEventChannel :: L.Lens' (S u arch s) (B.BChan (Events s))
+lEventChannel :: L.Lens' (S u arch s) (C.Chan (Events s))
 lEventChannel = GL.field @"sEventChannel"
 
 lAppState :: L.Lens' (S u arch s) AppState

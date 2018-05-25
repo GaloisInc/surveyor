@@ -19,19 +19,19 @@ module Surveyor.Commands (
   allCommands
   ) where
 
-import qualified Brick.BChan as B
 import qualified Data.Functor.Const as C
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 
+import qualified Surveyor.Chan as C
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Arguments as AR
 import           Surveyor.Events ( Events(..) )
 
 type Argument arch s = AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s
 type Command arch s tps = C.Command (Events s) (Maybe (NG.Nonce s arch)) (Argument arch s) AR.TypeRepr tps
-type Callback arch s tps = B.BChan (Events s) -> Maybe (NG.Nonce s arch) -> PL.List (Argument arch s) tps -> IO ()
+type Callback arch s tps = C.Chan (Events s) -> Maybe (NG.Nonce s arch) -> PL.List (Argument arch s) tps -> IO ()
 
 allCommands :: [Some (C.Command (Events s) (Maybe (NG.Nonce s arch)) (Argument arch s) AR.TypeRepr)]
 allCommands =
@@ -53,7 +53,7 @@ exitC =
   where
     doc = "Exit the application"
     callback :: Callback arch s '[]
-    callback = \customEventChan _ PL.Nil -> B.writeBChan customEventChan Exit
+    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan Exit
 
 showSummaryC :: forall arch s . Command arch s '[]
 showSummaryC =
@@ -61,7 +61,7 @@ showSummaryC =
   where
     doc = "Show a summary of the information discovered about the binary"
     callback :: Callback arch s '[]
-    callback = \customEventChan _ PL.Nil -> B.writeBChan customEventChan ShowSummary
+    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan ShowSummary
 
 showDiagnosticsC :: forall arch s . Command arch s '[]
 showDiagnosticsC =
@@ -69,7 +69,7 @@ showDiagnosticsC =
   where
     doc = "Show a log of the diagnostics produced by the analysis and UI"
     callback :: Callback arch s '[]
-    callback = \customEventChan _ PL.Nil -> B.writeBChan customEventChan ShowDiagnostics
+    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan ShowDiagnostics
 
 listFunctionsC :: forall arch s . Command arch s '[]
 listFunctionsC =
@@ -81,7 +81,7 @@ listFunctionsC =
       case mnonce of
         Nothing -> return ()
         Just nonce ->
-          B.writeBChan customEventChan (FindFunctionsContaining nonce Nothing)
+          C.writeChan customEventChan (FindFunctionsContaining nonce Nothing)
 
 findBlockC :: forall arch s . Command arch s '[AR.AddressType]
 findBlockC =
@@ -95,7 +95,7 @@ findBlockC =
       case mnonce of
         Nothing -> return ()
         Just nonce ->
-          B.writeBChan customEventChan (FindBlockContaining nonce addr)
+          C.writeChan customEventChan (FindBlockContaining nonce addr)
 
 describeCommandC :: forall arch s . Command arch s '[AR.CommandType]
 describeCommandC =
@@ -106,7 +106,7 @@ describeCommandC =
     rep = AR.CommandTypeRepr PL.:< PL.Nil
     callback :: Callback arch s '[AR.CommandType]
     callback = \customEventChan _ (AR.CommandArgument cmd PL.:< PL.Nil) ->
-      B.writeBChan customEventChan (DescribeCommand cmd)
+      C.writeChan customEventChan (DescribeCommand cmd)
 
 -- | This isn't part of 'allCommands' because we can never productively launch
 -- it from the minibuffer
@@ -116,7 +116,7 @@ minibufferC =
   where
     doc = "Open the minibuffer"
     callback :: Callback arch s '[]
-    callback = \customEventChan _ PL.Nil -> B.writeBChan customEventChan OpenMinibuffer
+    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan OpenMinibuffer
 
 loadFileC :: forall arch s . Command arch s '[AR.FilePathType]
 loadFileC =
@@ -127,7 +127,7 @@ loadFileC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback arch s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      B.writeBChan customEventChan (LoadFile filepath)
+      C.writeChan customEventChan (LoadFile filepath)
 
 loadELFC :: forall arch s . Command arch s '[AR.FilePathType]
 loadELFC =
@@ -138,7 +138,7 @@ loadELFC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback arch s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      B.writeBChan customEventChan (LoadELF filepath)
+      C.writeChan customEventChan (LoadELF filepath)
 
 loadLLVMC :: forall arch s . Command arch s '[AR.FilePathType]
 loadLLVMC =
@@ -149,7 +149,7 @@ loadLLVMC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback arch s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      B.writeBChan customEventChan (LoadLLVM filepath)
+      C.writeChan customEventChan (LoadLLVM filepath)
 
 loadJARC :: forall arch s . Command arch s '[AR.FilePathType]
 loadJARC =
@@ -160,4 +160,4 @@ loadJARC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback arch s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      B.writeBChan customEventChan (LoadJAR filepath)
+      C.writeChan customEventChan (LoadJAR filepath)

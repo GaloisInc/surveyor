@@ -3,10 +3,11 @@ module Surveyor.Core.Command (
   Command(..)
   ) where
 
-import qualified Brick.BChan as B
 import qualified Data.Functor.Const as C
 import qualified Data.Parameterized.List as PL
 import qualified Data.Text as T
+
+import qualified Surveyor.Chan as C
 
 data Command e s a r tps =
   Command { cmdName :: T.Text
@@ -17,6 +18,6 @@ data Command e s a r tps =
           -- ^ Argument names
           , cmdArgTypes :: PL.List r tps
           -- ^ Argument types
-          , cmdFunc :: B.BChan e -> s -> PL.List a tps -> IO ()
+          , cmdFunc :: C.Chan e -> s -> PL.List a tps -> IO ()
           -- ^ A function to call on the argument list
           }

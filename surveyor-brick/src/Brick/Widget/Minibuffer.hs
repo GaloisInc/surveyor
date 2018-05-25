@@ -13,7 +13,6 @@ module Brick.Widget.Minibuffer (
   ) where
 
 import qualified Brick as B
-import qualified Brick.BChan as B
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Functor.Const as C
 import           Data.Maybe ( fromMaybe )
@@ -26,6 +25,7 @@ import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
+import qualified Surveyor.Chan as C
 import           Surveyor.Core.Command ( Command(..) )
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
@@ -36,7 +36,7 @@ data MinibufferState e s a r where
                       -> PL.List r tps'
                       -> PL.List a tps'
                       -> PL.List r tps0
-                      -> (B.BChan e -> s -> PL.List a tps0 -> IO ())
+                      -> (C.Chan e -> s -> PL.List a tps0 -> IO ())
                       -> MinibufferState e s a r
   -- ^ In the process of collecting arguments
   Editing :: MinibufferState e s a r
@@ -141,7 +141,7 @@ argumentValue argList =
 --    command will deactivate the minibuffer
 handleMinibufferEvent :: (Ord n, Eq t, Monoid t, ZG.GenericTextZipper t, TestEquality r)
                       => V.Event
-                      -> B.BChan e
+                      -> C.Chan e
                       -> s
                       -> Minibuffer e s a r t n
                       -> B.EventM n (MinibufferStatus e s a r t n)
