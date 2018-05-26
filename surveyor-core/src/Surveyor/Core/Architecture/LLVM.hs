@@ -10,7 +10,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Surveyor.Architecture.LLVM ( mkLLVMResult ) where
+module Surveyor.Core.Architecture.LLVM ( mkLLVMResult ) where
 
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
@@ -24,7 +24,7 @@ import qualified Text.LLVM.PP as LL
 import qualified Text.PrettyPrint as PP
 import           Text.Printf ( printf )
 
-import           Surveyor.Architecture.Class
+import           Surveyor.Core.Architecture.Class
 
 data LLVM
 

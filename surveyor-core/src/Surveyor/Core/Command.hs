@@ -7,7 +7,7 @@ import qualified Data.Functor.Const as C
 import qualified Data.Parameterized.List as PL
 import qualified Data.Text as T
 
-import qualified Surveyor.Chan as C
+import qualified Surveyor.Core.Chan as C
 
 data Command e s a r tps =
   Command { cmdName :: T.Text

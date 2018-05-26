@@ -15,18 +15,18 @@ import           Text.Printf ( printf )
 
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
-import qualified Surveyor.Architecture as A
+import qualified Surveyor.Core as C
 import           Surveyor.Names ( Names(..) )
 
 data FunctionSelector arch s =
-  FunctionSelector { callback :: A.FunctionHandle arch s -> IO ()
-                   , selector :: !(FL.FilterList Names T.Text (A.FunctionHandle arch s))
+  FunctionSelector { callback :: C.FunctionHandle arch s -> IO ()
+                   , selector :: !(FL.FilterList Names T.Text (C.FunctionHandle arch s))
                    }
 
-functionSelector :: (A.Architecture arch s)
-                 => (A.FunctionHandle arch s -> IO ())
+functionSelector :: (C.Architecture arch s)
+                 => (C.FunctionHandle arch s -> IO ())
                  -> B.AttrName
-                 -> [A.FunctionHandle arch s]
+                 -> [C.FunctionHandle arch s]
                  -> FunctionSelector arch s
 functionSelector cb focAttr funcs =
   FunctionSelector { callback = cb
@@ -42,10 +42,10 @@ functionSelector cb focAttr funcs =
                                 , FL.flRenderEditorContent = renderEditorContent
                                 }
 
-funcToText :: (A.Architecture arch s) => A.FunctionHandle arch s -> T.Text
-funcToText f = T.pack (printf "%s (%s)" (A.fhName f) (A.prettyAddress (A.fhAddress f)))
+funcToText :: (C.Architecture arch s) => C.FunctionHandle arch s -> T.Text
+funcToText f = T.pack (printf "%s (%s)" (C.fhName f) (C.prettyAddress (C.fhAddress f)))
 
-renderFuncItem :: (A.Architecture arch s) => B.AttrName -> Bool -> A.FunctionHandle arch s -> B.Widget Names
+renderFuncItem :: (C.Architecture arch s) => B.AttrName -> Bool -> C.FunctionHandle arch s -> B.Widget Names
 renderFuncItem focAttr isFocused f =
   let xfrm = if isFocused then B.withAttr focAttr else id
   in xfrm (B.txt (funcToText f))
@@ -70,10 +70,10 @@ handleFunctionSelectorEvent evt fsel =
       fl' <- FL.handleFilterListEvent updater evt (selector fsel)
       return fsel { selector = fl' }
 
-renderFunctionSelector :: (A.Architecture arch s) => FunctionSelector arch s -> B.Widget Names
+renderFunctionSelector :: (C.Architecture arch s) => FunctionSelector arch s -> B.Widget Names
 renderFunctionSelector fsel =
   FL.renderFilterList (const B.emptyWidget) True (selector fsel)
 
-matchesFunction :: SW.Matcher -> A.FunctionHandle arch s -> Bool
+matchesFunction :: SW.Matcher -> C.FunctionHandle arch s -> Bool
 matchesFunction matcher f =
-  SW.matches matcher (A.fhName f)
+  SW.matches matcher (C.fhName f)

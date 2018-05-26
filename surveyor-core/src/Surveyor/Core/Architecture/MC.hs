@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
--- | Instantiations of the 'Architecture' class for machine code architectures
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -7,7 +6,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Surveyor.Architecture.MC (
+-- | Instantiations of the 'Architecture' class for machine code architectures
+module Surveyor.Core.Architecture.MC (
   mkPPC32Result,
   mkPPC64Result,
   mkX86Result
@@ -40,8 +40,8 @@ import qualified Renovate.Arch.PPC as PPC
 import qualified Renovate.Arch.X86_64 as X86
 import qualified Data.Parameterized.HasRepr as HR
 
-import           Surveyor.Architecture.Class
-import           Surveyor.BinaryAnalysisResult
+import           Surveyor.Core.Architecture.Class
+import           Surveyor.Core.BinaryAnalysisResult
 
 mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32
               -> SomeResult s PPC.PPC32

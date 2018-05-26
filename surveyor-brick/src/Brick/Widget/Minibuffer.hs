@@ -25,8 +25,7 @@ import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
-import qualified Surveyor.Chan as C
-import           Surveyor.Core.Command ( Command(..) )
+import qualified Surveyor.Core as C
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
 
@@ -55,9 +54,9 @@ data MinibufferState e s a r where
 -- application.
 data Minibuffer e s a r t n =
   Minibuffer { prefix :: !T.Text
-             , commandList :: FL.FilterList n t (Some (Command e s a r))
+             , commandList :: FL.FilterList n t (Some (C.Command e s a r))
              , argumentList :: FL.FilterList n t t
-             , allCommands :: !(V.Vector (Some (Command e s a r)))
+             , allCommands :: !(V.Vector (Some (C.Command e s a r)))
              , state :: MinibufferState e s a r
              , parseArgument :: forall tp . t -> r tp -> Maybe (a tp)
              , completeArgument :: forall tp . t -> r tp -> IO (V.Vector t)
@@ -83,7 +82,7 @@ minibuffer :: (ZG.GenericTextZipper t)
            -- ^ The name to assign to the completion list
            -> T.Text
            -- ^ The prefix to display before the editor widget
-           -> [Some (Command e s a r)]
+           -> [Some (C.Command e s a r)]
            -- ^ The commands supported by the minibuffer
            -> Minibuffer e s a r t n
 minibuffer parseArg compArg showRep attr edName compName pfx cmds =
@@ -103,7 +102,7 @@ minibuffer parseArg compArg showRep attr edName compName pfx cmds =
                                         , FL.flEditorPosition = FL.Top
                                         , FL.flMaxListHeight = Just 5
                                         , FL.flToText = \(Some cmd) ->
-                                            mconcat (map ZG.singleton (T.unpack (cmdName cmd)))
+                                            mconcat (map ZG.singleton (T.unpack (C.cmdName cmd)))
                                         , FL.flRenderListItem = renderCommandCompletionItem showRep attr
                                         , FL.flRenderEditorContent = drawContent
                                         }
@@ -155,7 +154,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
           -- the command immediately
           case FL.selectedItem (commandList mb) of
             Nothing -> return (Completed mb)
-            Just (Some (Command _ _ argNames argTypes callback)) ->
+            Just (Some (C.Command _ _ argNames argTypes callback)) ->
               case (argNames, argTypes) of
                 (PL.Nil, PL.Nil) -> do
                   liftIO (callback customEventChan s PL.Nil)
@@ -240,8 +239,8 @@ withReversedF l1 l2 k = go PL.Nil PL.Nil l1 l2
         (PL.Nil, PL.Nil) -> k acc1 acc2
         (x1 PL.:< xs1, x2 PL.:< xs2) -> go (x1 PL.:< acc1) (x2 PL.:< acc2) xs1 xs2
 
-commandMatches :: SW.Matcher -> Some (Command e s a r) -> Bool
-commandMatches m (Some cmd) = SW.matches m (cmdName cmd)
+commandMatches :: SW.Matcher -> Some (C.Command e s a r) -> Bool
+commandMatches m (Some cmd) = SW.matches m (C.cmdName cmd)
 
 renderMinibuffer :: (Ord n, Show n, B.TextWidth t, ZG.GenericTextZipper t)
                  => Bool
@@ -263,9 +262,9 @@ renderCommandCompletionItem :: forall e s a r n
                              . (forall tp . r tp -> T.Text)
                             -> B.AttrName
                             -> Bool
-                            -> Some (Command e s a r)
+                            -> Some (C.Command e s a r)
                             -> B.Widget n
-renderCommandCompletionItem showRep focAttr isFocused (Some (Command name _ argNames argTypes _)) =
+renderCommandCompletionItem showRep focAttr isFocused (Some (C.Command name _ argNames argTypes _)) =
   let xfrm = if isFocused then B.withAttr focAttr else id
   in xfrm (B.str (printf "%s (%s)" name sig))
   where

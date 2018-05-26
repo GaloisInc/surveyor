@@ -13,27 +13,25 @@ import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import qualified Data.Vector as V
 
-import qualified Surveyor.Architecture as A
-import qualified Surveyor.Core.Command as C
+import           Surveyor.Attributes
+import qualified Surveyor.Core as C
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.Minibuffer as MB
-import           Surveyor.Arguments
-import           Surveyor.Attributes
 
 completeArgument :: (Z.GenericTextZipper t)
-                 => [Some (C.Command e st (Argument arch e st s) TypeRepr)]
-                 -> (t -> TypeRepr tp -> IO (V.Vector t))
+                 => [Some (C.Command e st (C.Argument arch e st s) C.TypeRepr)]
+                 -> (t -> C.TypeRepr tp -> IO (V.Vector t))
 completeArgument cmds =
   let cmdNames = V.fromList [ C.cmdName cmd | Some cmd <- cmds ]
   in \t r ->
     case r of
-      StringTypeRepr -> return V.empty
-      AddressTypeRepr -> return V.empty
-      IntTypeRepr -> return V.empty
-      WordTypeRepr -> return V.empty
+      C.StringTypeRepr -> return V.empty
+      C.AddressTypeRepr -> return V.empty
+      C.IntTypeRepr -> return V.empty
+      C.WordTypeRepr -> return V.empty
       -- FIXME: We can actually do file path completion
-      FilePathTypeRepr -> return V.empty
-      CommandTypeRepr ->
+      C.FilePathTypeRepr -> return V.empty
+      C.CommandTypeRepr ->
         case SW.matcher (Z.toList t) of
           Nothing -> return V.empty
           Just matcher -> do
@@ -41,13 +39,13 @@ completeArgument cmds =
             let toGeneric txt = mconcat (map Z.singleton (T.unpack txt))
             return (fmap toGeneric matches)
 
-minibuffer :: (Z.GenericTextZipper t, A.Architecture arch s)
+minibuffer :: (Z.GenericTextZipper t, C.Architecture arch s)
            => n
            -- ^ The name of the editor widget
            -> n
            -- ^ The name of the completion list
            -> T.Text
-           -> [Some (C.Command e st (Argument arch e st s) TypeRepr)]
-           -> MB.Minibuffer e st (Argument arch e st s) TypeRepr t n
+           -> [Some (C.Command e st (C.Argument arch e st s) C.TypeRepr)]
+           -> MB.Minibuffer e st (C.Argument arch e st s) C.TypeRepr t n
 minibuffer edName compName pfx cmds =
-  MB.minibuffer (parseArgument cmds) (completeArgument cmds) showRepr focusedListAttr edName compName pfx cmds
+  MB.minibuffer (C.parseArgument cmds) (completeArgument cmds) C.showRepr focusedListAttr edName compName pfx cmds

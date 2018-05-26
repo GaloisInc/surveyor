@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
-module Surveyor.BinaryAnalysisResult (
+module Surveyor.Core.BinaryAnalysisResult (
   BinaryAnalysisResult(..),
   indexBlocksByAddress,
   blocksContaining

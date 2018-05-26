@@ -13,25 +13,26 @@ extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     Surveyor.Architecture
-                       Surveyor.Arguments
-                       Surveyor.Chan
-                       Surveyor.Commands
-                       Surveyor.Events
-                       Surveyor.Keymap
-                       Surveyor.Loader
-                       Surveyor.Mode
+  exposed-modules:     Surveyor.Core
+  other-modules:       
+                       Surveyor.Core.Architecture
+                       Surveyor.Core.Architecture.Class
+                       Surveyor.Core.Architecture.JVM
+                       Surveyor.Core.Architecture.LLVM
+                       Surveyor.Core.Architecture.MC
+                       Surveyor.Core.Arguments
+                       Surveyor.Core.BinaryAnalysisResult
+                       Surveyor.Core.Chan
                        Surveyor.Core.Command
+                       Surveyor.Core.Commands
+                       Surveyor.Core.EchoArea
+                       Surveyor.Core.Events
                        Surveyor.Core.Keymap
+                       Surveyor.Core.Loader
+                       Surveyor.Core.Loader.PPCConfig
+                       Surveyor.Core.Loader.RenovateAnalysis
+                       Surveyor.Core.Mode
                        Surveyor.Core.State
-                       Surveyor.EchoArea
-  other-modules:       Surveyor.Architecture.Class
-                       Surveyor.Architecture.JVM
-                       Surveyor.Architecture.LLVM
-                       Surveyor.Architecture.MC
-                       Surveyor.BinaryAnalysisResult
-                       Surveyor.Loader.PPCConfig
-                       Surveyor.Loader.RenovateAnalysis
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
                        containers,

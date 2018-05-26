@@ -4,7 +4,7 @@
 -- this abstraction so that the core doesn't need to be tied to one particular
 -- channel implementation.  The frontends can wrap their respective channels
 -- with this interface.
-module Surveyor.Chan (
+module Surveyor.Core.Chan (
   Chan,
   mkChan,
   readChan,

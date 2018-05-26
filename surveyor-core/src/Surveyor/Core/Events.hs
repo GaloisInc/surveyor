@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
-module Surveyor.Events ( Events(..) ) where
+module Surveyor.Core.Events ( Events(..) ) where
 
 import qualified Control.Exception as X
 import qualified Data.ElfEdit as E
@@ -12,8 +12,8 @@ import qualified Data.Text as T
 
 import qualified Renovate as R
 
+import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Command as C
-import qualified Surveyor.Architecture as A
 
 data Events s where
   -- Loading events

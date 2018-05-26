@@ -6,7 +6,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-module Surveyor.Architecture.Class (
+module Surveyor.Core.Architecture.Class (
   Architecture(..),
   SomeResult(..),
   ParameterizedFormula(..),

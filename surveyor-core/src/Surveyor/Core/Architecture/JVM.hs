@@ -10,7 +10,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Surveyor.Architecture.JVM ( mkJVMResult ) where
+module Surveyor.Core.Architecture.JVM ( mkJVMResult ) where
 
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
@@ -27,7 +27,7 @@ import qualified Language.JVM.JarReader as J
 import qualified Language.JVM.Parser as J
 import           Text.Printf ( printf )
 
-import           Surveyor.Architecture.Class
+import           Surveyor.Core.Architecture.Class
 
 data JVM
 

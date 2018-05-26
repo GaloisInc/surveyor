@@ -1,9 +1,12 @@
-module Surveyor.EchoArea (
+-- | A data abstraction around a text value that can timeout
+--
+-- This could probably be generalized beyond just the echo area
+module Surveyor.Core.EchoArea (
   EchoArea,
   echoArea,
   resetEchoArea,
-  getText,
-  setText
+  getEchoAreaText,
+  setEchoAreaText
   ) where
 
 import qualified Control.Concurrent as C
@@ -27,11 +30,11 @@ echoArea ts kill =
            , content = Nothing
            }
 
-getText :: EchoArea -> Maybe T.Text
-getText = fmap fst . content
+getEchoAreaText :: EchoArea -> Maybe T.Text
+getEchoAreaText = fmap fst . content
 
-setText :: EchoArea -> T.Text -> IO EchoArea
-setText ea t = do
+setEchoAreaText :: EchoArea -> T.Text -> IO EchoArea
+setEchoAreaText ea t = do
   case content ea of
     Just (_, oldTimeoutThread) -> do
       A.cancel oldTimeoutThread

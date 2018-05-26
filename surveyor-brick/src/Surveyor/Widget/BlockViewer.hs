@@ -31,29 +31,29 @@ import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
-import qualified Surveyor.Architecture as A
+import qualified Surveyor.Core as C
 import           Surveyor.Names ( Names(..) )
 
 data BlockViewer arch s =
-  BlockViewer { bvBlock :: !(A.Block arch s)
-              , instructionList :: !(B.List Names (A.Address arch s, A.Instruction arch s, OperandSelector arch s))
+  BlockViewer { bvBlock :: !(C.Block arch s)
+              , instructionList :: !(B.List Names (C.Address arch s, C.Instruction arch s, OperandSelector arch s))
               }
   deriving (Generic)
 
-instructionListL :: Lens' (BlockViewer arch s) (B.List Names (A.Address arch s, A.Instruction arch s, OperandSelector arch s))
+instructionListL :: Lens' (BlockViewer arch s) (B.List Names (C.Address arch s, C.Instruction arch s, OperandSelector arch s))
 instructionListL = GL.field @"instructionList"
 
-blockViewerBlockL :: Lens' (BlockViewer arch s) (A.Block arch s)
+blockViewerBlockL :: Lens' (BlockViewer arch s) (C.Block arch s)
 blockViewerBlockL = GL.field @"bvBlock"
 
-blockViewer :: (A.Architecture arch s) => Names -> A.Block arch s -> BlockViewer arch s
+blockViewer :: (C.Architecture arch s) => Names -> C.Block arch s -> BlockViewer arch s
 blockViewer n b =
   BlockViewer { bvBlock = b
               , instructionList = B.list n (V.fromList insns) 1
               }
   where
     insns = [ (a, i, operandSelector a i)
-            | (a, i) <- A.blockInstructions b
+            | (a, i) <- C.blockInstructions b
             ]
 
 handleBlockViewerEvent :: V.Event -> BlockViewer arch s -> B.EventM Names (BlockViewer arch s)
@@ -95,8 +95,8 @@ handleBlockViewerEvent evt bv =
         Just i -> return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorNext
     _ -> return bv
 
-renderBlockViewer :: (A.Architecture arch s)
-                  => A.AnalysisResult arch s
+renderBlockViewer :: (C.Architecture arch s)
+                  => C.AnalysisResult arch s
                   -> BlockViewer arch s
                   -> B.Widget Names
 renderBlockViewer ares bv =
@@ -106,59 +106,59 @@ renderBlockViewer ares bv =
          ]
   where
     renderListItem isFocused (addr, _i, os) =
-      B.hBox [ B.padRight (B.Pad 2) (B.txt (A.prettyAddress addr))
+      B.hBox [ B.padRight (B.Pad 2) (B.txt (C.prettyAddress addr))
              , renderOperandSelector isFocused os
              ]
     header =
       let b = bvBlock bv
-      in B.str (printf "Basic Block %s" (A.prettyAddress (A.blockAddress b)))
+      in B.str (printf "Basic Block %s" (C.prettyAddress (C.blockAddress b)))
     semanticsDisplay = fromMaybe B.emptyWidget $ do
       selectedIdx <- bv ^. instructionListL . B.listSelectedL
       insn <- bv ^? instructionListL . B.listElementsL . ix selectedIdx . _2
-      f <- A.genericSemantics ares insn
-      return (B.txtWrap (A.prettyParameterizedFormula f))
+      f <- C.genericSemantics ares insn
+      return (B.txtWrap (C.prettyParameterizedFormula f))
 
 -- FIXME: Have a separate semantics display widget.  When a new instruction is
 -- selected, send a message to display the semantics, allowing the outer system
 -- to place the widget.
 
-operandSelector :: (A.Architecture arch s) => A.Address arch s -> A.Instruction arch s -> OperandSelector arch s
+operandSelector :: (C.Architecture arch s) => C.Address arch s -> C.Instruction arch s -> OperandSelector arch s
 operandSelector addr i =
   OperandSelector { selectedIndex = Nothing
                   , address = addr
-                  , operands = V.fromList (A.operands i)
-                  , opcode = A.opcode i
-                  , boundValue = A.boundValue i
+                  , operands = V.fromList (C.operands i)
+                  , opcode = C.opcode i
+                  , boundValue = C.boundValue i
                   }
 
 data OperandSelector arch s =
   OperandSelector { selectedIndex :: Maybe Int
                   -- ^ The index of the selected operand, if any
-                  , address :: A.Address arch s
+                  , address :: C.Address arch s
                   -- ^ The address of the instruction rendered on this line
-                  , operands :: V.Vector (A.Operand arch s)
-                  , opcode :: A.Opcode arch s
-                  , boundValue :: Maybe (A.Operand arch s)
+                  , operands :: V.Vector (C.Operand arch s)
+                  , opcode :: C.Opcode arch s
+                  , boundValue :: Maybe (C.Operand arch s)
                   }
   deriving (Generic)
 
 selectedIndexL :: Lens' (OperandSelector arch s) (Maybe Int)
 selectedIndexL = GL.field @"selectedIndex"
 
-renderOperandSelector :: (A.Architecture arch s) => Bool -> OperandSelector arch s -> B.Widget Names
+renderOperandSelector :: (C.Architecture arch s) => Bool -> OperandSelector arch s -> B.Widget Names
 renderOperandSelector isFocused os =
   case selectedIndex os of
     Nothing -> highlight line
     Just _ -> line
   where
-    line = B.hBox (pad (B.txt (A.prettyOpcode (opcode os))) : L.intersperse (B.txt ", ") operandWidgets)
+    line = B.hBox (pad (B.txt (C.prettyOpcode (opcode os))) : L.intersperse (B.txt ", ") operandWidgets)
     highlight | isFocused = B.withAttr B.listSelectedFocusedAttr
               | otherwise = id
     pad = B.padRight (B.Pad 1)
     renderOperand i op
       | Just i == selectedIndex os =
-        highlight (B.txt (A.prettyOperand (address os) op))
-      | otherwise = B.txt (A.prettyOperand (address os) op)
+        highlight (B.txt (C.prettyOperand (address os) op))
+      | otherwise = B.txt (C.prettyOperand (address os) op)
     operandWidgets = V.toList (V.imap renderOperand (operands os))
 
 operandSelectorReset :: OperandSelector arch s -> OperandSelector arch s

@@ -4,7 +4,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ViewPatterns #-}
 -- | The types of arguments for commands
-module Surveyor.Arguments (
+module Surveyor.Core.Arguments (
   Argument(..),
   Type(..),
   TypeRepr(..),
@@ -27,8 +27,8 @@ import qualified Data.Text.Zipper.Generic as Z
 import           Numeric.Natural ( Natural )
 import           Text.Read ( readMaybe )
 
+import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Command as C
-import qualified Surveyor.Architecture as A
 
 data Type where
   StringType :: Type

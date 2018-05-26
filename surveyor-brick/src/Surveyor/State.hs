@@ -5,29 +5,29 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.State (
-  State(..),
-  S(..),
-  ArchState(..),
+  C.State(..),
+  C.S(..),
+  C.ArchState(..),
   BrickUIState(..),
-  AppState(..),
+  C.AppState(..),
   -- * Lenses
-  lInputFile,
-  lLoader,
-  lDiagnosticLog,
-  lEchoArea,
-  lUIMode,
-  lAppState,
-  lNonceGenerator,
-  lArchState,
-  lNonce,
-  lAnalysisResult,
+  C.lInputFile,
+  C.lLoader,
+  C.lDiagnosticLog,
+  C.lEchoArea,
+  C.lUIMode,
+  C.lAppState,
+  C.lNonceGenerator,
+  C.lArchState,
+  C.lNonce,
+  C.lAnalysisResult,
   lMinibuffer,
   lFunctionSelector,
   lBlockSelector,
   lBlockViewer,
   lFunctionViewer,
-  lKeymap,
-  lUIState
+  C.lKeymap,
+  C.lUIState
   ) where
 
 import           GHC.Generics ( Generic )
@@ -37,9 +37,7 @@ import qualified Data.Generics.Product as GL
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 
-import           Surveyor.Core.State
-import qualified Surveyor.Arguments as AR
-import           Surveyor.Events ( Events )
+import qualified Surveyor.Core as C
 import           Surveyor.Names ( Names )
 import qualified Surveyor.Widget.BlockSelector as BS
 import qualified Surveyor.Widget.BlockViewer as BV
@@ -48,7 +46,7 @@ import qualified Surveyor.Widget.FunctionViewer as FV
 import qualified Surveyor.Widget.Minibuffer as MB
 
 data BrickUIState arch s =
-  BrickUIState { sMinibuffer :: !(MB.Minibuffer (Events s) (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr T.Text Names)
+  BrickUIState { sMinibuffer :: !(MB.Minibuffer (C.Events s) (Maybe (NG.Nonce s arch)) (C.Argument arch (C.Events s) (Maybe (NG.Nonce s arch)) s) C.TypeRepr T.Text Names)
                -- ^ The persistent state of the minibuffer
                , sFunctionSelector :: !(FS.FunctionSelector arch s)
                -- ^ Functions available in the function selector
@@ -58,19 +56,19 @@ data BrickUIState arch s =
                }
   deriving (Generic)
 
-lMinibuffer :: L.Lens' (ArchState BrickUIState arch s) (MB.Minibuffer (Events s) (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr T.Text Names)
-lMinibuffer = lUIState . GL.field @"sMinibuffer"
+lMinibuffer :: L.Lens' (C.ArchState BrickUIState arch s) (MB.Minibuffer (C.Events s) (Maybe (NG.Nonce s arch)) (C.Argument arch (C.Events s) (Maybe (NG.Nonce s arch)) s) C.TypeRepr T.Text Names)
+lMinibuffer = C.lUIState . GL.field @"sMinibuffer"
 
-lFunctionSelector :: L.Lens' (ArchState BrickUIState arch s) (FS.FunctionSelector arch s)
-lFunctionSelector = lUIState . GL.field @"sFunctionSelector"
+lFunctionSelector :: L.Lens' (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)
+lFunctionSelector = C.lUIState . GL.field @"sFunctionSelector"
 
-lBlockSelector :: L.Lens' (ArchState BrickUIState arch s) (BS.BlockSelector arch s)
-lBlockSelector = lUIState . GL.field @"sBlockSelector"
+lBlockSelector :: L.Lens' (C.ArchState BrickUIState arch s) (BS.BlockSelector arch s)
+lBlockSelector = C.lUIState . GL.field @"sBlockSelector"
 
-lBlockViewer :: L.Lens' (ArchState BrickUIState arch s) (BV.BlockViewer arch s)
-lBlockViewer = lUIState . GL.field @"sBlockViewer"
+lBlockViewer :: L.Lens' (C.ArchState BrickUIState arch s) (BV.BlockViewer arch s)
+lBlockViewer = C.lUIState . GL.field @"sBlockViewer"
 
-lFunctionViewer :: L.Lens' (ArchState BrickUIState arch s) (FV.FunctionViewer arch s)
-lFunctionViewer = lUIState . GL.field @"sFunctionViewer"
+lFunctionViewer :: L.Lens' (C.ArchState BrickUIState arch s) (FV.FunctionViewer arch s)
+lFunctionViewer = C.lUIState . GL.field @"sFunctionViewer"
 
 

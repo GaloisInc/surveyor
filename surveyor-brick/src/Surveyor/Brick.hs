@@ -21,27 +21,22 @@ import qualified Data.Traversable as T
 import           Data.Void ( Void )
 import qualified Graphics.Vty as V
 
-import qualified Surveyor.Architecture as A
+import qualified Surveyor.Core as C
 import           Surveyor.Attributes
-import qualified Surveyor.Chan as C
-import           Surveyor.Events ( Events(..) )
 import           Surveyor.Handlers ( appHandleEvent )
-import           Surveyor.Loader ( AsyncLoader, asynchronouslyLoad )
-import           Surveyor.Mode
 import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
 import qualified Surveyor.Widget.BlockSelector as BS
 import qualified Surveyor.Widget.BlockViewer as BV
-import qualified Surveyor.EchoArea as EA
 import qualified Surveyor.Widget.FunctionSelector as FS
 import qualified Surveyor.Widget.FunctionViewer as FV
 import qualified Surveyor.Widget.Minibuffer as MB
 
-drawSummary :: (A.Architecture arch s) => FilePath -> A.AnalysisResult arch s -> B.Widget Names
+drawSummary :: (C.Architecture arch s) => FilePath -> C.AnalysisResult arch s -> B.Widget Names
 drawSummary binFileName ares =
   B.vBox (map (drawSummaryTableEntry descColWidth) tbl)
   where
-    tbl = ("Target Binary", T.pack binFileName) : A.summarizeResult ares
+    tbl = ("Target Binary", T.pack binFileName) : C.summarizeResult ares
     descColWidth = maximum (1 : map (T.length . fst) tbl) + 4
 
 drawSummaryTableEntry :: Int -> (T.Text, T.Text) -> B.Widget Names
@@ -79,14 +74,14 @@ drawAppShell s w =
   where
     title sm =
       case sm of
-        SomeMiniBuffer (MiniBuffer m') -> title (SomeUIMode m')
-        SomeUIMode m' -> B.txt (prettyMode m')
+        C.SomeMiniBuffer (C.MiniBuffer m') -> title (C.SomeUIMode m')
+        C.SomeUIMode m' -> B.txt (C.prettyMode m')
     bottomLine =
       case sUIMode s of
-        SomeMiniBuffer (MiniBuffer _)
+        C.SomeMiniBuffer (C.MiniBuffer _)
           | Just mb <- s ^? lArchState . _Just . lMinibuffer ->
             MB.renderMinibuffer True mb
-        _ -> maybe B.emptyWidget B.txt (EA.getText (sEchoArea s))
+        _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (sEchoArea s))
 
 appDraw :: State BrickUIState s -> [B.Widget Names]
 appDraw (State s) =
@@ -97,25 +92,25 @@ appDraw (State s) =
         Nothing -> drawAppShell s B.emptyWidget
         Just archState ->
           case sUIMode s of
-            SomeMiniBuffer (MiniBuffer innerMode) ->
+            C.SomeMiniBuffer (C.MiniBuffer innerMode) ->
               drawUIMode binFileName archState s innerMode
-            SomeUIMode mode ->
+            C.SomeUIMode mode ->
               drawUIMode binFileName archState s mode
 
-drawUIMode :: (A.Architecture arch s)
+drawUIMode :: (C.Architecture arch s)
            => FilePath
            -> ArchState BrickUIState arch s
            -> S BrickUIState arch s
-           -> UIMode NormalK
+           -> C.UIMode C.NormalK
            -> [B.Widget Names]
 drawUIMode binFileName archState s uim =
   case uim of
-    Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
-    Summary -> drawAppShell s (drawSummary binFileName binfo)
-    FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. lFunctionSelector))
-    BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. lBlockSelector))
-    BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (archState ^. lBlockViewer))
-    FunctionViewer -> drawAppShell s (FV.renderFunctionViewer (archState ^. lFunctionViewer ))
+    C.Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
+    C.Summary -> drawAppShell s (drawSummary binFileName binfo)
+    C.FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. lFunctionSelector))
+    C.BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. lBlockSelector))
+    C.BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (archState ^. lBlockViewer))
+    C.FunctionViewer -> drawAppShell s (FV.renderFunctionViewer (archState ^. lFunctionViewer ))
   where
     binfo = sAnalysisResult archState
 
@@ -134,9 +129,9 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
 appStartEvent :: State BrickUIState s -> B.EventM Names (State BrickUIState s)
 appStartEvent s0 = return s0
 
-resetEchoArea :: C.Chan (Events s) -> IO ()
+resetEchoArea :: C.Chan (C.Events s) -> IO ()
 resetEchoArea customEventChan =
-  C.writeChan customEventChan ResetEchoArea
+  C.writeChan customEventChan C.ResetEchoArea
 
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
@@ -148,20 +143,20 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  mloader <- T.traverse (asynchronouslyLoad ng chan) mExePath
+  mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
   s0 <- emptyState mExePath mloader ng chan
   let initialState = State s0
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
 
 
-emptyState :: Maybe FilePath -> Maybe AsyncLoader -> PN.NonceGenerator IO s -> C.Chan (Events s) -> IO (S BrickUIState Void s)
+emptyState :: Maybe FilePath -> Maybe C.AsyncLoader -> PN.NonceGenerator IO s -> C.Chan (C.Events s) -> IO (S BrickUIState Void s)
 emptyState mfp mloader ng customEventChan = do
   return S { sInputFile = mfp
            , sLoader = mloader
            , sDiagnosticLog = Seq.empty
-           , sEchoArea = EA.echoArea 10 (resetEchoArea customEventChan)
-           , sUIMode = SomeUIMode Summary
+           , sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
+           , sUIMode = C.SomeUIMode C.Summary
            , sAppState = maybe AwaitingFile (const Loading) mfp
            , sEmitEvent = C.writeChan customEventChan
            , sEventChannel = customEventChan

@@ -2,7 +2,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
-module Surveyor.Mode (
+module Surveyor.Core.Mode (
   UIMode(..),
   UIKind(..),
   NormalK,

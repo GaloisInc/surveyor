@@ -13,7 +13,7 @@
 -- These definitions are designed to allow the Surveyor UI to abstractly handle
 -- different architectures, building up abstractions over functions, blocks,
 -- instructions, and operands.
-module Surveyor.Architecture (
+module Surveyor.Core.Architecture (
   Architecture(..),
   Block(..),
   FunctionHandle(..),
@@ -27,7 +27,7 @@ module Surveyor.Architecture (
   LL.mkLLVMResult
   ) where
 
-import           Surveyor.Architecture.Class
-import qualified Surveyor.Architecture.JVM as J
-import qualified Surveyor.Architecture.LLVM as LL
-import qualified Surveyor.Architecture.MC as MC
+import           Surveyor.Core.Architecture.Class
+import qualified Surveyor.Core.Architecture.JVM as J
+import qualified Surveyor.Core.Architecture.LLVM as LL
+import qualified Surveyor.Core.Architecture.MC as MC

@@ -1,7 +1,7 @@
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-module Surveyor.Loader.PPCConfig (
+module Surveyor.Core.Loader.PPCConfig (
   ppcConfig
   ) where
 
@@ -28,11 +28,11 @@ import qualified Dismantle.PPC as DPPC
 import qualified Renovate as R
 import qualified Renovate.Arch.PPC as RP
 
-import qualified Surveyor.Architecture as A
-import           Surveyor.BinaryAnalysisResult
-import qualified Surveyor.Chan as C
-import           Surveyor.Events
-import qualified Surveyor.Loader.RenovateAnalysis as RA
+import qualified Surveyor.Core.Architecture as A
+import           Surveyor.Core.BinaryAnalysisResult
+import qualified Surveyor.Core.Chan as C
+import           Surveyor.Core.Events
+import qualified Surveyor.Core.Loader.RenovateAnalysis as RA
 
 ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
               R.InstructionAnnotation arch ~ RP.TargetAddress arch,

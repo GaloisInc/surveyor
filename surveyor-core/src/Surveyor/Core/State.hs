@@ -31,14 +31,14 @@ import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
-import qualified Surveyor.Chan as C
+import qualified Surveyor.Core.Chan as C
 import           Surveyor.Core.Keymap ( Keymap )
-import qualified Surveyor.Arguments as AR
-import qualified Surveyor.Architecture as A
-import           Surveyor.Events ( Events )
-import           Surveyor.Loader ( AsyncLoader )
-import           Surveyor.Mode
-import qualified Surveyor.EchoArea as EA
+import qualified Surveyor.Core.Arguments as AR
+import qualified Surveyor.Core.Architecture as A
+import           Surveyor.Core.Events ( Events )
+import           Surveyor.Core.Loader ( AsyncLoader )
+import           Surveyor.Core.Mode
+import qualified Surveyor.Core.EchoArea as EA
 
 data State u s where
   State :: (A.Architecture arch s) => !(S u arch s) -> State u s

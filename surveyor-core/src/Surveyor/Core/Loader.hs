@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
-module Surveyor.Loader (
+module Surveyor.Core.Loader (
   AsyncLoader,
   cancelLoader,
   asynchronouslyLoad,
@@ -35,15 +35,17 @@ import qualified Renovate as R
 import qualified Renovate.Arch.X86_64 as X86
 import qualified Renovate.Arch.PPC as PPC
 
-import qualified Surveyor.Architecture as A
-import           Surveyor.BinaryAnalysisResult
-import qualified Surveyor.Chan as C
-import           Surveyor.Events ( Events(..) )
-import qualified Surveyor.Loader.RenovateAnalysis as RA
-import qualified Surveyor.Loader.PPCConfig as LP
+import qualified Surveyor.Core.Architecture as A
+import           Surveyor.Core.BinaryAnalysisResult
+import qualified Surveyor.Core.Chan as C
+import           Surveyor.Core.Events ( Events(..) )
+import qualified Surveyor.Core.Loader.RenovateAnalysis as RA
+import qualified Surveyor.Core.Loader.PPCConfig as LP
 
-import Data.Macaw.PPC.PPCReg ()
-import Data.Macaw.PPC.Arch ()
+-- These modules supply orphan instances; we seem to get some strange errors if
+-- we don't explicitly import them, even though they are transitively included.
+import           Data.Macaw.PPC.PPCReg ()
+import           Data.Macaw.PPC.Arch ()
 
 data AsyncLoader =
   AsyncLoader { errorCatcher :: A.Async ()

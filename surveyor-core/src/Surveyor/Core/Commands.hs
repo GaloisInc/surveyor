@@ -4,7 +4,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-module Surveyor.Commands (
+module Surveyor.Core.Commands (
   exitC,
   showSummaryC,
   showDiagnosticsC,
@@ -24,10 +24,10 @@ import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 
-import qualified Surveyor.Chan as C
+import qualified Surveyor.Core.Arguments as AR
+import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
-import qualified Surveyor.Arguments as AR
-import           Surveyor.Events ( Events(..) )
+import           Surveyor.Core.Events ( Events(..) )
 
 type Argument arch s = AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s
 type Command arch s tps = C.Command (Events s) (Maybe (NG.Nonce s arch)) (Argument arch s) AR.TypeRepr tps

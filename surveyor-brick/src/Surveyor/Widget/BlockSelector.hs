@@ -14,21 +14,21 @@ import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 
 import qualified Brick.Widget.FilterList as FL
-import qualified Surveyor.Architecture as A
+import qualified Surveyor.Core as C
 import           Surveyor.Names ( Names(..) )
 
-data BlockSelector arch s = BlockSelector (A.Block arch s -> IO ()) !(FL.FilterList Names T.Text (A.Block arch s))
+data BlockSelector arch s = BlockSelector (C.Block arch s -> IO ()) !(FL.FilterList Names T.Text (C.Block arch s))
                           | NoBlock
 
 emptyBlockSelector :: BlockSelector arch s
 emptyBlockSelector = NoBlock
 
-blockSelector :: (A.Architecture arch s)
-              => (A.Block arch s -> IO ())
+blockSelector :: (C.Architecture arch s)
+              => (C.Block arch s -> IO ())
               -- ^ An action to call once a block is selected
               -> B.AttrName
               -- ^ An attribute to apply to the selected list item
-              -> [A.Block arch s]
+              -> [C.Block arch s]
               -- ^ A list of blocks containing the address
               -> BlockSelector arch s
 blockSelector callback focAttr blocks =
@@ -45,13 +45,13 @@ blockSelector callback focAttr blocks =
                                 , FL.flRenderEditorContent = renderEditorContent
                                 }
 
-blockToText :: (A.Architecture arch s) => A.Block arch s -> T.Text
-blockToText b = A.prettyAddress (A.blockAddress b)
+blockToText :: (C.Architecture arch s) => C.Block arch s -> T.Text
+blockToText b = C.prettyAddress (C.blockAddress b)
 
-renderBlockItem :: (A.Architecture arch s) => B.AttrName -> Bool -> A.Block arch s -> B.Widget Names
+renderBlockItem :: (C.Architecture arch s) => B.AttrName -> Bool -> C.Block arch s -> B.Widget Names
 renderBlockItem focAttr isFocused b =
   let xfrm = if isFocused then B.withAttr focAttr else id
-  in xfrm (B.txt (A.prettyAddress (A.blockAddress b)))
+  in xfrm (B.txt (C.prettyAddress (C.blockAddress b)))
 
 renderEditorContent :: (Monoid t, ZG.GenericTextZipper t) => [t] -> B.Widget Names
 renderEditorContent txts = B.str (ZG.toList (mconcat txts))
@@ -72,7 +72,7 @@ handleBlockSelectorEvent evt bsel =
           fl' <- FL.handleFilterListEvent return evt fl
           return (BlockSelector callback fl')
 
-renderBlockSelector :: (A.Architecture arch s) => BlockSelector arch s -> B.Widget Names
+renderBlockSelector :: (C.Architecture arch s) => BlockSelector arch s -> B.Widget Names
 renderBlockSelector bsel =
   case bsel of
     NoBlock -> B.str "No block"
