@@ -155,7 +155,7 @@ handleCustomEvent s0 evt =
     EchoText txt -> do
       ea' <- liftIO (EA.setText (sEchoArea s0) txt)
       B.continue $! State (s0 & lEchoArea .~ ea')
-    UpdateEchoArea ea -> B.continue $! State (s0 & lEchoArea .~ ea)
+    ResetEchoArea -> B.continue $! State (s0 & lEchoArea %~ EA.resetEchoArea)
     OpenMinibuffer ->
       case sUIMode s0 of
         M.SomeMiniBuffer _ -> B.continue (State s0)

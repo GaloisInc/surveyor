@@ -14,7 +14,6 @@ import qualified Renovate as R
 
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Architecture as A
-import qualified Surveyor.EchoArea as EA
 
 data Events s where
   -- Loading events
@@ -45,7 +44,7 @@ data Events s where
   -- Informational messages
   DescribeCommand :: Some (C.Command (Events s) st a r) -> Events s
   EchoText :: !T.Text -> Events s
-  UpdateEchoArea :: !EA.EchoArea -> Events s
+  ResetEchoArea :: Events s
   LogDiagnostic :: !T.Text -> Events s
 
   -- UI Modes

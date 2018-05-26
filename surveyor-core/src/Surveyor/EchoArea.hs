@@ -1,6 +1,7 @@
 module Surveyor.EchoArea (
   EchoArea,
   echoArea,
+  resetEchoArea,
   getText,
   setText
   ) where
@@ -11,14 +12,14 @@ import qualified Data.Text as T
 
 data EchoArea =
   EchoArea { timeoutSeconds :: Int
-           , killFunc :: EchoArea -> IO ()
+           , killFunc :: IO ()
            , content :: Maybe (T.Text, A.Async ())
            }
 
 echoArea :: Int
          -- ^ Timeout in seconds
-         -> (EchoArea -> IO ())
-         -- ^ A callback provided with the new echo area after a timeout
+         -> IO ()
+         -- ^ A callback that resets the echo area after a timeout
          -> EchoArea
 echoArea ts kill =
   EchoArea { timeoutSeconds = ts
@@ -37,5 +38,8 @@ setText ea t = do
     Nothing -> return ()
   newTimeoutThread <- A.async $ do
     C.threadDelay (timeoutSeconds ea * 1000000)
-    killFunc ea (ea { content = Nothing } )
+    killFunc ea
   return ea { content = Just (t, newTimeoutThread) }
+
+resetEchoArea :: EchoArea -> EchoArea
+resetEchoArea ea = ea { content = Nothing }

@@ -134,9 +134,9 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
 appStartEvent :: State BrickUIState s -> B.EventM Names (State BrickUIState s)
 appStartEvent s0 = return s0
 
-updateEchoArea :: C.Chan (Events s) -> EA.EchoArea -> IO ()
-updateEchoArea customEventChan ea =
-  C.writeChan customEventChan (UpdateEchoArea ea)
+resetEchoArea :: C.Chan (Events s) -> IO ()
+resetEchoArea customEventChan =
+  C.writeChan customEventChan ResetEchoArea
 
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
@@ -160,7 +160,7 @@ emptyState mfp mloader ng customEventChan = do
   return S { sInputFile = mfp
            , sLoader = mloader
            , sDiagnosticLog = Seq.empty
-           , sEchoArea = EA.echoArea 10 (updateEchoArea customEventChan)
+           , sEchoArea = EA.echoArea 10 (resetEchoArea customEventChan)
            , sUIMode = SomeUIMode Summary
            , sAppState = maybe AwaitingFile (const Loading) mfp
            , sEmitEvent = C.writeChan customEventChan
