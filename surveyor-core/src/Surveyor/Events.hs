@@ -14,7 +14,7 @@ import qualified Renovate as R
 
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Architecture as A
-import qualified Surveyor.Widget.EchoArea as EA
+import qualified Surveyor.EchoArea as EA
 
 data Events s where
   -- Loading events

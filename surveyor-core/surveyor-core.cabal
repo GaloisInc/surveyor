@@ -14,10 +14,6 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Surveyor.Architecture
-                       Surveyor.Architecture.Class
-                       Surveyor.Architecture.JVM
-                       Surveyor.Architecture.LLVM
-                       Surveyor.Architecture.MC
                        Surveyor.Arguments
                        Surveyor.BinaryAnalysisResult
                        Surveyor.Chan
@@ -31,8 +27,11 @@ library
                        Surveyor.Core.Command
                        Surveyor.Core.Keymap
                        Surveyor.Core.State
-                       Surveyor.Widget.EchoArea
-  -- other-modules:       
+                       Surveyor.EchoArea
+  other-modules:       Surveyor.Architecture.Class
+                       Surveyor.Architecture.JVM
+                       Surveyor.Architecture.LLVM
+                       Surveyor.Architecture.MC
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
                        containers,

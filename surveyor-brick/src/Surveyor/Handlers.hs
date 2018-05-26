@@ -31,7 +31,7 @@ import           Surveyor.Names ( Names(..) )
 import           Surveyor.State
 import qualified Surveyor.Widget.BlockSelector as BS
 import qualified Surveyor.Widget.BlockViewer as BV
-import qualified Surveyor.Widget.EchoArea as EA
+import qualified Surveyor.EchoArea as EA
 import qualified Surveyor.Widget.FunctionViewer as FV
 import qualified Surveyor.Widget.FunctionSelector as FS
 import qualified Surveyor.Widget.Minibuffer as MB

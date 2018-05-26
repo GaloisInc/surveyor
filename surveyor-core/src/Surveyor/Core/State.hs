@@ -38,7 +38,7 @@ import qualified Surveyor.Architecture as A
 import           Surveyor.Events ( Events )
 import           Surveyor.Loader ( AsyncLoader )
 import           Surveyor.Mode
-import qualified Surveyor.Widget.EchoArea as EA
+import qualified Surveyor.EchoArea as EA
 
 data State u s where
   State :: (A.Architecture arch s) => !(S u arch s) -> State u s
