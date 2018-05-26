@@ -44,7 +44,7 @@ library
                        pretty,
                        split >= 0.2 && < 0.3,
                        lens >= 4.15 && < 5,
-                       generic-lens >= 0.5.1.0 && < 0.6,
+                       generic-lens >= 0.5.1.0 && < 1.1,
                        parameterized-utils >= 1 && < 2,
                        text-zipper,
                        megaparsec >= 6 && < 7,
