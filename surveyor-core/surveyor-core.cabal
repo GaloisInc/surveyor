@@ -15,14 +15,11 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Surveyor.Architecture
                        Surveyor.Arguments
-                       Surveyor.BinaryAnalysisResult
                        Surveyor.Chan
                        Surveyor.Commands
                        Surveyor.Events
                        Surveyor.Keymap
                        Surveyor.Loader
-                       Surveyor.Loader.PPCConfig
-                       Surveyor.Loader.RenovateAnalysis
                        Surveyor.Mode
                        Surveyor.Core.Command
                        Surveyor.Core.Keymap
@@ -32,6 +29,9 @@ library
                        Surveyor.Architecture.JVM
                        Surveyor.Architecture.LLVM
                        Surveyor.Architecture.MC
+                       Surveyor.BinaryAnalysisResult
+                       Surveyor.Loader.PPCConfig
+                       Surveyor.Loader.RenovateAnalysis
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
                        containers,
