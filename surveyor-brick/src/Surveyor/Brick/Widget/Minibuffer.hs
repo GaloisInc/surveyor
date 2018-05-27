@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
 -- | An instantiation of the generic minibuffer widget with a specific argument type
-module Surveyor.Widget.Minibuffer (
+module Surveyor.Brick.Widget.Minibuffer (
   MB.Minibuffer,
   minibuffer,
   MB.MinibufferStatus(..),
@@ -13,7 +13,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import qualified Data.Vector as V
 
-import           Surveyor.Attributes
+import           Surveyor.Brick.Attributes
 import qualified Surveyor.Core as C
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.Minibuffer as MB

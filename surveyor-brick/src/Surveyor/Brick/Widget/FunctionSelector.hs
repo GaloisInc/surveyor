@@ -1,4 +1,4 @@
-module Surveyor.Widget.FunctionSelector (
+module Surveyor.Brick.Widget.FunctionSelector (
   FunctionSelector,
   functionSelector,
   handleFunctionSelectorEvent,
@@ -16,7 +16,7 @@ import           Text.Printf ( printf )
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
 import qualified Surveyor.Core as C
-import           Surveyor.Names ( Names(..) )
+import           Surveyor.Brick.Names ( Names(..) )
 
 data FunctionSelector arch s =
   FunctionSelector { callback :: C.FunctionHandle arch s -> IO ()

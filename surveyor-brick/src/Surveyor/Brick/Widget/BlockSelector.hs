@@ -1,4 +1,4 @@
-module Surveyor.Widget.BlockSelector (
+module Surveyor.Brick.Widget.BlockSelector (
   BlockSelector,
   emptyBlockSelector,
   blockSelector,
@@ -15,7 +15,7 @@ import qualified Graphics.Vty as V
 
 import qualified Brick.Widget.FilterList as FL
 import qualified Surveyor.Core as C
-import           Surveyor.Names ( Names(..) )
+import           Surveyor.Brick.Names ( Names(..) )
 
 data BlockSelector arch s = BlockSelector (C.Block arch s -> IO ()) !(FL.FilterList Names T.Text (C.Block arch s))
                           | NoBlock

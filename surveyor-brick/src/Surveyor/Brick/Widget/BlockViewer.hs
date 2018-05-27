@@ -10,7 +10,7 @@
 -- * Viewing the semantics of an individual instruction for a block
 --   (parameterized and instantiated)
 -- * Symbolically simulating a range of instructions into a single formula
-module Surveyor.Widget.BlockViewer (
+module Surveyor.Brick.Widget.BlockViewer (
   BlockViewer,
   blockViewer,
   blockViewerBlockL,
@@ -32,7 +32,7 @@ import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
 import qualified Surveyor.Core as C
-import           Surveyor.Names ( Names(..) )
+import           Surveyor.Brick.Names ( Names(..) )
 
 data BlockViewer arch s =
   BlockViewer { bvBlock :: !(C.Block arch s)

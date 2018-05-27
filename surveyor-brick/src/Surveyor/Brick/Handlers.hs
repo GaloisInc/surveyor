@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
-module Surveyor.Handlers (
+module Surveyor.Brick.Handlers (
   appHandleEvent
   ) where
 
@@ -19,14 +19,14 @@ import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
 import qualified Surveyor.Core as C
-import           Surveyor.Attributes ( focusedListAttr )
-import           Surveyor.Names ( Names(..) )
-import           Surveyor.State
-import qualified Surveyor.Widget.BlockSelector as BS
-import qualified Surveyor.Widget.BlockViewer as BV
-import qualified Surveyor.Widget.FunctionViewer as FV
-import qualified Surveyor.Widget.FunctionSelector as FS
-import qualified Surveyor.Widget.Minibuffer as MB
+import           Surveyor.Brick.Attributes ( focusedListAttr )
+import           Surveyor.Brick.Names ( Names(..) )
+import           Surveyor.Brick.State
+import qualified Surveyor.Brick.Widget.BlockSelector as BS
+import qualified Surveyor.Brick.Widget.BlockViewer as BV
+import qualified Surveyor.Brick.Widget.FunctionViewer as FV
+import qualified Surveyor.Brick.Widget.FunctionSelector as FS
+import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
 appHandleEvent :: State BrickUIState s -> B.BrickEvent Names (C.Events s) -> B.EventM Names (B.Next (State BrickUIState s))
 appHandleEvent (State s0) evt =

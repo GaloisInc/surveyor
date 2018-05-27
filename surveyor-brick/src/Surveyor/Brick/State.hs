@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
-module Surveyor.State (
+module Surveyor.Brick.State (
   C.State(..),
   C.S(..),
   C.ArchState(..),
@@ -38,12 +38,12 @@ import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 
 import qualified Surveyor.Core as C
-import           Surveyor.Names ( Names )
-import qualified Surveyor.Widget.BlockSelector as BS
-import qualified Surveyor.Widget.BlockViewer as BV
-import qualified Surveyor.Widget.FunctionSelector as FS
-import qualified Surveyor.Widget.FunctionViewer as FV
-import qualified Surveyor.Widget.Minibuffer as MB
+import           Surveyor.Brick.Names ( Names )
+import qualified Surveyor.Brick.Widget.BlockSelector as BS
+import qualified Surveyor.Brick.Widget.BlockViewer as BV
+import qualified Surveyor.Brick.Widget.FunctionSelector as FS
+import qualified Surveyor.Brick.Widget.FunctionViewer as FV
+import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
 data BrickUIState arch s =
   BrickUIState { sMinibuffer :: !(MB.Minibuffer (C.Events s) (Maybe (NG.Nonce s arch)) (C.Argument arch (C.Events s) (Maybe (NG.Nonce s arch)) s) C.TypeRepr T.Text Names)

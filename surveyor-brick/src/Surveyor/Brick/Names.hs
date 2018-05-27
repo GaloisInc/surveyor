@@ -1,4 +1,4 @@
-module Surveyor.Names (
+module Surveyor.Brick.Names (
   Names(..)
   ) where
 

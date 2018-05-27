@@ -22,15 +22,15 @@ import           Data.Void ( Void )
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core as C
-import           Surveyor.Attributes
-import           Surveyor.Handlers ( appHandleEvent )
-import           Surveyor.Names ( Names(..) )
-import           Surveyor.State
-import qualified Surveyor.Widget.BlockSelector as BS
-import qualified Surveyor.Widget.BlockViewer as BV
-import qualified Surveyor.Widget.FunctionSelector as FS
-import qualified Surveyor.Widget.FunctionViewer as FV
-import qualified Surveyor.Widget.Minibuffer as MB
+import           Surveyor.Brick.Attributes
+import           Surveyor.Brick.Handlers ( appHandleEvent )
+import           Surveyor.Brick.Names ( Names(..) )
+import           Surveyor.Brick.State
+import qualified Surveyor.Brick.Widget.BlockSelector as BS
+import qualified Surveyor.Brick.Widget.BlockViewer as BV
+import qualified Surveyor.Brick.Widget.FunctionSelector as FS
+import qualified Surveyor.Brick.Widget.FunctionViewer as FV
+import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
 drawSummary :: (C.Architecture arch s) => FilePath -> C.AnalysisResult arch s -> B.Widget Names
 drawSummary binFileName ares =

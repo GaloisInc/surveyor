@@ -9,7 +9,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeApplications #-}
-module Surveyor.Widget.FunctionViewer (
+module Surveyor.Brick.Widget.FunctionViewer (
   FunctionViewer,
   functionViewer,
   handleFunctionViewerEvent,
@@ -27,8 +27,8 @@ import qualified Data.Map.Strict as M
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core as C
-import           Surveyor.Names ( Names(..) )
-import qualified Surveyor.Widget.BlockViewer as BV
+import           Surveyor.Brick.Names ( Names(..) )
+import qualified Surveyor.Brick.Widget.BlockViewer as BV
 
 data FunctionViewer arch s =
   FunctionViewer { funcHandle :: C.FunctionHandle arch s
