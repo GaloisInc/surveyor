@@ -5,30 +5,14 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Brick.State (
-  C.State(..),
-  C.S(..),
-  C.ArchState(..),
   BrickUIState(..),
   BrickUIExtension(..),
-  C.AppState(..),
   -- * Lenses
-  C.lInputFile,
-  C.lLoader,
-  C.lDiagnosticLog,
-  C.lEchoArea,
-  C.lUIMode,
-  C.lAppState,
-  C.lNonceGenerator,
-  C.lArchState,
-  C.lNonce,
-  C.lAnalysisResult,
   lMinibuffer,
   lFunctionSelector,
   lBlockSelector,
   lBlockViewer,
-  lFunctionViewer,
-  C.lKeymap,
-  C.lUIState
+  lFunctionViewer
   ) where
 
 import           GHC.Generics ( Generic )

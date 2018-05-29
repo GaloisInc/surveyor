@@ -53,20 +53,20 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
 -- The status bar is a line at the bottom of the screen that reflects the
 -- currently-loaded executable (if any) and includes an indicator of the
 -- analysis progress.
-drawStatusBar :: S BrickUIExtension BrickUIState arch s -> B.Widget Names
+drawStatusBar :: C.S BrickUIExtension BrickUIState arch s -> B.Widget Names
 drawStatusBar s =
   B.withAttr statusBarAttr (B.hBox [fileNameWidget, B.padLeft B.Max statusWidget])
   where
-    fileNameWidget = B.str (fromMaybe "" (sInputFile s))
+    fileNameWidget = B.str (fromMaybe "" (C.sInputFile s))
     statusWidget =
-      case sAppState s of
-        Loading -> B.str "Loading"
-        Ready -> B.str "Ready"
-        AwaitingFile -> B.str "Waiting for file"
+      case C.sAppState s of
+        C.Loading -> B.str "Loading"
+        C.Ready -> B.str "Ready"
+        C.AwaitingFile -> B.str "Waiting for file"
 
-drawAppShell :: S BrickUIExtension BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
+drawAppShell :: C.S BrickUIExtension BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w =
-  [ B.vBox [ B.borderWithLabel (title (sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
+  [ B.vBox [ B.borderWithLabel (title (C.sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
            , drawStatusBar s
            , bottomLine
            ]
@@ -77,21 +77,21 @@ drawAppShell s w =
         C.SomeMiniBuffer (C.MiniBuffer m') -> title (C.SomeUIMode m')
         C.SomeUIMode m' -> B.txt (C.prettyMode m')
     bottomLine =
-      case sUIMode s of
+      case C.sUIMode s of
         C.SomeMiniBuffer (C.MiniBuffer _)
           | mb <- s ^. C.lUIExtension . lMinibuffer ->
             MB.renderMinibuffer True mb
-        _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (sEchoArea s))
+        _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (C.sEchoArea s))
 
-appDraw :: State BrickUIExtension BrickUIState s -> [B.Widget Names]
-appDraw (State s) =
-  case sInputFile s of
+appDraw :: C.State BrickUIExtension BrickUIState s -> [B.Widget Names]
+appDraw (C.State s) =
+  case C.sInputFile s of
     Nothing -> drawAppShell s B.emptyWidget
     Just binFileName ->
-      case sArchState s of
+      case C.sArchState s of
         Nothing -> drawAppShell s B.emptyWidget
         Just archState ->
-          case sUIMode s of
+          case C.sUIMode s of
             C.SomeMiniBuffer (C.MiniBuffer innerMode) ->
               drawUIMode binFileName archState s innerMode
             C.SomeUIMode mode ->
@@ -99,34 +99,34 @@ appDraw (State s) =
 
 drawUIMode :: (C.Architecture arch s)
            => FilePath
-           -> ArchState BrickUIState arch s
-           -> S BrickUIExtension BrickUIState arch s
+           -> C.ArchState BrickUIState arch s
+           -> C.S BrickUIExtension BrickUIState arch s
            -> C.UIMode C.NormalK
            -> [B.Widget Names]
 drawUIMode binFileName archState s uim =
   case uim of
-    C.Diags -> drawAppShell s (drawDiagnostics (sDiagnosticLog s))
+    C.Diags -> drawAppShell s (drawDiagnostics (C.sDiagnosticLog s))
     C.Summary -> drawAppShell s (drawSummary binFileName binfo)
     C.FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. lFunctionSelector))
     C.BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. lBlockSelector))
     C.BlockViewer -> drawAppShell s (BV.renderBlockViewer binfo (archState ^. lBlockViewer))
     C.FunctionViewer -> drawAppShell s (FV.renderFunctionViewer (archState ^. lFunctionViewer ))
   where
-    binfo = sAnalysisResult archState
+    binfo = C.sAnalysisResult archState
 
-appChooseCursor :: State BrickUIExtension BrickUIState s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
+appChooseCursor :: C.State BrickUIExtension BrickUIState s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =
   case cursors of
     [c] -> Just c
     _ -> Nothing
 
-appAttrMap :: State BrickUIExtension BrickUIState s -> B.AttrMap
+appAttrMap :: C.State BrickUIExtension BrickUIState s -> B.AttrMap
 appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
                                    , (statusBarAttr, V.black `B.on` V.white)
                                    , (B.listSelectedFocusedAttr, V.blue `B.on` V.white)
                                    ]
 
-appStartEvent :: State BrickUIExtension BrickUIState s -> B.EventM Names (State BrickUIExtension BrickUIState s)
+appStartEvent :: C.State BrickUIExtension BrickUIState s -> B.EventM Names (C.State BrickUIExtension BrickUIState s)
 appStartEvent s0 = return s0
 
 resetEchoArea :: C.Chan (C.Events s) -> IO ()
@@ -145,7 +145,7 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
                   }
   mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
   s0 <- emptyState mExePath mloader ng chan
-  let initialState = State s0
+  let initialState = C.State s0
   _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
   return ()
 
@@ -154,21 +154,21 @@ emptyState :: Maybe FilePath
            -> Maybe C.AsyncLoader
            -> PN.NonceGenerator IO s
            -> C.Chan (C.Events s)
-           -> IO (S BrickUIExtension BrickUIState Void s)
+           -> IO (C.S BrickUIExtension BrickUIState Void s)
 emptyState mfp mloader ng customEventChan = do
   let addrParser _s = Nothing
   let uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList "M-x" C.allCommands
                                }
-  return S { sInputFile = mfp
-           , sLoader = mloader
-           , sDiagnosticLog = Seq.empty
-           , sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
-           , sUIMode = C.SomeUIMode C.Summary
-           , sAppState = maybe AwaitingFile (const Loading) mfp
-           , sEmitEvent = C.writeChan customEventChan
-           , sEventChannel = customEventChan
-           , sNonceGenerator = ng
-           , sKeymap = C.defaultKeymap
-           , sUIExtension = uiExt
-           , sArchState = Nothing
-           }
+  return C.S { C.sInputFile = mfp
+             , C.sLoader = mloader
+             , C.sDiagnosticLog = Seq.empty
+             , C.sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
+             , C.sUIMode = C.SomeUIMode C.Summary
+             , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
+             , C.sEmitEvent = C.writeChan customEventChan
+             , C.sEventChannel = customEventChan
+             , C.sNonceGenerator = ng
+             , C.sKeymap = C.defaultKeymap
+             , C.sUIExtension = uiExt
+             , C.sArchState = Nothing
+             }
