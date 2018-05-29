@@ -16,6 +16,7 @@ module Surveyor.Core.State (
   lAppState,
   lEventChannel,
   lNonceGenerator,
+  lUIExtension,
   lArchState,
   lNonce,
   lAnalysisResult,
@@ -35,15 +36,28 @@ import qualified Surveyor.Core.Chan as C
 import           Surveyor.Core.Keymap ( Keymap )
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Architecture as A
+import           Surveyor.Core.Commands ( SomeNonce(..) )
 import           Surveyor.Core.Events ( Events )
 import           Surveyor.Core.Loader ( AsyncLoader )
 import           Surveyor.Core.Mode
 import qualified Surveyor.Core.EchoArea as EA
 
-data State u s where
-  State :: (A.Architecture arch s) => !(S u arch s) -> State u s
+-- | This is a wrapper around the state type suitable for the UI core.  It hides
+-- the architecture so that the architecture can change during run-time (i.e.,
+-- when a new binary is loaded).
+data State e u s where
+  State :: (A.Architecture arch s) => !(S e u arch s) -> State e u s
 
-data S u arch s =
+-- | This is the core application state
+--
+-- * @e@ is the UI extension type not parameterized by the architecture.  This
+--       is meant for UI state that is required even when no executable is
+--       loaded.
+-- * @u@ is the UI extension type, which is parameterized by the architecture.
+--       This is where most of the frontend-specific state will live.
+-- * @arch@ is the type of the architecture of the loaded binary.
+-- * @s@ is the state thread parameter that links all uses of nonces.
+data S e u arch s =
   S { sInputFile :: Maybe FilePath
     , sLoader :: Maybe AsyncLoader
     , sDiagnosticLog :: !(Seq.Seq T.Text)
@@ -67,35 +81,49 @@ data S u arch s =
     -- streamed analysis result is of the same type as the last one.  We use
     -- nonces to track that; their 'TestEquality' instance lets us recover type
     -- equality.
+    , sKeymap :: !(Keymap (Events s) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+    -- ^ Keybindings mapped to commands
+    , sUIExtension :: e s
+    -- ^ An extension field for UI frontends for containing data that is
+    -- architecture-independent.  This is mostly useful for tracking the state
+    -- of UI elements that have to exist even when no binary is loaded.
     , sArchState :: Maybe (ArchState u arch s)
+    -- ^ Architecture-specific state, including UI extensions (via the @u@
+    -- parameter)
     }
   deriving (Generic)
 
-lInputFile :: L.Lens' (S u arch s) (Maybe FilePath)
+lInputFile :: L.Lens' (S e u arch s) (Maybe FilePath)
 lInputFile = GL.field @"sInputFile"
 
-lDiagnosticLog :: L.Lens' (S u arch s) (Seq.Seq T.Text)
+lDiagnosticLog :: L.Lens' (S e u arch s) (Seq.Seq T.Text)
 lDiagnosticLog = GL.field @"sDiagnosticLog"
 
-lEchoArea :: L.Lens' (S u arch s) EA.EchoArea
+lEchoArea :: L.Lens' (S e u arch s) EA.EchoArea
 lEchoArea = GL.field @"sEchoArea"
 
-lUIMode :: L.Lens' (S u arch s) SomeUIMode
+lUIMode :: L.Lens' (S e u arch s) SomeUIMode
 lUIMode = GL.field @"sUIMode"
 
-lEventChannel :: L.Lens' (S u arch s) (C.Chan (Events s))
+lEventChannel :: L.Lens' (S e u arch s) (C.Chan (Events s))
 lEventChannel = GL.field @"sEventChannel"
 
-lAppState :: L.Lens' (S u arch s) AppState
+lAppState :: L.Lens' (S e u arch s) AppState
 lAppState = GL.field @"sAppState"
 
-lNonceGenerator :: L.Lens' (S u arch s) (NG.NonceGenerator IO s)
+lNonceGenerator :: L.Lens' (S e u arch s) (NG.NonceGenerator IO s)
 lNonceGenerator = GL.field @"sNonceGenerator"
 
-lLoader :: L.Lens' (S u arch s) (Maybe AsyncLoader)
+lLoader :: L.Lens' (S e u arch s) (Maybe AsyncLoader)
 lLoader = GL.field @"sLoader"
 
-lArchState :: L.Lens' (S u arch s) (Maybe (ArchState u arch s))
+lKeymap :: L.Lens' (S e u arch s) (Keymap (Events s) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+lKeymap = GL.field @"sKeymap"
+
+lUIExtension :: L.Lens' (S e u arch s) (e s)
+lUIExtension = GL.field @"sUIExtension"
+
+lArchState :: L.Lens' (S e u arch s) (Maybe (ArchState u arch s))
 lArchState = GL.field @"sArchState"
 
 -- | A sub-component of the state dependent on the arch type variable
@@ -110,7 +138,6 @@ data ArchState u arch s =
             -- ^ Information returned by the binary analysis
             --
             -- We keep it around so that it doesn't have to re-index the commands
-            , sKeymap :: !(Keymap (Events s) SomeUIMode (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr)
             , sUIState :: !(u arch s)
             }
   deriving (Generic)
@@ -123,9 +150,6 @@ lNonce = GL.field @"sNonce"
 
 lAnalysisResult :: L.Lens' (ArchState u arch s) (A.AnalysisResult arch s)
 lAnalysisResult = GL.field @"sAnalysisResult"
-
-lKeymap :: L.Lens' (ArchState u arch s) (Keymap (Events s) SomeUIMode (Maybe (NG.Nonce s arch)) (AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr)
-lKeymap = GL.field @"sKeymap"
 
 data AppState = Loading
               | Ready

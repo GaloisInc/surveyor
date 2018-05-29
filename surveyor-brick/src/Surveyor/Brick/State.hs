@@ -9,6 +9,7 @@ module Surveyor.Brick.State (
   C.S(..),
   C.ArchState(..),
   BrickUIState(..),
+  BrickUIExtension(..),
   C.AppState(..),
   -- * Lenses
   C.lInputFile,
@@ -34,7 +35,6 @@ import           GHC.Generics ( Generic )
 
 import qualified Control.Lens as L
 import qualified Data.Generics.Product as GL
-import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 
 import qualified Surveyor.Core as C
@@ -46,9 +46,7 @@ import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
 data BrickUIState arch s =
-  BrickUIState { sMinibuffer :: !(MB.Minibuffer (C.Events s) (Maybe (NG.Nonce s arch)) (C.Argument arch (C.Events s) (Maybe (NG.Nonce s arch)) s) C.TypeRepr T.Text Names)
-               -- ^ The persistent state of the minibuffer
-               , sFunctionSelector :: !(FS.FunctionSelector arch s)
+  BrickUIState { sFunctionSelector :: !(FS.FunctionSelector arch s)
                -- ^ Functions available in the function selector
                , sBlockSelector :: !(BS.BlockSelector arch s)
                , sBlockViewer :: !(BV.BlockViewer arch s)
@@ -56,8 +54,14 @@ data BrickUIState arch s =
                }
   deriving (Generic)
 
-lMinibuffer :: L.Lens' (C.ArchState BrickUIState arch s) (MB.Minibuffer (C.Events s) (Maybe (NG.Nonce s arch)) (C.Argument arch (C.Events s) (Maybe (NG.Nonce s arch)) s) C.TypeRepr T.Text Names)
-lMinibuffer = C.lUIState . GL.field @"sMinibuffer"
+data BrickUIExtension s =
+  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.Events s) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
+                   -- ^ The persistent state of the minibuffer
+                   }
+  deriving (Generic)
+
+lMinibuffer :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.Events s) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
+lMinibuffer = GL.field @"sMinibuffer"
 
 lFunctionSelector :: L.Lens' (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)
 lFunctionSelector = C.lUIState . GL.field @"sFunctionSelector"

@@ -28,7 +28,7 @@ import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
-appHandleEvent :: State BrickUIState s -> B.BrickEvent Names (C.Events s) -> B.EventM Names (B.Next (State BrickUIState s))
+appHandleEvent :: State BrickUIExtension BrickUIState s -> B.BrickEvent Names (C.Events s) -> B.EventM Names (B.Next (State BrickUIExtension BrickUIState s))
 appHandleEvent (State s0) evt =
   case evt of
     B.AppEvent ae -> handleCustomEvent s0 ae
@@ -36,30 +36,32 @@ appHandleEvent (State s0) evt =
     B.MouseDown {} -> B.continue (State s0)
     B.MouseUp {} -> B.continue (State s0)
 
-handleVtyEvent :: State BrickUIState s -> V.Event -> B.EventM Names (B.Next (State BrickUIState s))
+handleVtyEvent :: State BrickUIExtension BrickUIState s -> V.Event -> B.EventM Names (B.Next (State BrickUIExtension BrickUIState s))
 handleVtyEvent s0@(State s) evt
   | V.EvKey k mods <- evt
-  , Just km <- s ^? lArchState . _Just . lKeymap
+  , km <- s ^. lKeymap
   , Just (Some cmd) <- C.lookupKeyCommand (sUIMode s) (C.Key k mods) km
   , Just Refl <- testEquality (C.cmdArgTypes cmd) PL.Nil = do
       -- First, we try to consult the keymap.  For now, we can only handle
       -- commands that take no arguments.  Later, once we develop a notion of
       -- "current context", we can use that to call commands that take an
       -- argument.
-      liftIO (C.cmdFunc cmd (sEventChannel s) (sNonce <$> sArchState s) PL.Nil)
+      let sn = (C.SomeNonce . sNonce) <$> sArchState s
+      liftIO (C.cmdFunc cmd (sEventChannel s) sn PL.Nil)
       B.continue (State s)
   | otherwise =
   case sUIMode s of
     C.SomeMiniBuffer (C.MiniBuffer oldMode)
-      | Just mb <- s ^? lArchState . _Just . lMinibuffer -> do
-          mbs <- MB.handleMinibufferEvent evt (sEventChannel s) (sNonce <$> sArchState s) mb
+      | mb <- s ^. C.lUIExtension . lMinibuffer -> do
+          let sn = (C.SomeNonce . sNonce) <$> sArchState s
+          mbs <- MB.handleMinibufferEvent evt (sEventChannel s) sn mb
           case mbs of
             MB.Canceled mb' -> do
               let s' = s & lUIMode .~ C.SomeUIMode oldMode
-                         & lArchState . _Just . lMinibuffer .~ mb'
+                         & C.lUIExtension . lMinibuffer .~ mb'
               B.continue $! State s'
             MB.Completed mb' -> do
-              let s' = s & lArchState . _Just . lMinibuffer .~ mb'
+              let s' = s & C.lUIExtension . lMinibuffer .~ mb'
               B.continue $! State s'
       | otherwise -> B.continue s0
     C.SomeUIMode C.BlockSelector
@@ -82,7 +84,7 @@ handleVtyEvent s0@(State s) evt
       | otherwise -> B.continue s0
     C.SomeUIMode _m -> B.continue s0
 
-handleCustomEvent :: (C.Architecture arch s) => S BrickUIState arch s -> C.Events s -> B.EventM Names (B.Next (State BrickUIState s))
+handleCustomEvent :: (C.Architecture arch s) => S BrickUIExtension BrickUIState arch s -> C.Events s -> B.EventM Names (B.Next (State BrickUIExtension BrickUIState s))
 handleCustomEvent s0 evt =
   case evt of
     C.AnalysisFinished (C.SomeResult bar) diags ->
@@ -217,12 +219,12 @@ handleCustomEvent s0 evt =
       B.halt (State s0)
 
 stateFromAnalysisResult :: (C.Architecture arch s)
-                        => S BrickUIState arch0 s
+                        => S BrickUIExtension BrickUIState arch0 s
                         -> C.AnalysisResult arch s
                         -> Seq.Seq T.Text
                         -> AppState
                         -> C.SomeUIMode
-                        -> S BrickUIState arch s
+                        -> S BrickUIExtension BrickUIState arch s
 stateFromAnalysisResult s0 ares newDiags state uiMode =
   S { sDiagnosticLog = sDiagnosticLog s0 <> newDiags
     , sUIMode = uiMode
@@ -233,6 +235,8 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
     , sEchoArea = sEchoArea s0
     , sInputFile = sInputFile s0
     , sLoader = sLoader s0
+    , sKeymap = C.defaultKeymap
+    , sUIExtension = uiExt
     , sArchState =
       case () of
         () | Just oldArchState <- sArchState s0
@@ -244,12 +248,14 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
                let uiState = BrickUIState { sBlockSelector = BS.emptyBlockSelector
                                           , sBlockViewer = BV.blockViewer (BlockViewerList 0) b0
                                           , sFunctionViewer = FV.functionViewer defFunc ares
-                                          , sMinibuffer = MB.minibuffer MinibufferEditor MinibufferCompletionList "M-x" C.allCommands
                                           , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
                                           }
                return ArchState { sAnalysisResult = ares
-                                , sKeymap = C.defaultKeymap
                                 , sNonce = C.archNonce ares
                                 , sUIState = uiState
                                 }
     }
+  where
+    addrParser s = C.SomeAddress (C.archNonce ares) <$> C.parseAddress s
+    uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList "M-x" C.allCommands
+                             }

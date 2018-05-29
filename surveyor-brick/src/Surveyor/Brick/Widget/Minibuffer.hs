@@ -19,7 +19,7 @@ import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.Minibuffer as MB
 
 completeArgument :: (Z.GenericTextZipper t)
-                 => [Some (C.Command e st (C.Argument arch e st s) C.TypeRepr)]
+                 => [Some (C.Command e st (C.Argument e st s) C.TypeRepr)]
                  -> (t -> C.TypeRepr tp -> IO (V.Vector t))
 completeArgument cmds =
   let cmdNames = V.fromList [ C.cmdName cmd | Some cmd <- cmds ]
@@ -39,13 +39,14 @@ completeArgument cmds =
             let toGeneric txt = mconcat (map Z.singleton (T.unpack txt))
             return (fmap toGeneric matches)
 
-minibuffer :: (Z.GenericTextZipper t, C.Architecture arch s)
-           => n
+minibuffer :: (Z.GenericTextZipper t)
+           => (String -> Maybe (C.SomeAddress s))
+           -> n
            -- ^ The name of the editor widget
            -> n
            -- ^ The name of the completion list
            -> T.Text
-           -> [Some (C.Command e st (C.Argument arch e st s) C.TypeRepr)]
-           -> MB.Minibuffer e st (C.Argument arch e st s) C.TypeRepr t n
-minibuffer edName compName pfx cmds =
-  MB.minibuffer (C.parseArgument cmds) (completeArgument cmds) C.showRepr focusedListAttr edName compName pfx cmds
+           -> [Some (C.Command e st (C.Argument e st s) C.TypeRepr)]
+           -> MB.Minibuffer e st (C.Argument e st s) C.TypeRepr t n
+minibuffer parseAddr edName compName pfx cmds =
+  MB.minibuffer (C.parseArgument parseAddr cmds) (completeArgument cmds) C.showRepr focusedListAttr edName compName pfx cmds

@@ -11,7 +11,7 @@ import qualified Brick as B
 import qualified Brick.BChan as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
-import           Control.Lens ( (^.), (^?), _Just )
+import           Control.Lens ( (^.) )
 import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Nonce as PN
@@ -53,7 +53,7 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
 -- The status bar is a line at the bottom of the screen that reflects the
 -- currently-loaded executable (if any) and includes an indicator of the
 -- analysis progress.
-drawStatusBar :: S BrickUIState arch s -> B.Widget Names
+drawStatusBar :: S BrickUIExtension BrickUIState arch s -> B.Widget Names
 drawStatusBar s =
   B.withAttr statusBarAttr (B.hBox [fileNameWidget, B.padLeft B.Max statusWidget])
   where
@@ -64,7 +64,7 @@ drawStatusBar s =
         Ready -> B.str "Ready"
         AwaitingFile -> B.str "Waiting for file"
 
-drawAppShell :: S BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
+drawAppShell :: S BrickUIExtension BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w =
   [ B.vBox [ B.borderWithLabel (title (sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
            , drawStatusBar s
@@ -79,11 +79,11 @@ drawAppShell s w =
     bottomLine =
       case sUIMode s of
         C.SomeMiniBuffer (C.MiniBuffer _)
-          | Just mb <- s ^? lArchState . _Just . lMinibuffer ->
+          | mb <- s ^. C.lUIExtension . lMinibuffer ->
             MB.renderMinibuffer True mb
         _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (sEchoArea s))
 
-appDraw :: State BrickUIState s -> [B.Widget Names]
+appDraw :: State BrickUIExtension BrickUIState s -> [B.Widget Names]
 appDraw (State s) =
   case sInputFile s of
     Nothing -> drawAppShell s B.emptyWidget
@@ -100,7 +100,7 @@ appDraw (State s) =
 drawUIMode :: (C.Architecture arch s)
            => FilePath
            -> ArchState BrickUIState arch s
-           -> S BrickUIState arch s
+           -> S BrickUIExtension BrickUIState arch s
            -> C.UIMode C.NormalK
            -> [B.Widget Names]
 drawUIMode binFileName archState s uim =
@@ -114,19 +114,19 @@ drawUIMode binFileName archState s uim =
   where
     binfo = sAnalysisResult archState
 
-appChooseCursor :: State BrickUIState s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
+appChooseCursor :: State BrickUIExtension BrickUIState s -> [B.CursorLocation Names] -> Maybe (B.CursorLocation Names)
 appChooseCursor _ cursors =
   case cursors of
     [c] -> Just c
     _ -> Nothing
 
-appAttrMap :: State BrickUIState s -> B.AttrMap
+appAttrMap :: State BrickUIExtension BrickUIState s -> B.AttrMap
 appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
                                    , (statusBarAttr, V.black `B.on` V.white)
                                    , (B.listSelectedFocusedAttr, V.blue `B.on` V.white)
                                    ]
 
-appStartEvent :: State BrickUIState s -> B.EventM Names (State BrickUIState s)
+appStartEvent :: State BrickUIExtension BrickUIState s -> B.EventM Names (State BrickUIExtension BrickUIState s)
 appStartEvent s0 = return s0
 
 resetEchoArea :: C.Chan (C.Events s) -> IO ()
@@ -150,8 +150,15 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   return ()
 
 
-emptyState :: Maybe FilePath -> Maybe C.AsyncLoader -> PN.NonceGenerator IO s -> C.Chan (C.Events s) -> IO (S BrickUIState Void s)
+emptyState :: Maybe FilePath
+           -> Maybe C.AsyncLoader
+           -> PN.NonceGenerator IO s
+           -> C.Chan (C.Events s)
+           -> IO (S BrickUIExtension BrickUIState Void s)
 emptyState mfp mloader ng customEventChan = do
+  let addrParser _s = Nothing
+  let uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList "M-x" C.allCommands
+                               }
   return S { sInputFile = mfp
            , sLoader = mloader
            , sDiagnosticLog = Seq.empty
@@ -161,5 +168,7 @@ emptyState mfp mloader ng customEventChan = do
            , sEmitEvent = C.writeChan customEventChan
            , sEventChannel = customEventChan
            , sNonceGenerator = ng
+           , sKeymap = C.defaultKeymap
+           , sUIExtension = uiExt
            , sArchState = Nothing
            }

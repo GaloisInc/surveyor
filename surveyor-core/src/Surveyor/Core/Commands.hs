@@ -16,7 +16,8 @@ module Surveyor.Core.Commands (
   loadLLVMC,
   loadJARC,
   loadELFC,
-  allCommands
+  allCommands,
+  SomeNonce(..)
   ) where
 
 import qualified Data.Functor.Const as C
@@ -29,11 +30,16 @@ import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
 import           Surveyor.Core.Events ( Events(..) )
 
-type Argument arch s = AR.Argument arch (Events s) (Maybe (NG.Nonce s arch)) s
-type Command arch s tps = C.Command (Events s) (Maybe (NG.Nonce s arch)) (Argument arch s) AR.TypeRepr tps
-type Callback arch s tps = C.Chan (Events s) -> Maybe (NG.Nonce s arch) -> PL.List (Argument arch s) tps -> IO ()
+-- | This is a separate wrapper (instead of the Some from parameterized-utils)
+-- because we want to constrain it with a kind signature.
+data SomeNonce s where
+  SomeNonce :: forall (arch :: *) s . NG.Nonce s arch -> SomeNonce s
 
-allCommands :: [Some (C.Command (Events s) (Maybe (NG.Nonce s arch)) (Argument arch s) AR.TypeRepr)]
+type Argument s = AR.Argument (Events s) (Maybe (SomeNonce s)) s
+type Command s tps = C.Command (Events s) (Maybe (SomeNonce s)) (Argument s) AR.TypeRepr tps
+type Callback s tps = C.Chan (Events s) -> Maybe (SomeNonce s) -> PL.List (Argument s) tps -> IO ()
+
+allCommands :: [Some (C.Command (Events s) (Maybe (SomeNonce s)) (Argument s) AR.TypeRepr)]
 allCommands =
   [ Some showSummaryC
   , Some exitC
@@ -47,117 +53,117 @@ allCommands =
   , Some loadJARC
   ]
 
-exitC :: forall arch s . Command arch s '[]
+exitC :: forall s . Command s '[]
 exitC =
   C.Command "exit" doc PL.Nil PL.Nil callback
   where
     doc = "Exit the application"
-    callback :: Callback arch s '[]
+    callback :: Callback s '[]
     callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan Exit
 
-showSummaryC :: forall arch s . Command arch s '[]
+showSummaryC :: forall s . Command s '[]
 showSummaryC =
   C.Command "summary" doc PL.Nil PL.Nil callback
   where
     doc = "Show a summary of the information discovered about the binary"
-    callback :: Callback arch s '[]
+    callback :: Callback s '[]
     callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan ShowSummary
 
-showDiagnosticsC :: forall arch s . Command arch s '[]
+showDiagnosticsC :: forall s . Command s '[]
 showDiagnosticsC =
   C.Command "log" doc PL.Nil PL.Nil callback
   where
     doc = "Show a log of the diagnostics produced by the analysis and UI"
-    callback :: Callback arch s '[]
+    callback :: Callback s '[]
     callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan ShowDiagnostics
 
-listFunctionsC :: forall arch s . Command arch s '[]
+listFunctionsC :: forall s . Command s '[]
 listFunctionsC =
   C.Command "list-functions" doc PL.Nil PL.Nil callback
   where
     doc = "List all of the discovered functions"
-    callback :: Callback arch s '[]
+    callback :: Callback s '[]
     callback = \customEventChan mnonce PL.Nil ->
       case mnonce of
         Nothing -> return ()
-        Just nonce ->
+        Just (SomeNonce nonce) ->
           C.writeChan customEventChan (FindFunctionsContaining nonce Nothing)
 
-findBlockC :: forall arch s . Command arch s '[AR.AddressType]
+findBlockC :: forall s . Command s '[AR.AddressType]
 findBlockC =
   C.Command "find-block" doc names rep callback
   where
     doc = "Find the block(s) containing the given address and list them"
     names = C.Const "address" PL.:< PL.Nil
     rep = AR.AddressTypeRepr PL.:< PL.Nil
-    callback :: Callback arch s '[AR.AddressType]
-    callback = \customEventChan mnonce (AR.AddressArgument addr PL.:< PL.Nil) ->
+    callback :: Callback s '[AR.AddressType]
+    callback = \customEventChan mnonce (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
       case mnonce of
         Nothing -> return ()
-        Just nonce ->
-          C.writeChan customEventChan (FindBlockContaining nonce addr)
+        Just (SomeNonce _nonce) ->
+            C.writeChan customEventChan (FindBlockContaining anonce addr)
 
-describeCommandC :: forall arch s . Command arch s '[AR.CommandType]
+describeCommandC :: forall s . Command s '[AR.CommandType]
 describeCommandC =
   C.Command "describe-command" doc names rep callback
   where
     doc = "Display the docstring of the named command"
     names = C.Const "command-name" PL.:< PL.Nil
     rep = AR.CommandTypeRepr PL.:< PL.Nil
-    callback :: Callback arch s '[AR.CommandType]
+    callback :: Callback s '[AR.CommandType]
     callback = \customEventChan _ (AR.CommandArgument cmd PL.:< PL.Nil) ->
       C.writeChan customEventChan (DescribeCommand cmd)
 
 -- | This isn't part of 'allCommands' because we can never productively launch
 -- it from the minibuffer
-minibufferC :: forall arch s . Command arch s '[]
+minibufferC :: forall s . Command s '[]
 minibufferC =
   C.Command "show-minibuffer" doc PL.Nil PL.Nil callback
   where
     doc = "Open the minibuffer"
-    callback :: Callback arch s '[]
+    callback :: Callback s '[]
     callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan OpenMinibuffer
 
-loadFileC :: forall arch s . Command arch s '[AR.FilePathType]
+loadFileC :: forall s . Command s '[AR.FilePathType]
 loadFileC =
   C.Command "load-file" doc names rep callback
   where
     doc = "Load a file, attempting to determine its type automatically"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
-    callback :: Callback arch s '[AR.FilePathType]
+    callback :: Callback s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
       C.writeChan customEventChan (LoadFile filepath)
 
-loadELFC :: forall arch s . Command arch s '[AR.FilePathType]
+loadELFC :: forall s . Command s '[AR.FilePathType]
 loadELFC =
   C.Command "load-elf" doc names rep callback
   where
     doc = "Load an ELF file"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
-    callback :: Callback arch s '[AR.FilePathType]
+    callback :: Callback s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
       C.writeChan customEventChan (LoadELF filepath)
 
-loadLLVMC :: forall arch s . Command arch s '[AR.FilePathType]
+loadLLVMC :: forall s . Command s '[AR.FilePathType]
 loadLLVMC =
   C.Command "load-llvm" doc names rep callback
   where
     doc = "Load an LLVM bitcode file"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
-    callback :: Callback arch s '[AR.FilePathType]
+    callback :: Callback s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
       C.writeChan customEventChan (LoadLLVM filepath)
 
-loadJARC :: forall arch s . Command arch s '[AR.FilePathType]
+loadJARC :: forall s . Command s '[AR.FilePathType]
 loadJARC =
   C.Command "load-jar" doc names rep callback
   where
     doc = "Load a JAR file"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
-    callback :: Callback arch s '[AR.FilePathType]
+    callback :: Callback s '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
       C.writeChan customEventChan (LoadJAR filepath)

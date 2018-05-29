@@ -33,6 +33,7 @@ module Surveyor.Core (
   -- * Completion system
   CC.Command(..),
   AR.Argument(..),
+  AR.SomeAddress(..),
   -- ** Commands
   module Surveyor.Core.Commands,
   -- ** Types and type representatives for the completion system
@@ -63,7 +64,6 @@ module Surveyor.Core (
   ) where
 
 import qualified Data.Foldable as F
-import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Graphics.Vty as V
 
@@ -80,7 +80,7 @@ import qualified Surveyor.Core.Mode as M
 import           Surveyor.Core.State
 
 -- | A default keymap with some reasonable keybindings
-defaultKeymap :: K.Keymap (CE.Events s) M.SomeUIMode (Maybe (NG.Nonce s arch)) (AR.Argument arch (CE.Events s) (Maybe (NG.Nonce s arch)) s) AR.TypeRepr
+defaultKeymap :: K.Keymap (CE.Events s) M.SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (CE.Events s) (Maybe (SomeNonce s)) s) AR.TypeRepr
 defaultKeymap = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
     globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some exitC)

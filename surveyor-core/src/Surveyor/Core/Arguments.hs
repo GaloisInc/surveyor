@@ -6,6 +6,7 @@
 -- | The types of arguments for commands
 module Surveyor.Core.Arguments (
   Argument(..),
+  SomeAddress(..),
   Type(..),
   TypeRepr(..),
   IntType,
@@ -21,6 +22,7 @@ module Surveyor.Core.Arguments (
 import qualified Data.Foldable as F
 import qualified Data.Map.Strict as M
 import           Data.Parameterized.Classes
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
@@ -62,19 +64,23 @@ instance TestEquality TypeRepr where
   testEquality FilePathTypeRepr FilePathTypeRepr = Just Refl
   testEquality _ _ = Nothing
 
-data Argument arch e st s tp where
-  CommandArgument :: Some (C.Command e st (Argument arch e st s) TypeRepr) -> Argument arch e st s CommandType
-  StringArgument :: T.Text -> Argument arch e st s StringType
-  AddressArgument :: A.Address arch s -> Argument arch e st s AddressType
-  IntArgument :: Integer -> Argument arch e st s IntType
-  WordArgument :: Natural -> Argument arch e st s WordType
-  FilePathArgument :: FilePath -> Argument arch e st s FilePathType
+data SomeAddress s where
+  SomeAddress :: (A.Architecture arch s) => PN.Nonce s arch -> A.Address arch s -> SomeAddress s
 
-parseArgument :: (A.Architecture arch s, Z.GenericTextZipper t)
-              => [Some (C.Command e st (Argument arch e st s) TypeRepr)]
+data Argument e st s tp where
+  CommandArgument :: Some (C.Command e st (Argument e st s) TypeRepr) -> Argument e st s CommandType
+  StringArgument :: T.Text -> Argument e st s StringType
+  AddressArgument :: SomeAddress s -> Argument e st s AddressType
+  IntArgument :: Integer -> Argument e st s IntType
+  WordArgument :: Natural -> Argument e st s WordType
+  FilePathArgument :: FilePath -> Argument e st s FilePathType
+
+parseArgument :: (Z.GenericTextZipper t)
+              => (String -> Maybe (SomeAddress s))
+              -> [Some (C.Command e st (Argument e st s) TypeRepr)]
               -> t
-              -> (TypeRepr tp -> Maybe (Argument arch e st s tp))
-parseArgument cmds =
+              -> (TypeRepr tp -> Maybe (Argument e st s tp))
+parseArgument parseAddress cmds =
   let indexCommand m (Some cmd) = M.insert (C.cmdName cmd) (Some cmd) m
       cmdIndex = F.foldl' indexCommand M.empty cmds
   in \(Z.toList -> txt) rep ->
@@ -82,7 +88,7 @@ parseArgument cmds =
       StringTypeRepr -> Just (StringArgument (T.pack txt))
       IntTypeRepr -> IntArgument <$> readMaybe txt
       WordTypeRepr -> WordArgument <$> readMaybe txt
-      AddressTypeRepr -> AddressArgument <$> A.parseAddress txt
+      AddressTypeRepr -> AddressArgument <$> parseAddress txt
       CommandTypeRepr ->
         let t = T.pack txt
         in CommandArgument <$> M.lookup t cmdIndex
