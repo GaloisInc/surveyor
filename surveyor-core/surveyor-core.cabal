@@ -20,6 +20,7 @@ library
                        Surveyor.Core.Architecture.JVM
                        Surveyor.Core.Architecture.LLVM
                        Surveyor.Core.Architecture.MC
+                       Surveyor.Core.Architecture.Void
                        Surveyor.Core.Arguments
                        Surveyor.Core.BinaryAnalysisResult
                        Surveyor.Core.Chan

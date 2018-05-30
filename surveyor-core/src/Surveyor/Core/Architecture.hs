@@ -32,3 +32,4 @@ import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.JVM as J
 import qualified Surveyor.Core.Architecture.LLVM as LL
 import qualified Surveyor.Core.Architecture.MC as MC
+import           Surveyor.Core.Architecture.Void ()
