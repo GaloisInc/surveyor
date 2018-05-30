@@ -129,7 +129,7 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
 appStartEvent :: C.State BrickUIExtension BrickUIState s -> B.EventM Names (C.State BrickUIExtension BrickUIState s)
 appStartEvent s0 = return s0
 
-resetEchoArea :: C.Chan (C.Events s) -> IO ()
+resetEchoArea :: C.Chan (C.Events s (C.S BrickUIExtension BrickUIState)) -> IO ()
 resetEchoArea customEventChan =
   C.writeChan customEventChan C.ResetEchoArea
 
@@ -153,7 +153,7 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
 emptyState :: Maybe FilePath
            -> Maybe C.AsyncLoader
            -> PN.NonceGenerator IO s
-           -> C.Chan (C.Events s)
+           -> C.Chan (C.Events s (C.S BrickUIExtension BrickUIState))
            -> IO (C.S BrickUIExtension BrickUIState Void s)
 emptyState mfp mloader ng customEventChan = do
   let addrParser _s = Nothing

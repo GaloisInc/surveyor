@@ -13,9 +13,9 @@ extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     Surveyor.Core
-  other-modules:       Control.Once
-                       Surveyor.Core.Architecture
+  exposed-modules:     Control.Once
+                       Surveyor.Core
+  other-modules:       Surveyor.Core.Architecture
                        Surveyor.Core.Architecture.Class
                        Surveyor.Core.Architecture.JVM
                        Surveyor.Core.Architecture.LLVM

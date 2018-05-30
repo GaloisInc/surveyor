@@ -7,6 +7,7 @@ module Surveyor.Brick.Handlers (
 import qualified Brick as B
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
 import           Control.Monad.IO.Class ( liftIO )
+import qualified Control.Once as O
 import qualified Data.Foldable as F
 import           Data.Maybe ( listToMaybe )
 import           Data.Monoid
@@ -28,7 +29,7 @@ import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
-appHandleEvent :: C.State BrickUIExtension BrickUIState s -> B.BrickEvent Names (C.Events s) -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
+appHandleEvent :: C.State BrickUIExtension BrickUIState s -> B.BrickEvent Names (C.Events s (C.S BrickUIExtension BrickUIState)) -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
 appHandleEvent (C.State s0) evt =
   case evt of
     B.AppEvent ae -> handleCustomEvent s0 ae
@@ -84,7 +85,7 @@ handleVtyEvent s0@(C.State s) evt
       | otherwise -> B.continue s0
     C.SomeUIMode _m -> B.continue s0
 
-handleCustomEvent :: (C.Architecture arch s) => C.S BrickUIExtension BrickUIState arch s -> C.Events s -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
+handleCustomEvent :: (C.Architecture arch s) => C.S BrickUIExtension BrickUIState arch s -> C.Events s (C.S BrickUIExtension BrickUIState) -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
 handleCustomEvent s0 evt =
   case evt of
     C.AnalysisFinished (C.SomeResult bar) diags ->
@@ -214,6 +215,15 @@ handleCustomEvent s0 evt =
 
     C.LogDiagnostic t ->
       B.continue $! C.State (s0 & C.lDiagnosticLog %~ (Seq.|> t))
+
+    -- We discard async state updates if the type of the state has changed in
+    -- the interim
+    C.AsyncStateUpdate archNonce nfVal upd
+      | Just oldNonce <- s0 ^? C.lArchState ._Just . C.lNonce
+      , Just Refl <- testEquality oldNonce archNonce ->
+          B.continue (C.State (upd (O.runOnce nfVal) s0))
+      | otherwise -> B.continue (C.State s0)
+
     C.Exit -> do
       liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
       B.halt (C.State s0)

@@ -81,7 +81,7 @@ import qualified Surveyor.Core.Mode as M
 import           Surveyor.Core.State
 
 -- | A default keymap with some reasonable keybindings
-defaultKeymap :: K.Keymap (CE.Events s) M.SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (CE.Events s) (Maybe (SomeNonce s)) s) AR.TypeRepr
+defaultKeymap :: K.Keymap (CE.Events s (S e u)) M.SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (CE.Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr
 defaultKeymap = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
     globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some exitC)

@@ -56,7 +56,7 @@ ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
               Show (MC.ArchReg arch (MT.BVType w)),
               MC.RegisterInfo (MC.ArchReg arch))
           => MBL.BinaryRepr binFmt
-          -> C.Chan (Events s)
+          -> C.Chan (Events s st)
           -> NG.NonceGenerator IO s
           -> [(Some (DPPC.Opcode DPPC.Operand), BS.ByteString)]
           -> ((R.RewriteEnv arch -> MBL.LoadedBinary arch binFmt -> A.SomeResult s arch) ->
@@ -86,13 +86,13 @@ ppcConfig binRep customEventChan ng semantics mkCfg0 mkRes = do
   let cfg = cfg0 { R.rcFunctionCallback = Just (10, callback) }
   return (R.SomeConfig NR.knownNat binRep cfg)
 
-mkLogCfg :: C.Chan (Events s) -> IO SL.LogCfg
+mkLogCfg :: C.Chan (Events s st) -> IO SL.LogCfg
 mkLogCfg customEventChan = do
   lcfg <- SL.mkLogCfg "loader"
   _ <- CA.async (SL.consumeUntilEnd (const True) (translateMessage customEventChan) lcfg)
   return lcfg
 
-translateMessage :: C.Chan (Events s) -> SL.LogEvent -> IO ()
+translateMessage :: C.Chan (Events s st) -> SL.LogEvent -> IO ()
 translateMessage customEventChan evt =
   C.writeChan customEventChan (LogDiagnostic (T.pack (SL.prettyLogEvent evt)))
 

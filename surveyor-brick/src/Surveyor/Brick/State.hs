@@ -39,12 +39,12 @@ data BrickUIState arch s =
   deriving (Generic)
 
 data BrickUIExtension s =
-  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.Events s) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
+  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
                    -- ^ The persistent state of the minibuffer
                    }
   deriving (Generic)
 
-lMinibuffer :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.Events s) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
+lMinibuffer :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
 lMinibuffer = GL.field @"sMinibuffer"
 
 lFunctionSelector :: L.Lens' (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)

@@ -62,14 +62,14 @@ cancelLoader al = do
 
 -- | Try to load the given file, attempting to determine its type based on the
 -- filename
-asynchronouslyLoad :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoad :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> FilePath -> IO AsyncLoader
 asynchronouslyLoad ng customEventChan path
   | takeExtension path == ".bc" = asynchronouslyLoadLLVM ng customEventChan path
   | takeExtension path == ".jar" = asynchronouslyLoadJAR ng customEventChan path
   | otherwise = asynchronouslyLoadElf ng customEventChan path
 
 -- | Load a JAR file
-asynchronouslyLoadJAR :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadJAR :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadJAR ng customEventChan jarPath = do
   nonce <- NG.freshNonce ng
   mv <- C.newEmptyMVar
@@ -97,7 +97,7 @@ asynchronouslyLoadJAR ng customEventChan jarPath = do
       C.writeChan customEventChan (AnalysisProgress (A.SomeResult res'))
       return (Just res')
 
-asynchronouslyLoadLLVM :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadLLVM :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadLLVM ng customEventChan bcPath = do
   mv <- C.newEmptyMVar
   errThread <- A.async $ do
@@ -124,7 +124,7 @@ asynchronouslyLoadLLVM ng customEventChan bcPath = do
 --
 -- The thread sends the result of loading to the main thread through the
 -- provided event channel
-asynchronouslyLoadElf :: NG.NonceGenerator IO s -> C.Chan (Events s) -> FilePath -> IO AsyncLoader
+asynchronouslyLoadElf :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadElf ng customEventChan exePath = do
   mv <- C.newEmptyMVar
   thread <- A.async $ do
@@ -153,7 +153,7 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 -- across all of the streamed results for the same executable.  We need to
 -- generate the nonce under 'withElfConfig' so that we can capture the
 -- appropriate value of w.
-loadElf :: NG.NonceGenerator IO s -> C.Chan (Events s) -> E.SomeElf E.Elf -> IO ()
+loadElf :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> E.SomeElf E.Elf -> IO ()
 loadElf ng customEventChan someElf = do
   nonceAx86 <- NG.freshNonce ng
   let x86cfg0 = X86.config (RA.analysis X86.isa A.mkX86Result nonceAx86 Nothing) R.nop

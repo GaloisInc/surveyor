@@ -69,9 +69,9 @@ data S e u arch s =
     , sAppState :: AppState
     -- ^ An indicator of the general state of the application (displayed in the
     -- status line)
-    , sEmitEvent :: Events s -> IO ()
+    , sEmitEvent :: Events s (S e u) -> IO ()
     -- ^ An IO action to emit an event (via the custom event channel)
-    , sEventChannel :: C.Chan (Events s)
+    , sEventChannel :: C.Chan (Events s (S e u))
     , sNonceGenerator :: NG.NonceGenerator IO s
     -- ^ Nonce source used to correlate related analysis results as they stream
     -- in.  The reporting of analysis results through an existential wrapper
@@ -81,7 +81,7 @@ data S e u arch s =
     -- streamed analysis result is of the same type as the last one.  We use
     -- nonces to track that; their 'TestEquality' instance lets us recover type
     -- equality.
-    , sKeymap :: !(Keymap (Events s) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+    , sKeymap :: !(Keymap (Events s (S e u)) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
     -- ^ Keybindings mapped to commands
     , sUIExtension :: e s
     -- ^ An extension field for UI frontends for containing data that is
@@ -105,7 +105,7 @@ lEchoArea = GL.field @"sEchoArea"
 lUIMode :: L.Lens' (S e u arch s) SomeUIMode
 lUIMode = GL.field @"sUIMode"
 
-lEventChannel :: L.Lens' (S e u arch s) (C.Chan (Events s))
+lEventChannel :: L.Lens' (S e u arch s) (C.Chan (Events s (S e u)))
 lEventChannel = GL.field @"sEventChannel"
 
 lAppState :: L.Lens' (S e u arch s) AppState
@@ -117,7 +117,7 @@ lNonceGenerator = GL.field @"sNonceGenerator"
 lLoader :: L.Lens' (S e u arch s) (Maybe AsyncLoader)
 lLoader = GL.field @"sLoader"
 
-lKeymap :: L.Lens' (S e u arch s) (Keymap (Events s) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+lKeymap :: L.Lens' (S e u arch s) (Keymap (Events s (S e u)) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
 lKeymap = GL.field @"sKeymap"
 
 lUIExtension :: L.Lens' (S e u arch s) (e s)
