@@ -15,6 +15,7 @@
 -- instructions, and operands.
 module Surveyor.Core.Architecture (
   Architecture(..),
+  AnalysisResult,
   Block(..),
   FunctionHandle(..),
   ParameterizedFormula(..),

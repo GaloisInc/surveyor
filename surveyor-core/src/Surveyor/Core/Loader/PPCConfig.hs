@@ -8,6 +8,9 @@ module Surveyor.Core.Loader.PPCConfig (
 import           GHC.TypeLits
 
 import qualified Control.Concurrent.Async as CA
+import qualified Control.DeepSeq as DS
+import qualified Control.Exception as X
+import           Control.Monad ( void )
 import qualified Data.ByteString as BS
 import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MC
@@ -78,6 +81,7 @@ ppcConfig binRep customEventChan ng semantics mkCfg0 mkRes = do
                                            , rSemantics = Just formulas
                                            }
             let sr = mkRes res
+            void $ X.evaluate (DS.force sr)
             C.writeChan customEventChan (AnalysisProgress sr)
   let cfg = cfg0 { R.rcFunctionCallback = Just (10, callback) }
   return (R.SomeConfig NR.knownNat binRep cfg)

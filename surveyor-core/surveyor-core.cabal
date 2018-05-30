@@ -14,7 +14,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Surveyor.Core
-  other-modules:       
+  other-modules:       Control.Once
                        Surveyor.Core.Architecture
                        Surveyor.Core.Architecture.Class
                        Surveyor.Core.Architecture.JVM
@@ -35,6 +35,7 @@ library
                        Surveyor.Core.State
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
+                       deepseq,
                        containers,
                        async,
                        bytestring,

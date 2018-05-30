@@ -12,6 +12,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Surveyor.Core.Architecture.LLVM ( mkLLVMResult ) where
 
+import           Control.DeepSeq ( NFData, rnf )
+import qualified Control.Once as O
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
 import qualified Data.Map.Strict as M
@@ -49,12 +51,19 @@ indexFunctions = F.foldl' indexDefine M.empty . LL.modDefines
 
 mkLLVMResult :: NG.Nonce s LLVM -> LL.Module -> SomeResult s LLVM
 mkLLVMResult nonce m =
-  SomeResult (LLVMAnalysisResult lr)
+  SomeResult (AnalysisResult (LLVMAnalysisResult lr) (indexResult lr))
   where
     lr = LLVMResult { llvmNonce = nonce
                     , llvmModule = m
                     , llvmFunctionIndex = indexFunctions m
                     }
+
+indexResult :: LLVMResult s -> O.Once (ResultIndex LLVM s)
+indexResult lr = O.once idx
+  where
+    idx = ResultIndex { riFunctions = mapMaybe defToFunction (LL.modDefines (llvmModule lr))
+                      , riSummary = summarizeModule (llvmModule lr)
+                      }
 
 data AddrType = FuncK | BlockK | InsnK
 
@@ -140,12 +149,12 @@ data LLVMOperand' = Value !LL.Value
                   | AtomicOp LL.AtomicRWOp
 
 instance Architecture LLVM s where
-  data AnalysisResult LLVM s = LLVMAnalysisResult (LLVMResult s)
+  data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
   data Instruction LLVM s = LLVMInstruction LL.Stmt
   data Operand LLVM s = LLVMOperand LLVMOperand'
   data Opcode LLVM s = LLVMOpcode LL.Instr
   data Address LLVM s = forall addrTy . LLVMAddress (Addr addrTy)
-  archNonce (LLVMAnalysisResult lr) = llvmNonce lr
+  archNonce (AnalysisResult (LLVMAnalysisResult lr) _) = llvmNonce lr
   genericSemantics _ _ = Nothing
   boundValue (LLVMInstruction stmt) =
     case stmt of
@@ -170,15 +179,13 @@ instance Architecture LLVM s where
     case stmt of
       LL.Result _ i _ -> LLVMOpcode i
       LL.Effect i _ -> LLVMOpcode i
-  functions (LLVMAnalysisResult lr) =
-    mapMaybe defToFunction (LL.modDefines (llvmModule lr))
+  functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
   prettyOpcode (LLVMOpcode i) = ppOpcode i
   operands (LLVMInstruction stmt) = stmtOperands stmt
-  containingBlocks (LLVMAnalysisResult lr) (LLVMAddress addr) =
+  containingBlocks (AnalysisResult (LLVMAnalysisResult lr) _) (LLVMAddress addr) =
     llvmContainingBlocks lr addr
-  summarizeResult (LLVMAnalysisResult lr) =
-    summarizeModule (llvmModule lr)
-  functionBlocks (LLVMAnalysisResult lr) fh =
+  summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
+  functionBlocks (AnalysisResult (LLVMAnalysisResult lr) _) fh =
     llvmFunctionBlocks lr fh
 
 instance Eq (Address LLVM s) where
@@ -189,6 +196,13 @@ instance Ord (Address LLVM s) where
 
 instance Show (Address LLVM s) where
   show (LLVMAddress a) = show a
+
+instance NFData (Address LLVM s) where
+  rnf (LLVMAddress a) = a `seq` ()
+
+-- FIXME: This could be improved if we changed the underlying llvm-pretty definition
+instance NFData (Instruction LLVM s) where
+  rnf (LLVMInstruction i) = i `seq` ()
 
 ppOperand :: (?config :: LL.Config) => LLVMOperand' -> PP.Doc
 ppOperand op =

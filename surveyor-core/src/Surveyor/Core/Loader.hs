@@ -13,6 +13,9 @@ module Surveyor.Core.Loader (
 
 import qualified Control.Concurrent.Async as A
 import qualified Control.Concurrent.MVar as C
+import qualified Control.DeepSeq as DS
+import qualified Control.Exception as X
+import           Control.Monad ( void )
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy.Char8 as LB8
 import qualified Data.ElfEdit as E
@@ -154,7 +157,7 @@ loadElf :: NG.NonceGenerator IO s -> C.Chan (Events s) -> E.SomeElf E.Elf -> IO 
 loadElf ng customEventChan someElf = do
   nonceAx86 <- NG.freshNonce ng
   let x86cfg0 = X86.config (RA.analysis X86.isa A.mkX86Result nonceAx86 Nothing) R.nop
-  let x86callback loadedBinary _addr bi =
+  let x86callback loadedBinary _addr bi = do
             let res = BinaryAnalysisResult { rBlockInfo = bi
                                            , rLoadedBinary = loadedBinary
                                            , rISA = R.rcISA x86cfg0
@@ -162,8 +165,9 @@ loadElf ng customEventChan someElf = do
                                            , rNonce = nonceAx86
                                            , rSemantics = Nothing
                                            }
-                sr = A.mkX86Result res
-            in C.writeChan customEventChan (AnalysisProgress sr)
+            let sr = A.mkX86Result res
+            void $ X.evaluate (DS.force sr)
+            C.writeChan customEventChan (AnalysisProgress sr)
   let x86cfg = x86cfg0 { R.rcFunctionCallback = Just (10, x86callback) }
   ppc32cfg <- LP.ppcConfig MBL.Elf32Repr customEventChan ng PPC32.allSemantics PPC.config32 A.mkPPC32Result
   ppc64cfg <- LP.ppcConfig MBL.Elf64Repr customEventChan ng PPC64.allSemantics PPC.config64 A.mkPPC64Result

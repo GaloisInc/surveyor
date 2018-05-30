@@ -19,7 +19,7 @@ module Surveyor.Brick.Widget.FunctionViewer (
 import           GHC.Generics ( Generic )
 
 import qualified Brick as B
-import           Control.Lens ( Lens', (^.) )
+import           Control.Lens ( Lens', (^.), (^?) )
 import qualified Data.Foldable as F
 import qualified Data.Generics.Product as GL
 import qualified Data.List as L
@@ -78,8 +78,11 @@ renderFunctionViewer fv = blockList
 --  B.viewport FunctionViewport B.Both blockList
   where
     blockList = B.vBox (map renderWithFocus (funcBlocks fv))
-    renderWithFocus b =
-      let w = B.padBottom (B.Pad 1) (BV.renderBlockViewer (analysisResult fv) b)
-      in case fv ^. focusedBlockL == Just (C.blockAddress (b ^. BV.blockViewerBlockL)) of
-        True -> B.visible w
-        False -> w
+    renderWithFocus mb =
+      case mb ^? BV.asBlockViewer of
+        Nothing -> B.emptyWidget
+        Just b ->
+          let w = B.padBottom (B.Pad 1) (BV.renderBlockViewer (analysisResult fv) mb)
+          in case fv ^. focusedBlockL == Just (C.blockAddress (b ^. BV.blockViewerBlockL)) of
+            True -> B.visible w
+            False -> w

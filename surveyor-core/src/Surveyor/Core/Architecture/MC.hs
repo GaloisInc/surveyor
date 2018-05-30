@@ -13,6 +13,8 @@ module Surveyor.Core.Architecture.MC (
   mkX86Result
   ) where
 
+import           Control.DeepSeq ( NFData, rnf )
+import qualified Control.Once as O
 import qualified Data.Functor.Const as C
 import           Data.Int ( Int16, Int64 )
 import qualified Data.Map as M
@@ -45,15 +47,28 @@ import           Surveyor.Core.BinaryAnalysisResult
 
 mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32
               -> SomeResult s PPC.PPC32
-mkPPC32Result = SomeResult . PPC32AnalysisResult
+mkPPC32Result bar =
+  SomeResult (AnalysisResult (PPC32AnalysisResult bar) (indexBinaryAnalysisResult PPC32Address bar))
 
 mkPPC64Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64
               -> SomeResult s PPC.PPC64
-mkPPC64Result = SomeResult . PPC64AnalysisResult
+mkPPC64Result bar =
+  SomeResult (AnalysisResult (PPC64AnalysisResult bar) (indexBinaryAnalysisResult PPC64Address bar))
 
 mkX86Result :: BinaryAnalysisResult s (C.Const Void) X86.X86_64
             -> SomeResult s X86.X86_64
-mkX86Result = SomeResult . X86AnalysisResult
+mkX86Result bar =
+  SomeResult (AnalysisResult (X86AnalysisResult bar) (indexBinaryAnalysisResult X86Address bar))
+
+indexBinaryAnalysisResult :: (ArchConstraints arch s, MM.MemWidth (MM.ArchAddrWidth arch))
+                          => (MM.MemAddr (MM.ArchAddrWidth arch) -> Address arch s)
+                          -> BinaryAnalysisResult s o arch
+                          -> O.Once (ResultIndex arch s)
+indexBinaryAnalysisResult addrCon bar = O.once idx
+  where
+    idx = ResultIndex { riFunctions = mcFunctions addrCon bar
+                      , riSummary = mcSummarize bar
+                      }
 
 -- TODO
 --
@@ -191,25 +206,25 @@ ppcPrettyOperand _addr op =
     DPPC.Vsrc vr -> T.pack (show (HPJ.pPrint vr))
 
 instance Architecture Void s where
-  data AnalysisResult Void s = VoidAnalysisResult Void
+  data ArchResult Void s = VoidAnalysisResult Void
   data Instruction Void s = VoidInstruction Void
   data Operand Void s = VoidOperand Void
   data Opcode Void s = VoidOpcode Void
   data Address Void s = VoidAddress Void
-  summarizeResult (VoidAnalysisResult v) = absurd v
-  archNonce (VoidAnalysisResult v) = absurd v
+  summarizeResult (AnalysisResult (VoidAnalysisResult v) _) = absurd v
+  archNonce (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   parseAddress _ = Nothing
   prettyAddress (VoidAddress v) = absurd v
-  containingBlocks (VoidAnalysisResult v) _ = absurd v
-  functions (VoidAnalysisResult v) = absurd v
+  containingBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
+  functions (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   prettyInstruction _ (VoidInstruction v) = absurd v
   opcode (VoidInstruction v) = absurd v
   operands (VoidInstruction v) = absurd v
   boundValue (VoidInstruction v) = absurd v
   prettyOperand _ (VoidOperand v) = absurd v
   prettyOpcode (VoidOpcode v) = absurd v
-  genericSemantics (VoidAnalysisResult v) _ = absurd v
-  functionBlocks (VoidAnalysisResult v) _ = absurd v
+  genericSemantics (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
+  functionBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
 
 instance Eq (Address Void s) where
   VoidAddress v == _ = absurd v
@@ -220,22 +235,28 @@ instance Ord (Address Void s) where
 instance Show (Address Void s) where
   show (VoidAddress v) = absurd v
 
+instance NFData (Address Void s) where
+  rnf (VoidAddress v) = absurd v
+
+instance NFData (Instruction Void s) where
+  rnf (VoidInstruction v) = absurd v
+
 instance Architecture PPC.PPC32 s where
-  data AnalysisResult PPC.PPC32 s =
+  data ArchResult PPC.PPC32 s =
     PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32)
   data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction ())
   data Operand PPC.PPC32 s = forall x . PPC32Operand !(DPPC.Operand x)
   data Opcode PPC.PPC32 s = forall x y . PPC32Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC32 s = PPC32Address !(MM.MemAddr 32)
 
-  summarizeResult (PPC32AnalysisResult bar) = mcSummarize bar
-  archNonce (PPC32AnalysisResult bar) = mcNonce bar
+  summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
+  archNonce (AnalysisResult (PPC32AnalysisResult bar) _) = mcNonce bar
   parseAddress t = PPC32Address <$> mcParseAddress32 t
   prettyAddress (PPC32Address addr) = mcPrettyAddress addr
   prettyInstruction _ (PPC32Instruction i) = mcPrettyInstruction i
-  containingBlocks (PPC32AnalysisResult bar) (PPC32Address addr) =
+  containingBlocks (AnalysisResult (PPC32AnalysisResult bar) _) (PPC32Address addr) =
     mcContainingBlocks (toBlockPPC32 bar) bar addr
-  functions (PPC32AnalysisResult bar) = mcFunctions PPC32Address bar
+  functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
   opcode (PPC32Instruction i) =
     case PPC.toInst i of
       DPPC.Instruction opc _ -> PPC32Opcode opc
@@ -246,12 +267,12 @@ instance Architecture PPC.PPC32 s where
   prettyOperand (PPC32Address addr) (PPC32Operand op) =
     ppcPrettyOperand addr op
   prettyOpcode (PPC32Opcode opc) = T.pack (show opc)
-  genericSemantics (PPC32AnalysisResult ares) (PPC32Instruction i) =
+  genericSemantics (AnalysisResult (PPC32AnalysisResult ares) _) (PPC32Instruction i) =
     case PPC.toInst i of
       DPPC.Instruction opc _ -> do
         formulas <- rSemantics ares
         ParameterizedFormula (HR.typeRepr opc) <$> MapF.lookup opc formulas
-  functionBlocks (PPC32AnalysisResult ares) fh =
+  functionBlocks (AnalysisResult (PPC32AnalysisResult ares) _) fh =
     let PPC32Address addr0 = fhAddress fh
         addr1 = MM.addrOffset addr0
         addr2 = R.concreteFromAbsolute addr1
@@ -266,22 +287,28 @@ instance Ord (Address PPC.PPC32 s) where
 instance Show (Address PPC.PPC32 s) where
   show (PPC32Address a) = show a
 
+instance NFData (Address PPC.PPC32 s) where
+  rnf (PPC32Address a) = a `seq` ()
+
+instance NFData (Instruction PPC.PPC32 s) where
+  rnf (PPC32Instruction i) = i `seq` ()
+
 instance Architecture PPC.PPC64 s where
-  data AnalysisResult PPC.PPC64 s =
+  data ArchResult PPC.PPC64 s =
     PPC64AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64)
   data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction ())
   data Operand PPC.PPC64 s = forall x . PPC64Operand !(DPPC.Operand x)
   data Opcode PPC.PPC64 s = forall x y . PPC64Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC64 s = PPC64Address !(MM.MemAddr 64)
 
-  summarizeResult (PPC64AnalysisResult bar) = mcSummarize bar
-  archNonce (PPC64AnalysisResult bar) = mcNonce bar
+  summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
+  archNonce (AnalysisResult (PPC64AnalysisResult bar) _) = mcNonce bar
   parseAddress t = PPC64Address <$> mcParseAddress64 t
   prettyAddress (PPC64Address addr) = mcPrettyAddress addr
   prettyInstruction _ (PPC64Instruction i) = mcPrettyInstruction i
-  containingBlocks (PPC64AnalysisResult bar) (PPC64Address addr) =
+  containingBlocks (AnalysisResult (PPC64AnalysisResult bar) _) (PPC64Address addr) =
     mcContainingBlocks (toBlockPPC64 bar) bar addr
-  functions (PPC64AnalysisResult bar) = mcFunctions PPC64Address bar
+  functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
   opcode (PPC64Instruction i) =
     case PPC.toInst i of
       DPPC.Instruction opc _ -> PPC64Opcode opc
@@ -292,12 +319,12 @@ instance Architecture PPC.PPC64 s where
   prettyOperand (PPC64Address addr) (PPC64Operand op) =
     ppcPrettyOperand addr op
   prettyOpcode (PPC64Opcode opc) = T.pack (show opc)
-  genericSemantics (PPC64AnalysisResult ares) (PPC64Instruction i) =
+  genericSemantics (AnalysisResult (PPC64AnalysisResult ares) _) (PPC64Instruction i) =
     case PPC.toInst i of
       DPPC.Instruction opc _ -> do
         formulas <- rSemantics ares
         ParameterizedFormula (HR.typeRepr opc) <$> MapF.lookup opc formulas
-  functionBlocks (PPC64AnalysisResult ares) fh =
+  functionBlocks (AnalysisResult (PPC64AnalysisResult ares) _) fh =
     let PPC64Address addr0 = fhAddress fh
         addr1 = MM.addrOffset addr0
         addr2 = R.concreteFromAbsolute addr1
@@ -312,32 +339,38 @@ instance Ord (Address PPC.PPC64 s) where
 instance Show (Address PPC.PPC64 s) where
   show (PPC64Address a) = show a
 
+instance NFData (Address PPC.PPC64 s) where
+  rnf (PPC64Address a) = a `seq` ()
+
+instance NFData (Instruction PPC.PPC64 s) where
+  rnf (PPC64Instruction i) = i `seq` ()
+
 instance Architecture X86.X86_64 s where
-  data AnalysisResult X86.X86_64 s =
+  data ArchResult X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.X86_64)
   data Instruction X86.X86_64 s = X86Instruction (X86.Instruction ())
   data Operand X86.X86_64 s = X86Operand FD.Value FD.OperandType
   data Opcode X86.X86_64 s = X86Opcode String
   data Address X86.X86_64 s = X86Address (MM.MemAddr 64)
 
-  summarizeResult (X86AnalysisResult bar) = mcSummarize bar
-  archNonce (X86AnalysisResult bar) = mcNonce bar
+  summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
+  archNonce (AnalysisResult (X86AnalysisResult bar) _) = mcNonce bar
   parseAddress t = X86Address <$> mcParseAddress64 t
   prettyAddress (X86Address addr) = mcPrettyAddress addr
   opcode (X86Instruction i) = X86Opcode (X86.instrOpcode i)
   operands (X86Instruction i) = map (uncurry X86Operand) (X86.instrOperands i)
   boundValue _ = Nothing
   genericSemantics _ _ = Nothing
-  functions (X86AnalysisResult bar) = mcFunctions X86Address bar
+  functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
   prettyOpcode (X86Opcode s) = T.pack s
   prettyOperand (X86Address addr) (X86Operand v _) =
     let waddr = fromIntegral (MM.addrOffset addr)
     in T.pack (show (ppValue waddr v))
   prettyInstruction (X86Address addr) (X86Instruction i) =
     T.pack (show (FD.ppInstruction (fromIntegral (MM.addrOffset addr)) (X86.toFlexInst i)))
-  containingBlocks (X86AnalysisResult bar) (X86Address addr) =
+  containingBlocks (AnalysisResult (X86AnalysisResult bar) _) (X86Address addr) =
     mcContainingBlocks (toBlockX86 bar) bar addr
-  functionBlocks (X86AnalysisResult ares) fh =
+  functionBlocks (AnalysisResult (X86AnalysisResult ares) _) fh =
     let X86Address addr0 = fhAddress fh
         addr1 = MM.addrOffset addr0
         addr2 = R.concreteFromAbsolute addr1
@@ -352,6 +385,12 @@ instance Ord (Address X86.X86_64 s) where
 
 instance Show (Address X86.X86_64 s) where
   show (X86Address a) = show a
+
+instance NFData (Address X86.X86_64 s) where
+  rnf (X86Address a) = a `seq` ()
+
+instance NFData (Instruction X86.X86_64 s) where
+  rnf (X86Instruction i) = i `seq` ()
 
 -- This whole bit is unfortunate - we can probably export ppValue from flexdis
 ppShowReg :: Show r => r -> HPJ.Doc

@@ -244,9 +244,8 @@ stateFromAnalysisResult s0 ares newDiags state uiMode =
                Just (oldArchState { C.sAnalysisResult = ares })
              | otherwise -> do
                  defFunc <- listToMaybe (C.functions ares)
-                 b0 <- listToMaybe (C.functionBlocks ares defFunc)
                  let uiState = BrickUIState { sBlockSelector = BS.emptyBlockSelector
-                                            , sBlockViewer = BV.blockViewer (BlockViewerList 0) b0
+                                            , sBlockViewer = BV.emptyBlockViewer
                                             , sFunctionViewer = FV.functionViewer defFunc ares
                                             , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
                                             }

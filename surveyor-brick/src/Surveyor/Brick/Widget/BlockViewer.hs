@@ -12,8 +12,10 @@
 -- * Symbolically simulating a range of instructions into a single formula
 module Surveyor.Brick.Widget.BlockViewer (
   BlockViewer,
+  emptyBlockViewer,
   blockViewer,
   blockViewerBlockL,
+  asBlockViewer,
   handleBlockViewerEvent,
   renderBlockViewer
   ) where
@@ -23,8 +25,9 @@ import           GHC.Generics ( Generic )
 import qualified Brick as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
-import           Control.Lens ( Lens', (^.), (&), (.~), (%~), _2, _3, ix, (^?) )
+import           Control.Lens ( Prism', Lens', (^.), (&), (.~), (%~), _2, _3, ix, (^?) )
 import qualified Data.Generics.Product as GL
+import qualified Data.Generics.Sum as GS
 import qualified Data.List as L
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Vector as V
@@ -34,72 +37,88 @@ import           Text.Printf ( printf )
 import qualified Surveyor.Core as C
 import           Surveyor.Brick.Names ( Names(..) )
 
-data BlockViewer arch s =
-  BlockViewer { bvBlock :: !(C.Block arch s)
-              , instructionList :: !(B.List Names (C.Address arch s, C.Instruction arch s, OperandSelector arch s))
-              }
+data BlockViewer arch s = NoBlock
+                        | BlockViewer (MkBlockViewer arch s)
+                        deriving (Generic)
+
+data MkBlockViewer arch s =
+  MkBlockViewer { bvBlock :: !(C.Block arch s)
+                , instructionList :: !(B.List Names (C.Address arch s, C.Instruction arch s, OperandSelector arch s))
+                }
   deriving (Generic)
 
-instructionListL :: Lens' (BlockViewer arch s) (B.List Names (C.Address arch s, C.Instruction arch s, OperandSelector arch s))
+asBlockViewer :: Prism' (BlockViewer arch s) (MkBlockViewer arch s)
+asBlockViewer = GS._Ctor @"BlockViewer"
+
+instructionListL :: Lens' (MkBlockViewer arch s) (B.List Names (C.Address arch s, C.Instruction arch s, OperandSelector arch s))
 instructionListL = GL.field @"instructionList"
 
-blockViewerBlockL :: Lens' (BlockViewer arch s) (C.Block arch s)
+blockViewerBlockL :: Lens' (MkBlockViewer arch s) (C.Block arch s)
 blockViewerBlockL = GL.field @"bvBlock"
+
+-- I really want this, but can't figure out the type:
+--
+-- > realBlockViewerL = asBlockViewer . blockViewerBlockL
+
+emptyBlockViewer :: BlockViewer arch s
+emptyBlockViewer = NoBlock
 
 blockViewer :: (C.Architecture arch s) => Names -> C.Block arch s -> BlockViewer arch s
 blockViewer n b =
-  BlockViewer { bvBlock = b
-              , instructionList = B.list n (V.fromList insns) 1
-              }
+  BlockViewer MkBlockViewer { bvBlock = b
+                            , instructionList = B.list n (V.fromList insns) 1
+                            }
   where
     insns = [ (a, i, operandSelector a i)
             | (a, i) <- C.blockInstructions b
             ]
 
 handleBlockViewerEvent :: V.Event -> BlockViewer arch s -> B.EventM Names (BlockViewer arch s)
-handleBlockViewerEvent evt bv =
+handleBlockViewerEvent _ NoBlock = return NoBlock
+handleBlockViewerEvent evt (BlockViewer bv) =
   case evt of
     V.EvKey V.KEsc [] ->
-      return $ bv & instructionListL . B.listSelectedL .~ Nothing
+      return $ BlockViewer $ bv & instructionListL . B.listSelectedL .~ Nothing
     V.EvKey (V.KChar 'n') [V.MCtrl] ->
       case bv ^. instructionListL . B.listSelectedL of
-        Nothing -> return $ bv & instructionListL %~ B.listMoveDown
+        Nothing -> return $ BlockViewer $ bv & instructionListL %~ B.listMoveDown
         Just i ->
-          return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
-                      & instructionListL %~ B.listMoveDown
+          return $ BlockViewer $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
+                                    & instructionListL %~ B.listMoveDown
     V.EvKey V.KDown [] ->
       case bv ^. instructionListL . B.listSelectedL of
-        Nothing -> return $ bv & instructionListL %~ B.listMoveDown
+        Nothing -> return $ BlockViewer $ bv & instructionListL %~ B.listMoveDown
         Just i ->
-          return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
-                      & instructionListL %~ B.listMoveDown
+          return $ BlockViewer $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
+                                    & instructionListL %~ B.listMoveDown
     V.EvKey (V.KChar 'p') [V.MCtrl] ->
       case bv ^. instructionListL . B.listSelectedL of
-        Nothing -> return $ bv & instructionListL %~ B.listMoveUp
+        Nothing -> return $ BlockViewer $ bv & instructionListL %~ B.listMoveUp
         Just i ->
-          return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
-                      & instructionListL %~ B.listMoveUp
+          return $ BlockViewer $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
+                                    & instructionListL %~ B.listMoveUp
     V.EvKey V.KUp [] ->
       case bv ^. instructionListL . B.listSelectedL of
-        Nothing -> return $ bv & instructionListL %~ B.listMoveUp
+        Nothing -> return $ BlockViewer $ bv & instructionListL %~ B.listMoveUp
         Just i ->
-          return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
-                      & instructionListL %~ B.listMoveUp
+          return $ BlockViewer $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorReset
+                                    & instructionListL %~ B.listMoveUp
     V.EvKey V.KLeft [] ->
       case bv ^. instructionListL . B.listSelectedL of
-        Nothing -> return bv
-        Just i -> return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorPrevious
+        Nothing -> return (BlockViewer bv)
+        Just i -> return $ BlockViewer $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorPrevious
     V.EvKey V.KRight [] ->
       case bv ^. instructionListL . B.listSelectedL of
-        Nothing -> return bv
-        Just i -> return $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorNext
-    _ -> return bv
+        Nothing -> return (BlockViewer bv)
+        Just i -> return $ BlockViewer $ bv & instructionListL . B.listElementsL . ix i . _3 %~ operandSelectorNext
+    _ -> return (BlockViewer bv)
 
 renderBlockViewer :: (C.Architecture arch s)
                   => C.AnalysisResult arch s
                   -> BlockViewer arch s
                   -> B.Widget Names
-renderBlockViewer ares bv =
+renderBlockViewer _ NoBlock = B.txt "No block"
+renderBlockViewer ares (BlockViewer bv) =
   B.borderWithLabel header $
   B.hBox [ B.renderList renderListItem False (instructionList bv)
          , B.hLimit 20 semanticsDisplay

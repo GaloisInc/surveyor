@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -9,12 +10,19 @@
 module Surveyor.Core.Architecture.Class (
   Architecture(..),
   SomeResult(..),
+  ResultIndex(..),
+  AnalysisResult(..),
   ParameterizedFormula(..),
   prettyParameterizedFormula,
   Block(..),
-  FunctionHandle(..)
+  FunctionHandle(..),
+  ArchConstraints
   ) where
 
+import           GHC.Generics ( Generic )
+
+import           Control.DeepSeq ( NFData, rnf, deepseq )
+import qualified Control.Once as O
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 
@@ -25,12 +33,39 @@ import qualified Lang.Crucible.Backend.Simple as SB
 data SomeResult s arch where
   SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s arch
 
+instance NFData (SomeResult s arch) where
+  rnf (SomeResult ar) = ar `deepseq` ()
+
+-- | The 'ResultIndex' is a type that we use to pre-compute as much as we can
+-- when we produce an analysis result (i.e., on another thread) so that we can
+-- start consulting it from the event handler thread without incurring a huge
+-- cost.
+data ResultIndex arch s =
+  ResultIndex { riFunctions :: [FunctionHandle arch s]
+              , riSummary :: [(T.Text, T.Text)]
+              }
+  deriving (Generic)
+
+instance (ArchConstraints arch s) => NFData (ResultIndex arch s)
+
+data AnalysisResult arch s =
+  AnalysisResult { archResult :: ArchResult arch s
+                 , resultIndex :: !(O.Once (ResultIndex arch s))
+                 }
+
+-- We only force the 'ResultIndex', as we can't really force the 'ArchResult'
+-- due to missing instances (and likely too much work)
+instance NFData (AnalysisResult arch s) where
+  rnf (AnalysisResult _ idx) = idx `deepseq` ()
+
 type ArchConstraints arch s = (Eq (Address arch s),
                                Ord (Address arch s),
-                               Show (Address arch s))
+                               Show (Address arch s),
+                               NFData (Address arch s),
+                               NFData (Instruction arch s))
 
 class (ArchConstraints arch s) => Architecture (arch :: *) (s :: *) where
-  data AnalysisResult arch s :: *
+  data ArchResult arch s :: *
   data Instruction arch s :: *
   data Operand arch s :: *
   data Opcode arch s :: *
@@ -70,12 +105,17 @@ data Block arch s =
   Block { blockAddress :: !(Address arch s)
         , blockInstructions :: [(Address arch s, Instruction arch s)]
         }
+  deriving (Generic)
+
+instance (NFData (Address arch s), NFData (Instruction arch s)) => NFData (Block arch s)
 
 -- | A description of a function suitable for looking up the function definition
--- in the 'AnalysisResult' for the architecture
+-- in the 'ArchResult' for the architecture
 data FunctionHandle arch s =
   FunctionHandle { fhAddress :: !(Address arch s)
                  , fhName :: T.Text
                  }
+  deriving (Generic)
 
 deriving instance (Show (Address arch s)) => Show (FunctionHandle arch s)
+instance (NFData (Address arch s)) => NFData (FunctionHandle arch s)

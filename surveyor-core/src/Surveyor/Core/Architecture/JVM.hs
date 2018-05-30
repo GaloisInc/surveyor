@@ -12,7 +12,9 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Surveyor.Core.Architecture.JVM ( mkJVMResult ) where
 
+import           Control.DeepSeq ( NFData, rnf )
 import           Control.Monad ( guard )
+import qualified Control.Once as O
 import qualified Data.Foldable as F
 import           Data.Int ( Int16, Int32 )
 import qualified Data.Map.Strict as M
@@ -47,7 +49,9 @@ mkJVMResult :: NG.Nonce s JVM
             -- ^ Newly-discovered classes to add to the old result
             -> AnalysisResult JVM s
 mkJVMResult nonce jr oldRes newClasses =
-  JVMAnalysisResult r1
+  AnalysisResult { archResult = JVMAnalysisResult r1
+                 , resultIndex = indexResult r1
+                 }
   where
     r0 = JVMResult { jvmNonce = nonce
                    , jvmJarReader = jr
@@ -60,8 +64,15 @@ mkJVMResult nonce jr oldRes newClasses =
            }
     indexMethods idx m = M.insert (J.methodKey m) m idx
 
+indexResult :: JVMResult s -> O.Once (ResultIndex JVM s)
+indexResult r = O.once ri
+  where
+    ri = ResultIndex { riFunctions = jvmFunctions r
+                     , riSummary = jvmSummarize r
+                     }
+
 unwrapAnalysis :: AnalysisResult JVM s -> JVMResult s
-unwrapAnalysis (JVMAnalysisResult r) = r
+unwrapAnalysis (AnalysisResult (JVMAnalysisResult r) _) = r
 
 data AddrType = ClassK | MethodK | BlockK | InsnK
 
@@ -78,6 +89,10 @@ instance Ord (Addr addrTy) where
   compare a1 a2 = toOrdering (compareF a1 a2)
 
 deriving instance Show (Addr addrTy)
+
+-- FIXME: This requires a change to the JVM parser to add a real NFData instance
+instance NFData (Instruction JVM s) where
+  rnf (JVMInstruction i) = i `seq` ()
 
 -- | Operands for JVM instructions
 --
@@ -98,13 +113,13 @@ data JVMOperand' = LocalVariableIndex !J.LocalVariableIndex
                  | PCList [J.PC]
 
 instance Architecture JVM s where
-  data AnalysisResult JVM s = JVMAnalysisResult (JVMResult s)
+  data ArchResult JVM s = JVMAnalysisResult (JVMResult s)
   data Address JVM s = forall addrTy . JVMAddress (Addr addrTy)
   data Operand JVM s = JVMOperand JVMOperand'
   data Opcode JVM s = JVMOpcode J.Instruction
   data Instruction JVM s = JVMInstruction J.Instruction
 
-  archNonce (JVMAnalysisResult r) = jvmNonce r
+  archNonce (AnalysisResult (JVMAnalysisResult r) _) = jvmNonce r
   prettyInstruction _ (JVMInstruction i) = T.pack (show (J.ppInstruction i))
   prettyOpcode (JVMOpcode i) = ppOpcode i
   prettyOperand (JVMAddress _) (JVMOperand op) = ppOperand op
@@ -114,15 +129,9 @@ instance Architecture JVM s where
   boundValue _ = Nothing
   opcode (JVMInstruction i) = JVMOpcode i
   operands (JVMInstruction i) = jvmOperands i
-  functions (JVMAnalysisResult r) =
-    [ FunctionHandle (JVMAddress methodAddr) name
-    | (klass, methods) <- M.elems (jvmClassIndex r)
-    , let classAddr = ClassAddr (J.className klass)
-    , m <- M.elems methods
-    , let methodAddr = MethodAddr classAddr (J.methodKey m)
-    , let name = T.pack (J.methodName m)
-    ]
-  functionBlocks (JVMAnalysisResult r) (FunctionHandle (JVMAddress addr) _) =
+  functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
+
+  functionBlocks (AnalysisResult (JVMAnalysisResult r) _) (FunctionHandle (JVMAddress addr) _) =
     case addr of
       maddr@(MethodAddr (ClassAddr klassName) mkey) -> fromMaybe [] $ do
         (_, midx) <- M.lookup klassName (jvmClassIndex r)
@@ -133,12 +142,22 @@ instance Architecture JVM s where
           J.AbstractMethod -> Nothing
           J.NativeMethod -> Nothing
       _ -> []
-  summarizeResult (JVMAnalysisResult r) = jvmSummarize r
+  summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
 
   -- TODO
   containingBlocks _ _ = []
   genericSemantics _ _ = Nothing
   parseAddress _ = Nothing
+
+jvmFunctions :: JVMResult s -> [FunctionHandle JVM s]
+jvmFunctions r =
+  [ FunctionHandle (JVMAddress methodAddr) name
+  | (klass, methods) <- M.elems (jvmClassIndex r)
+  , let classAddr = ClassAddr (J.className klass)
+  , m <- M.elems methods
+  , let methodAddr = MethodAddr classAddr (J.methodKey m)
+  , let name = T.pack (J.methodName m)
+  ]
 
 jvmSummarize :: JVMResult s -> [(T.Text, T.Text)]
 jvmSummarize jr =
@@ -486,6 +505,9 @@ instance Ord (Address JVM s) where
 
 instance Show (Address JVM s) where
   show (JVMAddress a) = show a
+
+instance NFData (Address JVM s) where
+  rnf (JVMAddress a) = a `seq` ()
 
 instance TestEquality Addr where
   testEquality a1 a2 =

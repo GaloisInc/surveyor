@@ -15,6 +15,7 @@ module Surveyor.Core (
   CL.asynchronouslyLoadJAR,
   CL.asynchronouslyLoadLLVM,
   -- ** Program representation
+  CA.AnalysisResult,
   CA.Architecture(..),
   CA.Block(..),
   CA.FunctionHandle(..),
