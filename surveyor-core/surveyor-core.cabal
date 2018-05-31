@@ -22,6 +22,7 @@ library
                        Surveyor.Core.Architecture.MC
                        Surveyor.Core.Architecture.Void
                        Surveyor.Core.Arguments
+                       Surveyor.Core.Async
                        Surveyor.Core.BinaryAnalysisResult
                        Surveyor.Core.Chan
                        Surveyor.Core.Command

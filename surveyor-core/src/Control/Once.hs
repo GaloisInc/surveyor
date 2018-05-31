@@ -6,7 +6,7 @@ module Control.Once (
 
 import Control.DeepSeq
 
-data Once a = Once () a
+data Once a = Once !() !a
 
 runOnce :: Once a -> a
 runOnce (Once _ a) = a

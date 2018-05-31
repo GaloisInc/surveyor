@@ -9,7 +9,6 @@ import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Control.Once as O
 import qualified Data.Foldable as F
-import           Data.Maybe ( listToMaybe )
 import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
@@ -85,17 +84,20 @@ handleVtyEvent s0@(C.State s) evt
       | otherwise -> B.continue s0
     C.SomeUIMode _m -> B.continue s0
 
-handleCustomEvent :: (C.Architecture arch s) => C.S BrickUIExtension BrickUIState arch s -> C.Events s (C.S BrickUIExtension BrickUIState) -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
+handleCustomEvent :: (C.Architecture arch s)
+                  => C.S BrickUIExtension BrickUIState arch s
+                  -> C.Events s (C.S BrickUIExtension BrickUIState)
+                  -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
 handleCustomEvent s0 evt =
   case evt of
-    C.AnalysisFinished (C.SomeResult bar) diags ->
+    C.AnalysisFinished (C.SomeResult bar) diags -> do
       let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
           notification = "Finished loading file"
-          s1 = stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) C.Ready (C.SomeUIMode C.Diags)
-      in B.continue (C.State s1)
-    C.AnalysisProgress (C.SomeResult bar) ->
-      let s1 = stateFromAnalysisResult s0 bar Seq.empty C.Loading (C.sUIMode s0)
-      in B.continue (C.State s1)
+      s1 <- liftIO $ stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) C.Ready (C.SomeUIMode C.Diags)
+      B.continue (C.State s1)
+    C.AnalysisProgress (C.SomeResult bar) -> do
+      s1 <- liftIO $ stateFromAnalysisResult s0 bar Seq.empty C.Loading (C.sUIMode s0)
+      B.continue (C.State s1)
     C.AnalysisFailure exn -> do
       liftIO (C.sEmitEvent s0 (C.LogDiagnostic (T.pack ("Analysis failure: " ++ show exn))))
       B.continue $! C.State s0
@@ -217,7 +219,7 @@ handleCustomEvent s0 evt =
       B.continue $! C.State (s0 & C.lDiagnosticLog %~ (Seq.|> t))
 
     -- We discard async state updates if the type of the state has changed in
-    -- the interim
+    -- the interim (i.e., if another binary has been loaded)
     C.AsyncStateUpdate archNonce nfVal upd
       | Just oldNonce <- s0 ^? C.lArchState ._Just . C.lNonce
       , Just Refl <- testEquality oldNonce archNonce ->
@@ -234,36 +236,53 @@ stateFromAnalysisResult :: (C.Architecture arch s)
                         -> Seq.Seq T.Text
                         -> C.AppState
                         -> C.SomeUIMode
-                        -> C.S BrickUIExtension BrickUIState arch s
-stateFromAnalysisResult s0 ares newDiags state uiMode =
-  C.S { C.sDiagnosticLog = C.sDiagnosticLog s0 <> newDiags
-      , C.sUIMode = uiMode
-      , C.sAppState = state
-      , C.sEmitEvent = C.sEmitEvent s0
-      , C.sEventChannel = C.sEventChannel s0
-      , C.sNonceGenerator = C.sNonceGenerator s0
-      , C.sEchoArea = C.sEchoArea s0
-      , C.sInputFile = C.sInputFile s0
-      , C.sLoader = C.sLoader s0
-      , C.sKeymap = C.defaultKeymap
-      , C.sUIExtension = uiExt
-      , C.sArchState =
-        case () of
-          () | Just oldArchState <- C.sArchState s0
-             , Just Refl <- testEquality (C.sNonce oldArchState) (C.archNonce ares) ->
-               Just (oldArchState { C.sAnalysisResult = ares })
-             | otherwise -> do
-                 defFunc <- listToMaybe (C.functions ares)
-                 let uiState = BrickUIState { sBlockSelector = BS.emptyBlockSelector
-                                            , sBlockViewer = BV.emptyBlockViewer
-                                            , sFunctionViewer = FV.functionViewer defFunc ares
-                                            , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                            }
-                 return C.ArchState { C.sAnalysisResult = ares
-                                    , C.sNonce = C.archNonce ares
-                                    , C.sUIState = uiState
-                                    }
-      }
+                        -> IO (C.S BrickUIExtension BrickUIState arch s)
+stateFromAnalysisResult s0 ares newDiags state uiMode = do
+  case () of
+    () | Just oldArchState <- C.sArchState s0
+       , Just Refl <- testEquality (C.sNonce oldArchState) (C.archNonce ares) -> return ()
+       | otherwise -> do
+           -- When we get a new binary (and have a fresh state), queue up a
+           -- default function to view (the first function we found).
+           --
+           -- We have to do this in a separate thread, as constructing the
+           -- function viewer can be a bit expensive (since we are translating
+           -- the function on-demand).
+           --
+           -- If there is no function, then just don't do anything.
+           case C.functions ares of
+             [] -> return ()
+             defFunc : _ -> do
+               let upd newV x = x & C.lArchState . _Just . lFunctionViewer .~ newV
+               C.asynchronously (C.archNonce ares) (C.sEmitEvent s0) upd $ do
+                 return (FV.functionViewer defFunc ares)
+  return C.S { C.sDiagnosticLog = C.sDiagnosticLog s0 <> newDiags
+             , C.sUIMode = uiMode
+             , C.sAppState = state
+             , C.sEmitEvent = C.sEmitEvent s0
+             , C.sEventChannel = C.sEventChannel s0
+             , C.sNonceGenerator = C.sNonceGenerator s0
+             , C.sEchoArea = C.sEchoArea s0
+             , C.sInputFile = C.sInputFile s0
+             , C.sLoader = C.sLoader s0
+             , C.sKeymap = C.defaultKeymap
+             , C.sUIExtension = uiExt
+             , C.sArchState =
+               case () of
+                 () | Just oldArchState <- C.sArchState s0
+                    , Just Refl <- testEquality (C.sNonce oldArchState) (C.archNonce ares) ->
+                      Just (oldArchState { C.sAnalysisResult = ares })
+                    | otherwise -> do
+                        let uiState = BrickUIState { sBlockSelector = BS.emptyBlockSelector
+                                                   , sBlockViewer = BV.emptyBlockViewer
+                                                   , sFunctionViewer = FV.emptyFunctionViewer
+                                                   , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                                   }
+                        return C.ArchState { C.sAnalysisResult = ares
+                                           , C.sNonce = C.archNonce ares
+                                           , C.sUIState = uiState
+                                           }
+             }
   where
     addrParser s = C.SomeAddress (C.archNonce ares) <$> C.parseAddress s
     uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList "M-x" C.allCommands

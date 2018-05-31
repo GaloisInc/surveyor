@@ -16,6 +16,7 @@ module Surveyor.Core (
   CL.asynchronouslyLoadLLVM,
   -- ** Program representation
   CA.AnalysisResult,
+  CA.ArchConstraints,
   CA.Architecture(..),
   CA.Block(..),
   CA.FunctionHandle(..),
@@ -24,6 +25,7 @@ module Surveyor.Core (
   CA.SomeResult(..),
   -- * State
   module Surveyor.Core.State,
+  CAS.asynchronously,
   -- ** Modes
   M.UIMode(..),
   M.UIKind,
@@ -70,6 +72,7 @@ import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.Arguments as AR
+import qualified Surveyor.Core.Async as CAS
 import qualified Surveyor.Core.Chan as CS
 import qualified Surveyor.Core.Command as CC
 import           Surveyor.Core.Commands

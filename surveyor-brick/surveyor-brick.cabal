@@ -29,6 +29,7 @@ library
   -- other-modules:       
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
+                       deepseq,
                        containers,
                        async,
                        bytestring,

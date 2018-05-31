@@ -56,7 +56,7 @@ data Events st s where
   -- Apply an arbitrary state update based on some value that has been computed
   -- asynchronously (to avoid blocking the event loop with an expensive
   -- computation).
-  AsyncStateUpdate :: PN.Nonce s arch -> O.Once a -> (a -> st arch s -> st arch s) -> Events s st
+  AsyncStateUpdate :: PN.Nonce s arch -> !(O.Once a) -> (a -> st arch s -> st arch s) -> Events s st
 
   -- Exit
   Exit :: Events s st

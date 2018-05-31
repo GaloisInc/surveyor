@@ -14,6 +14,7 @@
 -- different architectures, building up abstractions over functions, blocks,
 -- instructions, and operands.
 module Surveyor.Core.Architecture (
+  ArchConstraints,
   Architecture(..),
   AnalysisResult,
   Block(..),

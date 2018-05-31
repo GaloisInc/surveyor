@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -25,6 +26,7 @@ import           GHC.Generics ( Generic )
 import qualified Brick as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
+import           Control.DeepSeq ( NFData, rnf, deepseq )
 import           Control.Lens ( Prism', Lens', (^.), (&), (.~), (%~), _2, _3, ix, (^?) )
 import qualified Data.Generics.Product as GL
 import qualified Data.Generics.Sum as GS
@@ -41,11 +43,16 @@ data BlockViewer arch s = NoBlock
                         | BlockViewer (MkBlockViewer arch s)
                         deriving (Generic)
 
+instance (C.ArchConstraints arch s) => NFData (BlockViewer arch s)
+
 data MkBlockViewer arch s =
   MkBlockViewer { bvBlock :: !(C.Block arch s)
                 , instructionList :: !(B.List Names (C.Address arch s, C.Instruction arch s, OperandSelector arch s))
                 }
   deriving (Generic)
+
+instance (C.ArchConstraints arch s) => NFData (MkBlockViewer arch s) where
+  rnf bv = bvBlock bv `deepseq` ()
 
 asBlockViewer :: Prism' (BlockViewer arch s) (MkBlockViewer arch s)
 asBlockViewer = GS._Ctor @"BlockViewer"
