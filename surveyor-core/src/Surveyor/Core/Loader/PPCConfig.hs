@@ -20,7 +20,6 @@ import qualified Data.Parameterized.TraversableF as TF
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
-import qualified Data.Text as T
 
 import qualified Data.Parameterized.HasRepr as HR
 import qualified Lang.Crucible.Backend.Simple as SB
@@ -92,7 +91,8 @@ mkLogCfg customEventChan = do
   _ <- CA.async (SL.consumeUntilEnd (const True) (translateMessage customEventChan) lcfg)
   return lcfg
 
+-- | Drop the log messages from semmc
 translateMessage :: C.Chan (Events s st) -> SL.LogEvent -> IO ()
-translateMessage customEventChan evt =
-  C.writeChan customEventChan (LogDiagnostic (T.pack (SL.prettyLogEvent evt)))
+translateMessage _customEventChan _evt =
+  return ()
 
