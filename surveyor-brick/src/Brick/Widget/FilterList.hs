@@ -18,6 +18,7 @@ import qualified Brick as B
 import qualified Brick.Widgets.Edit as B
 import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
+import           Control.Monad ( guard )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Text.Zipper as Z
 import qualified Data.Text.Zipper.Generic as ZG
@@ -129,6 +130,7 @@ handleFilterListEvent listUpdater evt fl =
 selectedItem :: FilterList n t e -> Maybe e
 selectedItem fl = do
   idx <- matchingItems fl L.^. B.listSelectedL
+  guard (idx <= V.length (matchingItems fl L.^. B.listElementsL))
   return ((matchingItems fl L.^. B.listElementsL ) V.! idx)
 
 -- | Extract the current contents of the editor widget
