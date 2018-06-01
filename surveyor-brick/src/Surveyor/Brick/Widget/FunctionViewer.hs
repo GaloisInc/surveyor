@@ -25,12 +25,14 @@ import qualified Brick as B
 import qualified Brick.Widgets.Border.Style as BS
 import           Control.DeepSeq ( NFData, rnf, deepseq )
 import           Control.Lens ( Lens', Prism', (^.), (^?), (&), (%~), (.~) )
+import qualified Control.Lens as L
 import qualified Data.Foldable as F
 import qualified Data.Generics.Product as GL
 import qualified Data.Generics.Sum as GS
 import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
+import qualified Data.Vector as V
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core as C
@@ -48,7 +50,7 @@ data MkFunctionViewer arch s =
                  -- ^ A pointer to the function being displayed
                  , analysisResult :: C.AnalysisResult arch s
                  -- ^ The analysis result to find blocks in
-                 , funcBlocks :: [BV.BlockViewer arch s]
+                 , funcBlocks :: V.Vector (BV.BlockViewer arch s)
                  -- ^ The blocks in the function
                  , focusedBlock :: Maybe Int
                  -- ^ The currently-focused block, if any (an index into the list of funcBlocks)
@@ -70,6 +72,9 @@ asFunctionViewer = GS._Ctor @"FunctionViewer"
 focusedBlockL :: Lens' (MkFunctionViewer arch s) (Maybe Int)
 focusedBlockL = GL.field @"focusedBlock"
 
+funcBlocksL :: Lens' (MkFunctionViewer arch s) (V.Vector (BV.BlockViewer arch s))
+funcBlocksL = GL.field @"funcBlocks"
+
 emptyFunctionViewer :: FunctionViewer arch s
 emptyFunctionViewer = NoFunction
 
@@ -80,7 +85,7 @@ functionViewer :: (Ord (C.Address arch s), C.Architecture arch s)
 functionViewer fh ar =
   FunctionViewer MkFunctionViewer { funcHandle = fh
                                   , analysisResult = ar
-                                  , funcBlocks = blockViewers
+                                  , funcBlocks = V.fromList blockViewers
                                   , focusedBlock = Nothing
                                   , blockMap = F.foldl' indexBlock M.empty blocks
                                   }
@@ -90,7 +95,6 @@ functionViewer fh ar =
     blocks = C.functionBlocks ar fh
     indexBlock m b = M.insert (C.blockAddress b) b m
 
--- FIXME: Before switching focus, revert the state of the underlying block viewer (if any)
 handleFunctionViewerEvent :: (C.Architecture arch s)
                           => V.Event
                           -> FunctionViewer arch s
@@ -99,14 +103,27 @@ handleFunctionViewerEvent _ NoFunction = return NoFunction
 handleFunctionViewerEvent evt fv0@(FunctionViewer fv) =
   case evt of
     V.EvKey V.KPageDown [] ->
-      return $ FunctionViewer $ fv & focusedBlockL %~ maybe (Just 0) (Just . min (length (funcBlocks fv) - 1) . (+1))
+      return $ FunctionViewer $ fv & focusedBlockL %~ maybe (Just 0) (Just . min (V.length (funcBlocks fv) - 1) . (+1))
+                                   & funcBlocksL .~ resetCurrentBlockViewer fv
     V.EvKey V.KPageUp [] ->
       return $ FunctionViewer $ fv & focusedBlockL %~ maybe (Just 0) (Just . max 0 . subtract 1)
+                                   & funcBlocksL .~ resetCurrentBlockViewer fv
     V.EvKey V.KEsc [] ->
       return $ FunctionViewer $ fv & focusedBlockL .~ Nothing
-    _ ->
-      -- FIXME: Pass other events down to the selected block
-      return fv0
+    _ | Just selIdx <- fv ^. focusedBlockL -> do
+          -- If we have a focused block, pass events down to the selected block
+          -- viewer to let the user select instructions for closer inspection.
+          let bv = funcBlocks fv V.! selIdx
+          bv' <- BV.handleBlockViewerEvent evt bv
+          let fv' = fv & funcBlocksL . L.ix selIdx .~ bv'
+          return $ FunctionViewer fv'
+      | otherwise -> return fv0
+
+resetCurrentBlockViewer :: MkFunctionViewer arch s -> V.Vector (BV.BlockViewer arch s)
+resetCurrentBlockViewer fv
+  | Just selIdx <- fv ^. focusedBlockL =
+      (fv ^. funcBlocksL) & L.ix selIdx %~ BV.resetBlockViewerState
+  | otherwise = fv ^. funcBlocksL
 
 renderFunctionViewer :: (C.Architecture arch s, Eq (C.Address arch s))
                      => FunctionViewer arch s
@@ -115,7 +132,7 @@ renderFunctionViewer NoFunction = B.txt (T.pack "No function")
 renderFunctionViewer (FunctionViewer fv) = blockList
 --  B.viewport FunctionViewport B.Both blockList
   where
-    blockList = B.vBox (map renderWithFocus (zip [0..] (funcBlocks fv)))
+    blockList = B.vBox (map renderWithFocus (zip [0..] (F.toList (funcBlocks fv))))
     renderWithFocus (idx, mb) =
       case mb ^? BV.asBlockViewer of
         Nothing -> B.emptyWidget

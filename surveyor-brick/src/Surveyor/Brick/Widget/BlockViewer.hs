@@ -17,6 +17,7 @@ module Surveyor.Brick.Widget.BlockViewer (
   blockViewer,
   blockViewerBlockL,
   asBlockViewer,
+  resetBlockViewerState,
   handleBlockViewerEvent,
   renderBlockViewer
   ) where
@@ -62,6 +63,13 @@ instructionListL = GL.field @"instructionList"
 
 blockViewerBlockL :: Lens' (MkBlockViewer arch s) (C.Block arch s)
 blockViewerBlockL = GL.field @"bvBlock"
+
+resetBlockViewerState :: BlockViewer arch s -> BlockViewer arch s
+resetBlockViewerState NoBlock = NoBlock
+resetBlockViewerState (BlockViewer bv) =
+  BlockViewer bv { instructionList = il' & B.listSelectedL .~ Nothing }
+  where
+    il' = fmap (\(a, b, os) -> (a, b, resetOperandSelector os)) (instructionList bv)
 
 -- I really want this, but can't figure out the type:
 --
@@ -167,6 +175,9 @@ data OperandSelector arch s =
                   , boundValue :: Maybe (C.Operand arch s)
                   }
   deriving (Generic)
+
+resetOperandSelector :: OperandSelector arch s -> OperandSelector arch s
+resetOperandSelector os = os { selectedIndex = Nothing }
 
 selectedIndexL :: Lens' (OperandSelector arch s) (Maybe Int)
 selectedIndexL = GL.field @"selectedIndex"
