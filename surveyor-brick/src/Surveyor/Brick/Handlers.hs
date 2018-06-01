@@ -7,7 +7,7 @@ module Surveyor.Brick.Handlers (
 import qualified Brick as B
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
 import           Control.Monad.IO.Class ( liftIO )
-import qualified Control.Once as O
+import qualified Control.NF as NF
 import qualified Data.Foldable as F
 import           Data.Monoid
 import           Data.Parameterized.Classes
@@ -223,7 +223,7 @@ handleCustomEvent s0 evt =
     C.AsyncStateUpdate archNonce nfVal upd
       | Just oldNonce <- s0 ^? C.lArchState ._Just . C.lNonce
       , Just Refl <- testEquality oldNonce archNonce ->
-          B.continue (C.State (upd (O.runOnce nfVal) s0))
+          B.continue (C.State (upd (NF.getNF nfVal) s0))
       | otherwise -> B.continue (C.State s0)
 
     C.Exit -> do

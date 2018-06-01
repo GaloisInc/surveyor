@@ -9,7 +9,7 @@ module Surveyor.Core.Async (
 import qualified Control.Concurrent.Async as A
 import           Control.DeepSeq ( NFData )
 import           Control.Monad ( void )
-import qualified Control.Once as O
+import qualified Control.NF as NF
 import qualified Data.Parameterized.Nonce as PN
 import qualified Surveyor.Core.Events as CE
 
@@ -26,4 +26,4 @@ asynchronously :: (NFData a)
 asynchronously nonce emit upd act = do
   void $ A.async $ do
     res <- act
-    emit $! CE.AsyncStateUpdate nonce (O.once res) upd
+    emit $! CE.AsyncStateUpdate nonce (NF.nf res) upd
