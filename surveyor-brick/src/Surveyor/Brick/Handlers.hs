@@ -82,6 +82,11 @@ handleVtyEvent s0@(C.State s) evt
           let s' = s & C.lArchState . _Just . lFunctionSelector .~ fsel'
           B.continue $! C.State s'
       | otherwise -> B.continue s0
+    C.SomeUIMode C.FunctionViewer
+      | Just fview <- s ^? C.lArchState . _Just . lFunctionViewer -> do
+          fview' <- FV.handleFunctionViewerEvent evt fview
+          let s' = s & C.lArchState . _Just . lFunctionViewer .~ fview'
+          B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
 handleCustomEvent :: (C.Architecture arch s)
