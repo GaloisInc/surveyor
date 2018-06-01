@@ -73,7 +73,7 @@ emptyBlockViewer = NoBlock
 blockViewer :: (C.Architecture arch s) => Names -> C.Block arch s -> BlockViewer arch s
 blockViewer n b =
   BlockViewer MkBlockViewer { bvBlock = b
-                            , instructionList = B.list n (V.fromList insns) 1
+                            , instructionList = B.list n (V.fromList insns) 1 & B.listSelectedL .~ Nothing
                             }
   where
     insns = [ (a, i, operandSelector a i)
