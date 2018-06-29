@@ -17,11 +17,9 @@ import qualified Control.DeepSeq as DS
 import qualified Control.Exception as X
 import           Control.Monad ( void )
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy.Char8 as LB8
 import qualified Data.ElfEdit as E
 import qualified Data.Foldable as F
 import qualified Data.List.Split as L
-import qualified Data.Map.Strict as M
 import           Data.Maybe ( catMaybes )
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
@@ -76,7 +74,7 @@ asynchronouslyLoadJAR ng customEventChan jarPath = do
   errThread <- A.async $ do
     worker <- A.async $ do
       jr <- J.newJarReader [jarPath]
-      let chunks = L.chunksOf 10 (M.keys (J.unJR jr))
+      let chunks = L.chunksOf 10 (J.jarClasses jr)
       lastRes <- F.foldlM (addJARChunk nonce jr) Nothing chunks
       let lastRes' = A.mkJVMResult nonce jr lastRes []
       C.writeChan customEventChan (AnalysisFinished (A.SomeResult lastRes') [])
@@ -91,7 +89,7 @@ asynchronouslyLoadJAR ng customEventChan jarPath = do
                      }
   where
     addJARChunk nonce jr mres classNames = do
-      let readClass className = J.loadClassFromJar (LB8.unpack className) jr
+      let readClass className = J.loadClassFromJar className jr
       classes <- catMaybes <$> mapM readClass classNames
       let res' = A.mkJVMResult nonce jr mres classes
       C.writeChan customEventChan (AnalysisProgress (A.SomeResult res'))

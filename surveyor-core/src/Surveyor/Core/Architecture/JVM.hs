@@ -36,7 +36,7 @@ data JVM
 data JVMResult s =
   JVMResult { jvmNonce :: NG.Nonce s JVM
             , jvmJarReader :: J.JarReader
-            , jvmClassIndex :: M.Map String (J.Class, M.Map J.MethodKey J.Method)
+            , jvmClassIndex :: M.Map J.ClassName (J.Class, M.Map J.MethodKey J.Method)
             }
 
 mkJVMResult :: NG.Nonce s JVM
@@ -77,7 +77,7 @@ unwrapAnalysis (AnalysisResult (JVMAnalysisResult r) _) = r
 data AddrType = ClassK | MethodK | BlockK | InsnK
 
 data Addr addrTy where
-  ClassAddr :: String -> Addr 'ClassK
+  ClassAddr :: !J.ClassName -> Addr 'ClassK
   MethodAddr :: !(Addr 'ClassK) -> !J.MethodKey -> Addr 'MethodK
   BlockAddr :: !(Addr 'MethodK) -> !J.BBId -> Addr 'BlockK
   InsnAddr :: !(Addr 'BlockK) -> !J.PC -> Addr 'InsnK
@@ -256,9 +256,9 @@ jvmOperands i =
     J.Imul -> []
     J.Ineg -> []
     J.Instanceof t -> [JVMOperand (Type t)]
-    J.Invokeinterface s mk -> [JVMOperand (StringOp s), JVMOperand (MethodKey mk)]
+    J.Invokeinterface s mk -> [JVMOperand (StringOp (J.unClassName s)), JVMOperand (MethodKey mk)]
     J.Invokespecial t mk -> [JVMOperand (Type t), JVMOperand (MethodKey mk)]
-    J.Invokestatic s mk -> [JVMOperand (StringOp s), JVMOperand (MethodKey mk)]
+    J.Invokestatic s mk -> [JVMOperand (StringOp (J.unClassName s)), JVMOperand (MethodKey mk)]
     J.Invokevirtual t mk -> [JVMOperand (Type t), JVMOperand (MethodKey mk)]
     J.Invokedynamic w16 -> [JVMOperand (W16 w16)]
     J.Ior -> []
@@ -297,7 +297,7 @@ jvmOperands i =
     J.Monitorenter -> []
     J.Monitorexit -> []
     J.Multianewarray t w8 -> [JVMOperand (Type t), JVMOperand (W8 w8)]
-    J.New s -> [JVMOperand (StringOp s)]
+    J.New s -> [JVMOperand (StringOp (J.unClassName s))]
     J.Newarray t -> [JVMOperand (Type t)]
     J.Nop -> []
     J.Pop -> []
@@ -330,7 +330,7 @@ toInstruction baddr (pc, i) = (JVMAddress (InsnAddr baddr pc), JVMInstruction i)
 ppAddress :: Addr addrTy -> T.Text
 ppAddress a =
   case a of
-    ClassAddr s -> T.pack s
+    ClassAddr s -> T.pack (J.unClassName s)
     MethodAddr _ k -> T.pack (show (J.ppMethodKey k))
     BlockAddr m i -> T.pack (printf "%s:%s" (ppAddress m) (show i))
     InsnAddr b pc -> T.pack (printf "%s:%s" (ppAddress b) (show pc))

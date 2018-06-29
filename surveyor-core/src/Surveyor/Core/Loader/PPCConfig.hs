@@ -50,6 +50,7 @@ ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
               MC.FoldableFC (MC.ArchFn arch),
               MC.IsArchFn (MC.ArchFn arch),
               SA.Architecture arch,
+              MC.IPAlignment arch,
               MBL.BinaryLoader arch binFmt,
               HR.HasRepr (DPPC.Opcode DPPC.Operand) (SA.ShapeRepr arch),
               Show (MC.ArchReg arch (MT.BVType w)),
@@ -58,8 +59,8 @@ ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
           -> C.Chan (Events s st)
           -> NG.NonceGenerator IO s
           -> [(Some (DPPC.Opcode DPPC.Operand), BS.ByteString)]
-          -> ((R.RewriteEnv arch -> MBL.LoadedBinary arch binFmt -> A.SomeResult s arch) ->
-              (A.SomeResult s arch -> R.ISA arch -> MBL.LoadedBinary arch binFmt -> R.SymbolicBlock arch -> R.RewriteM arch (Maybe [R.TaggedInstruction arch (R.InstructionAnnotation arch)])) ->
+          -> ((R.AnalyzeEnv arch -> MBL.LoadedBinary arch binFmt -> IO (A.SomeResult s arch)) ->
+              (A.SomeResult s arch -> MBL.LoadedBinary arch binFmt -> R.SymbolicBlock arch -> R.RewriteM arch (Maybe [R.TaggedInstruction arch (R.InstructionAnnotation arch)])) ->
               R.RenovateConfig arch binFmt (A.SomeResult s))
           -> (BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) arch -> A.SomeResult s arch)
           -> IO (R.SomeConfig R.TrivialConfigConstraint (A.SomeResult s))

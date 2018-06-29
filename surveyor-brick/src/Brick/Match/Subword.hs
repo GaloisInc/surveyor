@@ -7,9 +7,9 @@ module Brick.Match.Subword (
 
 import qualified Data.List as L
 import qualified Data.Text as T
-import qualified Text.RE.TDFA.Text as RE
+import qualified Text.Regex.TDFA as RE
 
-data Matcher = Matcher RE.RE
+data Matcher = Matcher RE.Regex
 
 -- | Generate a matcher that breaks the search term into words (at whitespace
 -- boundaries) and allows any text between the words, as long as the words
@@ -17,9 +17,21 @@ data Matcher = Matcher RE.RE
 --
 -- Note, it probably isn't possible for the construction to fail...
 matcher :: String -> Maybe Matcher
-matcher s = Matcher <$> RE.compileRegex rxStr
+matcher s = Matcher <$> RE.makeRegexM rxStr
   where
-    rxStr = L.intercalate ".*" (map RE.escapeREString (words s))
+    rxStr = L.intercalate ".*" (map escapeREString (words s))
 
 matches :: Matcher -> T.Text -> Bool
-matches (Matcher rx) t = RE.matched (t RE.?=~ rx)
+matches (Matcher rx) t = RE.match rx (T.unpack t)
+
+-- | FIXME: Make this more systematic
+escapeREString :: String -> String
+escapeREString = concatMap replaceREChar
+  where
+    replaceREChar c =
+      case c of
+        '\\' -> "\\\\"
+        '$' -> "\\$"
+        '^' -> "\\^"
+        '.' -> "\\."
+        _ -> c:[]

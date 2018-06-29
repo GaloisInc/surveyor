@@ -19,15 +19,15 @@ analysis :: (A.Architecture arch s, MM.MemWidth w, w ~ MM.ArchAddrWidth arch)
          -> (BAR.BinaryAnalysisResult s o arch -> A.SomeResult s arch)
          -> NG.Nonce s arch
          -> Maybe (MapF.MapF o (F.ParameterizedFormula (SB.SimpleBackend s) arch))
-         -> R.RewriteEnv arch
+         -> R.AnalyzeEnv arch
          -> MBL.LoadedBinary arch binFmt
-         -> A.SomeResult s arch
-analysis isa con nonce semantics env loadedBinary = con r
+         -> IO (A.SomeResult s arch)
+analysis isa con nonce semantics env loadedBinary = return (con r)
   where
-    r = BAR.BinaryAnalysisResult { BAR.rBlockInfo = R.envBlockInfo env
+    r = BAR.BinaryAnalysisResult { BAR.rBlockInfo = R.envBlockInfo (R.aeRewriteEnv env)
                                  , BAR.rLoadedBinary = loadedBinary
                                  , BAR.rISA = isa
-                                 , BAR.rBlockMap = BAR.indexBlocksByAddress isa (R.envBlockInfo env)
+                                 , BAR.rBlockMap = BAR.indexBlocksByAddress isa (R.envBlockInfo (R.aeRewriteEnv env))
                                  , BAR.rNonce = nonce
                                  , BAR.rSemantics = semantics
                                  }
