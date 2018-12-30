@@ -21,7 +21,6 @@ module Surveyor.Core.Architecture (
   AnalysisResult,
   Block(..),
   FunctionHandle(..),
-  BlockTranslationCache(..),
   ParameterizedFormula(..),
   prettyParameterizedFormula,
   SomeResult(..),

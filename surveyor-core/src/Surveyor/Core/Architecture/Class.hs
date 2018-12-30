@@ -19,7 +19,6 @@ module Surveyor.Core.Architecture.Class (
   prettyParameterizedFormula,
   Block(..),
   FunctionHandle(..),
-  BlockTranslationCache(..),
   ArchConstraints
   ) where
 
@@ -28,7 +27,6 @@ import           GHC.Generics ( Generic )
 import           Control.DeepSeq ( NFData, rnf, deepseq )
 import qualified Control.Once as O
 import qualified Data.Parameterized.Nonce as NG
-import qualified Data.Map as Map
 import qualified Data.Text as T
 
 import qualified SemMC.Architecture as SA
@@ -97,9 +95,6 @@ class (IR arch s) => Architecture (arch :: *) (s :: *) where
   -- FIXME: Some source IR blocks may translate to *multiple* alternative IR
   -- blocks (esp. Crucible)
   asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO [(Block arch s, Block ir s)]
-
-newtype BlockTranslationCache arch s ir =
-  BlockTranslationCache (Map.Map (FunctionHandle arch s) (Map.Map (Address arch s) (Block arch s, Block ir s)))
 
 -- | An abstraction over intermediate representations for display in a UI
 --
