@@ -1,16 +1,21 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.State (
   State(..),
   S(..),
   ArchState(..),
   AppState(..),
+  -- * Logging
+  logMessage,
+  logDiagnostic,
   -- * Lenses
   lInputFile,
   lLoader,
   lDiagnosticLog,
+  diagnosticLevelL,
   lEchoArea,
   lUIMode,
   lAppState,
@@ -37,7 +42,7 @@ import           Surveyor.Core.Keymap ( Keymap )
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Architecture as A
 import           Surveyor.Core.Commands ( SomeNonce(..) )
-import           Surveyor.Core.Events ( Events )
+import           Surveyor.Core.Events ( Events(LogDiagnostic), LogLevel )
 import           Surveyor.Core.Loader ( AsyncLoader )
 import           Surveyor.Core.Mode
 import qualified Surveyor.Core.EchoArea as EA
@@ -57,14 +62,15 @@ data State e u s where
 --       This is where most of the frontend-specific state will live.
 -- * @arch@ is the type of the architecture of the loaded binary.
 -- * @s@ is the state thread parameter that links all uses of nonces.
-data S e u arch s =
+data S e u (arch :: *) s =
   S { sInputFile :: Maybe FilePath
     , sLoader :: Maybe AsyncLoader
-    , sDiagnosticLog :: !(Seq.Seq T.Text)
+    , sDiagnosticLog :: !(Seq.Seq (Maybe LogLevel, T.Text))
     -- ^ Diagnostics collected over time (displayed in the diagnostic view)
+    , sDiagnosticLevel :: !LogLevel
     , sEchoArea :: !EA.EchoArea
     -- ^ An area where one-line messages can be displayed
-    , sUIMode :: !SomeUIMode
+    , sUIMode :: !(SomeUIMode s)
     -- ^ The current UI mode, which drives rendering and keybindings available
     , sAppState :: AppState
     -- ^ An indicator of the general state of the application (displayed in the
@@ -81,7 +87,7 @@ data S e u arch s =
     -- streamed analysis result is of the same type as the last one.  We use
     -- nonces to track that; their 'TestEquality' instance lets us recover type
     -- equality.
-    , sKeymap :: !(Keymap (Events s (S e u)) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+    , sKeymap :: !(Keymap (Events s (S e u)) (SomeUIMode s) (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
     -- ^ Keybindings mapped to commands
     , sUIExtension :: e s
     -- ^ An extension field for UI frontends for containing data that is
@@ -93,16 +99,25 @@ data S e u arch s =
     }
   deriving (Generic)
 
+logMessage :: S e u arch s -> T.Text -> IO ()
+logMessage s t = sEmitEvent s (LogDiagnostic Nothing t)
+
+logDiagnostic :: S e u arch s -> LogLevel -> T.Text -> IO ()
+logDiagnostic s ll t = sEmitEvent s (LogDiagnostic (Just ll) t)
+
 lInputFile :: L.Lens' (S e u arch s) (Maybe FilePath)
 lInputFile = GL.field @"sInputFile"
 
-lDiagnosticLog :: L.Lens' (S e u arch s) (Seq.Seq T.Text)
+lDiagnosticLog :: L.Lens' (S e u arch s) (Seq.Seq (Maybe LogLevel, T.Text))
 lDiagnosticLog = GL.field @"sDiagnosticLog"
+
+diagnosticLevelL :: L.Lens' (S e u arch s) LogLevel
+diagnosticLevelL = GL.field @"sDiagnosticLevel"
 
 lEchoArea :: L.Lens' (S e u arch s) EA.EchoArea
 lEchoArea = GL.field @"sEchoArea"
 
-lUIMode :: L.Lens' (S e u arch s) SomeUIMode
+lUIMode :: L.Lens' (S e u arch s) (SomeUIMode s)
 lUIMode = GL.field @"sUIMode"
 
 lEventChannel :: L.Lens' (S e u arch s) (C.Chan (Events s (S e u)))
@@ -117,7 +132,7 @@ lNonceGenerator = GL.field @"sNonceGenerator"
 lLoader :: L.Lens' (S e u arch s) (Maybe AsyncLoader)
 lLoader = GL.field @"sLoader"
 
-lKeymap :: L.Lens' (S e u arch s) (Keymap (Events s (S e u)) SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+lKeymap :: L.Lens' (S e u arch s) (Keymap (Events s (S e u)) (SomeUIMode s) (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
 lKeymap = GL.field @"sKeymap"
 
 lUIExtension :: L.Lens' (S e u arch s) (e s)

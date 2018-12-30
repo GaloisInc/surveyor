@@ -130,7 +130,7 @@ handleFilterListEvent listUpdater evt fl =
 selectedItem :: FilterList n t e -> Maybe e
 selectedItem fl = do
   idx <- matchingItems fl L.^. B.listSelectedL
-  guard (idx <= V.length (matchingItems fl L.^. B.listElementsL))
+  guard (idx < V.length (matchingItems fl L.^. B.listElementsL))
   return ((matchingItems fl L.^. B.listElementsL ) V.! idx)
 
 -- | Extract the current contents of the editor widget

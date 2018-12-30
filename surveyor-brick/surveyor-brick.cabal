@@ -17,7 +17,6 @@ library
                        Surveyor.Brick.Attributes
                        Surveyor.Brick.Handlers
                        Surveyor.Brick.Names
-                       Surveyor.Brick.State
                        Surveyor.Brick.Widget.BlockSelector
                        Surveyor.Brick.Widget.BlockViewer
                        Surveyor.Brick.Widget.FunctionSelector
@@ -25,8 +24,9 @@ library
                        Surveyor.Brick.Widget.Minibuffer
                        Brick.Match.Subword
                        Brick.Widget.FilterList
+                       Brick.Widget.Graph
                        Brick.Widget.Minibuffer
-  -- other-modules:       
+  other-modules:       Surveyor.Brick.Command
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
                        deepseq,
@@ -38,26 +38,28 @@ library
                        filepath,
                        prettyprinter,
                        pretty,
+                       fmt,
                        split >= 0.2 && < 0.3,
                        lens >= 4.15 && < 5,
                        generic-lens >= 0.5.1.0 && < 1.1,
                        parameterized-utils >= 1 && < 2,
                        text-zipper,
-                       megaparsec >= 6 && < 7,
-                       IntervalMap >= 0.5 && < 0.6,
+                       megaparsec >= 7 && < 8,
+                       IntervalMap >= 0.6 && < 0.7,
                        regex-tdfa >= 1 && < 2,
                        brick >= 0.30 && < 1,
                        vty,
+                       haggle,
                        surveyor-core
   hs-source-dirs:      src
   default-language:    Haskell2010
-  ghc-options: -Wall
+  ghc-options: -Wall -Wcompat
 
 executable surveyor-brick
   default-language: Haskell2010
   hs-source-dirs: tools/surveyor
   main-is: Main.hs
-  ghc-options: -Wall -rtsopts -threaded "-with-rtsopts=-I0"
+  ghc-options: -Wall -Wcompat -rtsopts -threaded "-with-rtsopts=-I0"
   build-depends: surveyor-brick,
                  base,
                  optparse-applicative

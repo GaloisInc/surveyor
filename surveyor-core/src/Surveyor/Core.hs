@@ -17,6 +17,9 @@ module Surveyor.Core (
   -- ** Program representation
   CA.AnalysisResult,
   CA.ArchConstraints,
+  CA.IR(..),
+  IR.IRRepr(..),
+  CA.SomeIRRepr(..),
   CA.Architecture(..),
   CA.Block(..),
   CA.FunctionHandle(..),
@@ -50,6 +53,36 @@ module Surveyor.Core (
   AR.FilePathType,
   AR.showRepr,
   AR.parseArgument,
+  -- * Context
+  CCX.Context(..),
+  CCX.InstructionSelection(..),
+  CCX.ContextStack(..),
+  CCX.BlockState(..),
+  CCX.emptyContextStack,
+  CCX.makeContext,
+  CCX.selectedIndex,
+  -- ** Modifiers
+  CCX.resetBlockSelection,
+  CCX.selectNextInstruction,
+  CCX.selectPreviousInstruction,
+  CCX.selectNextOperand,
+  CCX.selectPreviousOperand,
+  CCX.selectNextBlock,
+  CCX.selectPreviousBlock,
+  CCX.pushContext,
+  -- ** Lenses
+  CCX.currentContext,
+  CCX.contextFocusedBlock,
+  CCX.blockStateFor,
+  CCX.blockStateList,
+  CCX.blockStateBlock,
+  CCX.blockStateSelection,
+  CCX.cfgG,
+  CCX.vertexMapG,
+  CCX.selectedBlockL,
+  -- * Translation Cache
+  TC.TranslationCache,
+  TC.newTranslationCache,
   -- * The EchoArea abstraction
   EA.EchoArea,
   EA.echoArea,
@@ -62,6 +95,10 @@ module Surveyor.Core (
   K.emptyKeymap,
   K.addGlobalKey,
   K.lookupKeyCommand,
+  -- * Logging
+  logMessage,
+  logDiagnostic,
+  CE.LogLevel(..),
   -- * Defaults
   defaultKeymap
   ) where
@@ -76,15 +113,18 @@ import qualified Surveyor.Core.Async as CAS
 import qualified Surveyor.Core.Chan as CS
 import qualified Surveyor.Core.Command as CC
 import           Surveyor.Core.Commands
+import qualified Surveyor.Core.Context as CCX
 import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.Events as CE
 import qualified Surveyor.Core.Keymap as K
+import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Loader as CL
 import qualified Surveyor.Core.Mode as M
 import           Surveyor.Core.State
+import qualified Surveyor.Core.TranslationCache as TC
 
 -- | A default keymap with some reasonable keybindings
-defaultKeymap :: K.Keymap (CE.Events s (S e u)) M.SomeUIMode (Maybe (SomeNonce s)) (AR.Argument (CE.Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr
+defaultKeymap :: K.Keymap (CE.Events s (S e u)) (M.SomeUIMode s) (Maybe (SomeNonce s)) (AR.Argument (CE.Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr
 defaultKeymap = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
     globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some exitC)

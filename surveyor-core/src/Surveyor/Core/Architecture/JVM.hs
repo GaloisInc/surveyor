@@ -112,14 +112,11 @@ data JVMOperand' = LocalVariableIndex !J.LocalVariableIndex
                  | W16 !Word16
                  | PCList [J.PC]
 
-instance Architecture JVM s where
-  data ArchResult JVM s = JVMAnalysisResult (JVMResult s)
+instance IR JVM s where
   data Address JVM s = forall addrTy . JVMAddress (Addr addrTy)
   data Operand JVM s = JVMOperand JVMOperand'
   data Opcode JVM s = JVMOpcode J.Instruction
   data Instruction JVM s = JVMInstruction J.Instruction
-
-  archNonce (AnalysisResult (JVMAnalysisResult r) _) = jvmNonce r
   prettyInstruction _ (JVMInstruction i) = T.pack (show (J.ppInstruction i))
   prettyOpcode (JVMOpcode i) = ppOpcode i
   prettyOperand (JVMAddress _) (JVMOperand op) = ppOperand op
@@ -129,6 +126,12 @@ instance Architecture JVM s where
   boundValue _ = Nothing
   opcode (JVMInstruction i) = JVMOpcode i
   operands (JVMInstruction i) = jvmOperands i
+  parseAddress _ = Nothing
+
+instance Architecture JVM s where
+  data ArchResult JVM s = JVMAnalysisResult (JVMResult s)
+
+  archNonce (AnalysisResult (JVMAnalysisResult r) _) = jvmNonce r
   functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
 
   functionBlocks (AnalysisResult (JVMAnalysisResult r) _) (FunctionHandle (JVMAddress addr) _) =
@@ -138,7 +141,7 @@ instance Architecture JVM s where
         method <- M.lookup mkey midx
         case J.methodBody method of
           J.Code _ _ cfg _ _ _ _ ->
-            return [ toBlock maddr bb | bb <- J.allBBs cfg ]
+            return [ toBlock maddr method bb | bb <- J.allBBs cfg ]
           J.AbstractMethod -> Nothing
           J.NativeMethod -> Nothing
       _ -> []
@@ -147,7 +150,8 @@ instance Architecture JVM s where
   -- TODO
   containingBlocks _ _ = []
   genericSemantics _ _ = Nothing
-  parseAddress _ = Nothing
+  alternativeIRs _ = []
+  asAlternativeIR _ _ _ = return []
 
 jvmFunctions :: JVMResult s -> [FunctionHandle JVM s]
 jvmFunctions r =
@@ -316,10 +320,11 @@ jvmOperands i =
       , JVMOperand (PCList pcs)
       ]
 
-toBlock :: Addr 'MethodK -> J.BasicBlock -> Block JVM s
-toBlock maddr bb =
+toBlock :: Addr 'MethodK -> J.Method -> J.BasicBlock -> Block JVM s
+toBlock maddr method bb =
   Block { blockAddress = JVMAddress baddr
         , blockInstructions = map (toInstruction baddr) (J.bbInsts bb)
+        , blockFunction = FunctionHandle (JVMAddress maddr) (T.pack (J.methodName method))
         }
   where
     baddr = BlockAddr maddr (J.bbId bb)

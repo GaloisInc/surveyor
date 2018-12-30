@@ -1,6 +1,8 @@
-{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.Loader.PPCConfig (
   ppcConfig
   ) where
@@ -14,12 +16,11 @@ import           Control.Monad ( void )
 import qualified Data.ByteString as BS
 import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MC
-import qualified Data.Macaw.Memory as MM
-import qualified Data.Macaw.Types as MT
-import qualified Data.Parameterized.TraversableF as TF
+import qualified Data.Macaw.Symbolic as MS
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
+import           Data.Proxy ( Proxy(..) )
 
 import qualified Data.Parameterized.HasRepr as HR
 import qualified Lang.Crucible.Backend.Simple as SB
@@ -29,6 +30,8 @@ import qualified SemMC.Log as SL
 import qualified Dismantle.PPC as DPPC
 import qualified Renovate as R
 import qualified Renovate.Arch.PPC as RP
+import qualified What4.InterpretedFloatingPoint as WI
+import qualified What4.Expr as WE
 
 import qualified Surveyor.Core.Architecture as A
 import           Surveyor.Core.BinaryAnalysisResult
@@ -36,49 +39,48 @@ import qualified Surveyor.Core.Chan as C
 import           Surveyor.Core.Events
 import qualified Surveyor.Core.Loader.RenovateAnalysis as RA
 
-ppcConfig :: (w ~ MC.RegAddrWidth (MC.ArchReg arch),
-              R.InstructionAnnotation arch ~ RP.TargetAddress arch,
-              R.Instruction arch ~ RP.Instruction,
-              MM.MemWidth w,
-              R.ArchInfo arch,
-              A.Architecture arch s,
-              KnownNat w,
-              TF.FoldableF (MC.ArchStmt arch),
-              R.InstructionConstraints arch,
-              MC.IsArchStmt (MC.ArchStmt arch),
-              MC.PrettyF (MC.ArchTermStmt arch),
-              MC.FoldableFC (MC.ArchFn arch),
-              MC.IsArchFn (MC.ArchFn arch),
-              SA.Architecture arch,
-              MC.IPAlignment arch,
-              MBL.BinaryLoader arch binFmt,
-              HR.HasRepr (DPPC.Opcode DPPC.Operand) (SA.ShapeRepr arch),
-              Show (MC.ArchReg arch (MT.BVType w)),
-              MC.RegisterInfo (MC.ArchReg arch))
-          => MBL.BinaryRepr binFmt
+ppcConfig :: forall sym w arch s fs st binFmt
+           . ( w ~ MC.RegAddrWidth (MC.ArchReg arch)
+             , sym ~ SB.SimpleBackend s fs
+             , R.InstructionAnnotation arch ~ RP.TargetAddress arch
+             , R.Instruction arch ~ RP.Instruction
+             , A.Architecture arch s
+             , KnownNat w
+             , MS.ArchBits arch
+             , R.InstructionConstraints arch
+             , SA.Architecture arch
+             , MC.IPAlignment arch
+             , MBL.BinaryLoader arch binFmt
+             , HR.HasRepr (DPPC.Opcode DPPC.Operand) (SA.ShapeRepr arch)
+             , WI.IsInterpretedFloatExprBuilder (WE.ExprBuilder s SB.SimpleBackendState fs)
+             )
+          => sym
+          -> MBL.BinaryRepr binFmt
           -> C.Chan (Events s st)
           -> NG.NonceGenerator IO s
+          -> [(String, BS.ByteString)]
           -> [(Some (DPPC.Opcode DPPC.Operand), BS.ByteString)]
-          -> ((R.AnalyzeEnv arch -> MBL.LoadedBinary arch binFmt -> IO (A.SomeResult s arch)) ->
-              (A.SomeResult s arch -> MBL.LoadedBinary arch binFmt -> R.SymbolicBlock arch -> R.RewriteM arch (Maybe [R.TaggedInstruction arch (R.InstructionAnnotation arch)])) ->
-              R.RenovateConfig arch binFmt (A.SomeResult s))
+          -> (R.AnalyzeOnly arch binFmt (A.SomeResult s) -> R.RenovateConfig arch binFmt R.AnalyzeOnly (A.SomeResult s))
           -> (BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) arch -> A.SomeResult s arch)
-          -> IO (R.SomeConfig R.TrivialConfigConstraint (A.SomeResult s))
-ppcConfig binRep customEventChan ng semantics mkCfg0 mkRes = do
-  sym <- SB.newSimpleBackend ng
+          -> IO (R.SomeConfig R.AnalyzeOnly (A.SomeResult s))
+ppcConfig sym binRep customEventChan ng library semantics mkCfg0 mkRes = do
   logCfg <- mkLogCfg customEventChan
   let ?logCfg = logCfg
-  formulas <- SF.loadFormulas sym semantics
+  lib <- SF.loadLibrary (Proxy @arch) sym library
+  formulas <- SF.loadFormulas sym lib semantics
   nonceA <- NG.freshNonce ng
-  let cfg0 = mkCfg0 (RA.analysis RP.isa mkRes nonceA (Just formulas)) R.nop
+  let ao = R.AnalyzeOnly (RA.analysis sym RP.isa mkRes ng nonceA (Just formulas))
+  let cfg0 = mkCfg0 ao
   let callback loadedBinary _addr bi = do
             let isa = R.rcISA cfg0
             let res = BinaryAnalysisResult { rBlockInfo = bi
                                            , rLoadedBinary = loadedBinary
                                            , rISA = isa
-                                           , rBlockMap = indexBlocksByAddress isa bi
+                                           , rAddressIndex = indexAddresses isa bi
                                            , rNonce = nonceA
                                            , rSemantics = Just formulas
+                                           , rSym = sym
+                                           , rNonceGen = ng
                                            }
             let sr = mkRes res
             void $ X.evaluate (DS.force sr)

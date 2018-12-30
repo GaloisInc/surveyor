@@ -37,3 +37,9 @@
 [submodule "deps/llvm-pretty-bc-parser"]
 	path = deps/llvm-pretty-bc-parser
 	url = git@github.com:GaloisInc/llvm-pretty-bc-parser.git
+[submodule "deps/macaw-loader"]
+	path = deps/macaw-loader
+	url = git@github.com:GaloisInc/macaw-loader.git
+[submodule "deps/haggle"]
+	path = deps/haggle
+	url = git@github.com:travitch/haggle.git

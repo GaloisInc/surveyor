@@ -13,26 +13,31 @@ import           Data.Void
 
 import           Surveyor.Core.Architecture.Class
 
-instance Architecture Void s where
-  data ArchResult Void s = VoidAnalysisResult Void
+instance IR Void s where
   data Instruction Void s = VoidInstruction Void
   data Operand Void s = VoidOperand Void
   data Opcode Void s = VoidOpcode Void
   data Address Void s = VoidAddress Void
-  summarizeResult (AnalysisResult (VoidAnalysisResult v) _) = absurd v
-  archNonce (AnalysisResult (VoidAnalysisResult v) _) = absurd v
-  parseAddress _ = Nothing
+
   prettyAddress (VoidAddress v) = absurd v
-  containingBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
-  functions (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   prettyInstruction _ (VoidInstruction v) = absurd v
   opcode (VoidInstruction v) = absurd v
   operands (VoidInstruction v) = absurd v
   boundValue (VoidInstruction v) = absurd v
   prettyOperand _ (VoidOperand v) = absurd v
   prettyOpcode (VoidOpcode v) = absurd v
+  parseAddress _ = Nothing
+
+instance Architecture Void s where
+  data ArchResult Void s = VoidAnalysisResult Void
+  summarizeResult (AnalysisResult (VoidAnalysisResult v) _) = absurd v
+  archNonce (AnalysisResult (VoidAnalysisResult v) _) = absurd v
+  containingBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
+  functions (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   genericSemantics (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
   functionBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
+  alternativeIRs _ = []
+  asAlternativeIR _ (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
 
 instance Eq (Address Void s) where
   VoidAddress v == _ = absurd v

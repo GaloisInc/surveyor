@@ -14,4 +14,6 @@ data Names = DiagnosticView
            | FunctionSelectList
            | BlockViewerList Int
            | FunctionViewport
+           | FunctionCFGViewer
+           | InteractiveBlockViewer
   deriving (Eq, Ord, Show)

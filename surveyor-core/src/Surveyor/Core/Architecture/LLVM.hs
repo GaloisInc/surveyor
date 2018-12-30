@@ -33,20 +33,23 @@ data LLVM
 data LLVMResult s =
   LLVMResult { llvmNonce :: NG.Nonce s LLVM
              , llvmModule :: LL.Module
-             , llvmFunctionIndex :: FunctionIndex
+             , llvmFunctionIndex :: FunctionIndex s
              }
 
-type FunctionIndex = M.Map LL.Symbol (LL.Define, BlockIndex)
+type FunctionIndex s = M.Map LL.Symbol (FunctionHandle LLVM s, LL.Define, BlockIndex)
 type BlockIndex = M.Map (Maybe LL.BlockLabel) LL.BasicBlock
 
-indexFunctions :: LL.Module -> FunctionIndex
+indexFunctions :: LL.Module -> FunctionIndex s
 indexFunctions = F.foldl' indexDefine M.empty . LL.modDefines
   where
     indexDefine m def
       | null (LL.defBody def) = m
       | otherwise  =
         let blockIndex = F.foldl' indexBlock M.empty (LL.defBody def)
-        in M.insert (LL.defName def) (def, blockIndex) m
+            fh = FunctionHandle { fhAddress = LLVMAddress (FunctionAddr (LL.defName def))
+                                , fhName = T.pack (show (LL.ppSymbol (LL.defName def)))
+                                }
+        in M.insert (LL.defName def) (fh, def, blockIndex) m
     indexBlock m b = M.insert (LL.bbLabel b) b m
 
 mkLLVMResult :: NG.Nonce s LLVM -> LL.Module -> SomeResult s LLVM
@@ -148,14 +151,11 @@ data LLVMOperand' = Value !LL.Value
                   | Ordering LL.AtomicOrdering
                   | AtomicOp LL.AtomicRWOp
 
-instance Architecture LLVM s where
-  data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
+instance IR LLVM s where
   data Instruction LLVM s = LLVMInstruction LL.Stmt
   data Operand LLVM s = LLVMOperand LLVMOperand'
   data Opcode LLVM s = LLVMOpcode LL.Instr
   data Address LLVM s = forall addrTy . LLVMAddress (Addr addrTy)
-  archNonce (AnalysisResult (LLVMAnalysisResult lr) _) = llvmNonce lr
-  genericSemantics _ _ = Nothing
   boundValue (LLVMInstruction stmt) =
     case stmt of
       LL.Result iden _ _ -> Just (LLVMOperand (Value (LL.ValIdent iden)))
@@ -169,9 +169,6 @@ instance Architecture LLVM s where
       BlockAddr (FunctionAddr (LL.Symbol name)) l ->
         T.pack (printf "%s%s" name (maybe "" (("@"++) . show . LL.ppLabel) l))
       InsnAddr (BlockAddr (FunctionAddr (LL.Symbol name)) l) i -> T.pack (printf "%s%s:%d" name (maybe "" (("@"++) . show . LL.ppLabel) l) i)
-  -- Will work on what this means - we can probably do something if we also pass
-  -- in the analysisresult
-  parseAddress _ = Nothing
   prettyInstruction _ (LLVMInstruction stmt) =
     let ?config = llvmConfig
     in T.pack (show (LL.ppStmt stmt))
@@ -179,14 +176,24 @@ instance Architecture LLVM s where
     case stmt of
       LL.Result _ i _ -> LLVMOpcode i
       LL.Effect i _ -> LLVMOpcode i
-  functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
   prettyOpcode (LLVMOpcode i) = ppOpcode i
   operands (LLVMInstruction stmt) = stmtOperands stmt
+  -- Will work on what this means - we can probably do something if we also pass
+  -- in the analysisresult
+  parseAddress _ = Nothing
+
+instance Architecture LLVM s where
+  data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
+  archNonce (AnalysisResult (LLVMAnalysisResult lr) _) = llvmNonce lr
+  genericSemantics _ _ = Nothing
+  functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
   containingBlocks (AnalysisResult (LLVMAnalysisResult lr) _) (LLVMAddress addr) =
     llvmContainingBlocks lr addr
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   functionBlocks (AnalysisResult (LLVMAnalysisResult lr) _) fh =
     llvmFunctionBlocks lr fh
+  alternativeIRs _ = []
+  asAlternativeIR _ _ _ = return []
 
 instance Eq (Address LLVM s) where
   LLVMAddress a1 == LLVMAddress a2 = isJust (testEquality a1 a2)
@@ -248,8 +255,9 @@ instrOperands i =
       concat [ [LLVMOperand (TypedValue tv)]
              , maybe [] ((:[]) . LLVMOperand . ConstantInt) align
              ]
-    LL.Store tv1 tv2 align ->
+    LL.Store tv1 tv2 ordering align ->
       concat [ [LLVMOperand (TypedValue tv1), LLVMOperand (TypedValue tv2)]
+             , maybe [] ((:[]) . LLVMOperand . Ordering) ordering
              , maybe [] ((:[]) . LLVMOperand . ConstantInt) align
              ]
     LL.ICmp _ tv v -> [LLVMOperand (TypedValue tv), LLVMOperand (Value v)]
@@ -424,26 +432,27 @@ llvmContainingBlocks lr addr =
   case addr of
     FunctionAddr _ -> []
     BlockAddr (FunctionAddr sym) lab -> fromMaybe [] $ do
-      (_, bix) <- M.lookup sym (llvmFunctionIndex lr)
+      (fh, _, bix) <- M.lookup sym (llvmFunctionIndex lr)
       bb <- M.lookup lab bix
-      return [toBlock sym bb]
+      return [toBlock fh sym bb]
     InsnAddr (BlockAddr (FunctionAddr sym) lab) _ -> fromMaybe [] $ do
-      (_, bix) <- M.lookup sym (llvmFunctionIndex lr)
+      (fh, _, bix) <- M.lookup sym (llvmFunctionIndex lr)
       bb <- M.lookup lab bix
-      return [toBlock sym bb]
+      return [toBlock fh sym bb]
 
 llvmFunctionBlocks :: LLVMResult s -> FunctionHandle LLVM s -> [Block LLVM s]
 llvmFunctionBlocks lr fh =
   case M.lookup sym (llvmFunctionIndex lr) of
     Nothing -> []
-    Just (def, _) -> map (toBlock sym) (LL.defBody def)
+    Just (_, def, _) -> map (toBlock fh sym) (LL.defBody def)
   where
     sym = LL.Symbol (T.unpack (fhName fh))
 
-toBlock :: LL.Symbol -> LL.BasicBlock -> Block LLVM s
-toBlock sym b =
+toBlock :: FunctionHandle LLVM s -> LL.Symbol -> LL.BasicBlock -> Block LLVM s
+toBlock fh sym b =
   Block { blockAddress = LLVMAddress (BlockAddr (FunctionAddr sym) lab)
         , blockInstructions = map (toInstruction sym lab) (zip [0..] (LL.bbStmts b))
+        , blockFunction = fh
         }
   where
     lab = LL.bbLabel b

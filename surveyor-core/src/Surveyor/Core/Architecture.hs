@@ -15,10 +15,13 @@
 -- instructions, and operands.
 module Surveyor.Core.Architecture (
   ArchConstraints,
+  IR(..),
+  SomeIRRepr(..),
   Architecture(..),
   AnalysisResult,
   Block(..),
   FunctionHandle(..),
+  BlockTranslationCache(..),
   ParameterizedFormula(..),
   prettyParameterizedFormula,
   SomeResult(..),
@@ -26,11 +29,13 @@ module Surveyor.Core.Architecture (
   MC.mkPPC64Result,
   MC.mkX86Result,
   J.mkJVMResult,
-  LL.mkLLVMResult
+  LL.mkLLVMResult,
+  M.Macaw
   ) where
 
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.JVM as J
 import qualified Surveyor.Core.Architecture.LLVM as LL
 import qualified Surveyor.Core.Architecture.MC as MC
+import qualified Surveyor.Core.Architecture.Macaw as M
 import           Surveyor.Core.Architecture.Void ()

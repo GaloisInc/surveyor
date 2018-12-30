@@ -31,6 +31,9 @@ import qualified SemMC.Architecture.PPC64.Opcodes as PPC64
 import qualified Data.LLVM.BitCode as LL
 import qualified Data.Macaw.BinaryLoader as MBL
 import           Data.Macaw.BinaryLoader.X86 ()
+import           Data.Macaw.X86.Symbolic ()
+import qualified Lang.Crucible.Backend.Simple as SB
+import qualified Lang.Crucible.FunctionHandle as CFH
 import qualified Language.JVM.JarReader as J
 import qualified Renovate as R
 import qualified Renovate.Arch.X86_64 as X86
@@ -153,26 +156,30 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 -- appropriate value of w.
 loadElf :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> E.SomeElf E.Elf -> IO ()
 loadElf ng customEventChan someElf = do
+  sym <- SB.newSimpleBackend @_ @(SB.Flags SB.FloatReal) ng
   nonceAx86 <- NG.freshNonce ng
-  let x86cfg0 = X86.config (RA.analysis X86.isa A.mkX86Result nonceAx86 Nothing) R.nop
+  let x86cfg0 = X86.config (R.AnalyzeOnly (RA.analysis sym X86.isa A.mkX86Result ng nonceAx86 Nothing))
   let x86callback loadedBinary _addr bi = do
             let res = BinaryAnalysisResult { rBlockInfo = bi
                                            , rLoadedBinary = loadedBinary
                                            , rISA = R.rcISA x86cfg0
-                                           , rBlockMap = indexBlocksByAddress (R.rcISA x86cfg0) bi
+                                           , rAddressIndex = indexAddresses (R.rcISA x86cfg0) bi
                                            , rNonce = nonceAx86
                                            , rSemantics = Nothing
+                                           , rSym = sym
+                                           , rNonceGen = ng
                                            }
             let sr = A.mkX86Result res
             void $ X.evaluate (DS.force sr)
             C.writeChan customEventChan (AnalysisProgress sr)
   let x86cfg = x86cfg0 { R.rcFunctionCallback = Just (10, x86callback) }
-  ppc32cfg <- LP.ppcConfig MBL.Elf32Repr customEventChan ng PPC32.allSemantics PPC.config32 A.mkPPC32Result
-  ppc64cfg <- LP.ppcConfig MBL.Elf64Repr customEventChan ng PPC64.allSemantics PPC.config64 A.mkPPC64Result
+  ppc32cfg <- LP.ppcConfig sym MBL.Elf32Repr customEventChan ng PPC32.allDefinedFunctions PPC32.allSemantics PPC.config32 A.mkPPC32Result
+  ppc64cfg <- LP.ppcConfig sym MBL.Elf64Repr customEventChan ng PPC64.allDefinedFunctions PPC64.allSemantics PPC.config64 A.mkPPC64Result
   let rcfgs = [ (R.PPC32, ppc32cfg)
               , (R.PPC64, ppc64cfg)
               , (R.X86_64, R.SomeConfig NR.knownNat MBL.Elf64Repr x86cfg)
               ]
-  R.withElfConfig someElf rcfgs $ \rc e0 m -> do
-    (res, diags) <- R.analyzeElf rc e0 m
+  R.withElfConfig someElf rcfgs $ \rc elf loadedBinary -> do
+    hdlAlloc <- CFH.newHandleAllocator
+    (res, diags) <- R.analyzeElf rc hdlAlloc elf loadedBinary
     C.writeChan customEventChan (AnalysisFinished res diags)

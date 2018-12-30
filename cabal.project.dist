@@ -1,6 +1,5 @@
 packages: surveyor-core
           surveyor-brick
-          surveyor-qml
           deps/llvm-pretty
           deps/llvm-pretty-bc-parser
           deps/elf-edit
@@ -22,6 +21,9 @@ packages: surveyor-core
           deps/macaw/symbolic
           deps/macaw/x86
           deps/macaw/x86_symbolic
+          deps/macaw-loader/macaw-loader
+          deps/macaw-loader/macaw-loader-ppc
+          deps/macaw-loader/macaw-loader-x86
           deps/macaw-semmc/macaw-semmc
           deps/macaw-semmc/macaw-ppc
           deps/macaw-semmc/macaw-ppc-symbolic
@@ -29,3 +31,4 @@ packages: surveyor-core
           deps/renovate/renovate-x86
           deps/renovate/renovate-ppc
           deps/jvm-parser
+          deps/haggle

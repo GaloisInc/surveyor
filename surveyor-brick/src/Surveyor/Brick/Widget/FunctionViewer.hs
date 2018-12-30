@@ -1,8 +1,11 @@
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- | A basic function viewer
 --
 -- The concept is to view a function as a linear stream of blocks with control
@@ -12,8 +15,6 @@
 -- a graph layout.
 module Surveyor.Brick.Widget.FunctionViewer (
   FunctionViewer,
-  asFunctionViewer,
-  emptyFunctionViewer,
   functionViewer,
   handleFunctionViewerEvent,
   renderFunctionViewer
@@ -22,122 +23,70 @@ module Surveyor.Brick.Widget.FunctionViewer (
 import           GHC.Generics ( Generic )
 
 import qualified Brick as B
-import qualified Brick.Widgets.Border.Style as BS
-import           Control.DeepSeq ( NFData, rnf, deepseq )
-import           Control.Lens ( Lens', Prism', (^.), (^?), (&), (%~), (.~) )
-import qualified Control.Lens as L
-import qualified Data.Foldable as F
-import qualified Data.Generics.Product as GL
-import qualified Data.Generics.Sum as GS
-import qualified Data.List as L
-import qualified Data.Map.Strict as M
+import qualified Brick.Widgets.List as B
+import           Control.DeepSeq ( NFData, rnf )
+import           Control.Lens ( (^?), (^.) )
+import           Control.Monad.IO.Class ( liftIO )
+import qualified Data.Graph.Haggle as H
 import qualified Data.Text as T
-import qualified Data.Vector as V
+import qualified Fmt as Fmt
+import           Fmt ( (+|), (|+) )
 import qualified Graphics.Vty as V
 
+import qualified Brick.Widget.Graph as BG
 import qualified Surveyor.Core as C
 import           Surveyor.Brick.Names ( Names(..) )
-import qualified Surveyor.Brick.Widget.BlockViewer as BV
 
-data FunctionViewer arch s = NoFunction
-                           | FunctionViewer (MkFunctionViewer arch s)
-                           deriving (Generic)
 
-instance (C.ArchConstraints arch s) => NFData (FunctionViewer arch s)
-
-data MkFunctionViewer arch s =
-  MkFunctionViewer { funcHandle :: C.FunctionHandle arch s
-                 -- ^ A pointer to the function being displayed
-                 , analysisResult :: C.AnalysisResult arch s
-                 -- ^ The analysis result to find blocks in
-                 , funcBlocks :: V.Vector (BV.BlockViewer arch s)
-                 -- ^ The blocks in the function
-                 , focusedBlock :: Maybe Int
-                 -- ^ The currently-focused block, if any (an index into the list of funcBlocks)
-                 , blockMap :: M.Map (C.Address arch s) (C.Block arch s)
-                 -- ^ A mapping of addresses to blocks so that we can figure out
-                 -- which block is focused
-                 }
+data FunctionViewer arch s = FunctionViewer (C.Block arch s -> IO ()) Names
   deriving (Generic)
 
-instance (C.ArchConstraints arch s) => NFData (MkFunctionViewer arch s) where
-  rnf mk = funcHandle mk `deepseq`
-           funcBlocks mk `deepseq`
-           focusedBlock mk `deepseq`
-           blockMap mk `deepseq` ()
+instance NFData (FunctionViewer arch s) where
+  rnf (FunctionViewer _ !_names) = ()
 
-asFunctionViewer :: Prism' (FunctionViewer arch s) (MkFunctionViewer arch s)
-asFunctionViewer = GS._Ctor @"FunctionViewer"
-
-focusedBlockL :: Lens' (MkFunctionViewer arch s) (Maybe Int)
-focusedBlockL = GL.field @"focusedBlock"
-
-funcBlocksL :: Lens' (MkFunctionViewer arch s) (V.Vector (BV.BlockViewer arch s))
-funcBlocksL = GL.field @"funcBlocks"
-
-emptyFunctionViewer :: FunctionViewer arch s
-emptyFunctionViewer = NoFunction
-
-functionViewer :: (Ord (C.Address arch s), C.Architecture arch s)
-               => C.FunctionHandle arch s
-               -> C.AnalysisResult arch s
-               -> FunctionViewer arch s
-functionViewer fh ar =
-  FunctionViewer MkFunctionViewer { funcHandle = fh
-                                  , analysisResult = ar
-                                  , funcBlocks = V.fromList blockViewers
-                                  , focusedBlock = Nothing
-                                  , blockMap = F.foldl' indexBlock M.empty blocks
-                                  }
-  where
-    identifiers = map BlockViewerList [0..]
-    blockViewers = map (uncurry BV.blockViewer) (zip identifiers (L.sortOn C.blockAddress blocks))
-    blocks = C.functionBlocks ar fh
-    indexBlock m b = M.insert (C.blockAddress b) b m
+functionViewer :: (C.Block arch s -> IO ()) -> Names -> (FunctionViewer arch s)
+functionViewer = FunctionViewer
 
 handleFunctionViewerEvent :: (C.Architecture arch s)
                           => V.Event
                           -> FunctionViewer arch s
-                          -> B.EventM Names (FunctionViewer arch s)
-handleFunctionViewerEvent _ NoFunction = return NoFunction
-handleFunctionViewerEvent evt fv0@(FunctionViewer fv) =
+                          -> C.ContextStack arch s
+                          -> B.EventM Names (C.ContextStack arch s)
+handleFunctionViewerEvent evt (FunctionViewer selectBlock _name) cstk =
   case evt of
-    V.EvKey V.KPageDown [] ->
-      return $ FunctionViewer $ fv & focusedBlockL %~ maybe (Just 0) (Just . min (V.length (funcBlocks fv) - 1) . (+1))
-                                   & funcBlocksL .~ resetCurrentBlockViewer fv
-    V.EvKey V.KPageUp [] ->
-      return $ FunctionViewer $ fv & focusedBlockL %~ maybe (Just 0) (Just . max 0 . subtract 1)
-                                   & funcBlocksL .~ resetCurrentBlockViewer fv
-    V.EvKey V.KEsc [] ->
-      return $ FunctionViewer $ fv & focusedBlockL .~ Nothing
-    _ | Just selIdx <- fv ^. focusedBlockL -> do
-          -- If we have a focused block, pass events down to the selected block
-          -- viewer to let the user select instructions for closer inspection.
-          let bv = funcBlocks fv V.! selIdx
-          bv' <- BV.handleBlockViewerEvent evt bv
-          let fv' = fv & funcBlocksL . L.ix selIdx .~ bv'
-          return $ FunctionViewer fv'
-      | otherwise -> return fv0
-
-resetCurrentBlockViewer :: MkFunctionViewer arch s -> V.Vector (BV.BlockViewer arch s)
-resetCurrentBlockViewer fv
-  | Just selIdx <- fv ^. focusedBlockL =
-      (fv ^. funcBlocksL) & L.ix selIdx %~ BV.resetBlockViewerState
-  | otherwise = fv ^. funcBlocksL
+    V.EvKey V.KDown [] -> return (C.selectNextBlock cstk)
+    V.EvKey V.KUp [] -> return (C.selectPreviousBlock cstk)
+    V.EvKey V.KEnter []
+      | Just ctx <- cstk ^? C.currentContext
+      , Just selVert <- ctx ^. C.selectedBlockL
+      , Just selBlock <- H.vertexLabel (ctx ^. C.cfgG) selVert -> do
+          -- Either send a message (probably put the callback function in the
+          -- FunctionViewer constructor) or construct the new context here
+          liftIO (selectBlock selBlock)
+          return cstk
+      | otherwise -> return cstk
+    _ -> return cstk
 
 renderFunctionViewer :: (C.Architecture arch s, Eq (C.Address arch s))
-                     => FunctionViewer arch s
+                     => C.AnalysisResult arch s
+                     -> C.ContextStack arch s
+                     -> FunctionViewer arch s
                      -> B.Widget Names
-renderFunctionViewer NoFunction = B.txt (T.pack "No function")
-renderFunctionViewer (FunctionViewer fv) = blockList
---  B.viewport FunctionViewport B.Both blockList
+renderFunctionViewer _ares cstk (FunctionViewer _ names)
+  | Just ctx <- cstk ^? C.currentContext =
+      let cfg = ctx ^. C.cfgG
+          selectedBlock = ctx ^. C.selectedBlockL
+          gr = BG.graph names cfg selectedBlock 2
+      in BG.renderGraph renderNode renderEdge gr
+  | otherwise = B.txt (T.pack "No function")
+
+renderNode :: (C.IR arch s) => Bool -> C.Block arch s -> B.Widget Names
+renderNode isFocused b =
+  xfrm $ B.vBox [ B.txt (C.prettyAddress (C.blockAddress b))
+                , B.txt (Fmt.fmt ("("+|length (C.blockInstructions b)|+")"))
+                ]
   where
-    blockList = B.vBox (map renderWithFocus (zip [0..] (F.toList (funcBlocks fv))))
-    renderWithFocus (idx, mb) =
-      case mb ^? BV.asBlockViewer of
-        Nothing -> B.emptyWidget
-        Just _bv ->
-          let w = B.padBottom (B.Pad 1) (BV.renderBlockViewer (analysisResult fv) mb)
-          in case fv ^. focusedBlockL == Just idx of
-            True -> B.withBorderStyle BS.unicodeBold (B.visible w)
-            False -> w
+    xfrm = if isFocused then B.withAttr B.listSelectedFocusedAttr else id
+
+renderEdge :: () -> B.Widget Names
+renderEdge _el = B.emptyWidget
