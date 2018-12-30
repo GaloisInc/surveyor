@@ -17,7 +17,9 @@ data Matcher = Matcher RE.Regex
 --
 -- Note, it probably isn't possible for the construction to fail...
 matcher :: String -> Maybe Matcher
-matcher s = Matcher <$> RE.makeRegexM rxStr
+matcher s
+  | null s = Matcher <$> RE.makeRegexM ".*"
+  | otherwise = Matcher <$> RE.makeRegexM rxStr
   where
     rxStr = L.intercalate ".*" (map escapeREString (words s))
 

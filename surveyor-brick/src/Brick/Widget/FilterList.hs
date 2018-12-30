@@ -142,7 +142,8 @@ clearEditor = B.applyEdit (const (ZG.textZipper [] Nothing))
 
 -- | Apply an update function to the current list
 updateList :: (V.Vector e -> V.Vector e) -> FilterList n t e -> FilterList n t e
-updateList f fl = fl { matchingItems = L.over B.listElementsL f (matchingItems fl) }
+updateList f fl =
+  fl { matchingItems = B.list (matchingItems fl L.^. B.listNameL) (f (allItems fl)) 1 }
 
 -- | The current contents of the list weidget
 listContents :: FilterList n t e -> V.Vector e
