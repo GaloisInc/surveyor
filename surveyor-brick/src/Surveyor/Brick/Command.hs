@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Surveyor.Brick.Command (
-  showMacawC,
+  showMacawBlockC,
   extraCommands
   ) where
 
@@ -17,12 +17,13 @@ type Command s st tps = C.Command (C.Events s st) (Maybe (C.SomeNonce s)) (Argum
 type Callback s st tps = C.Chan (C.Events s st) -> Maybe (C.SomeNonce s) -> PL.List (Argument s st) tps -> IO ()
 
 extraCommands :: [Some (C.Command (C.Events s st) (Maybe (C.SomeNonce s)) (Argument s st) C.TypeRepr)]
-extraCommands = [ Some showMacawC
+extraCommands = [ Some showMacawBlockC
+                , Some showBaseBlockC
                 ]
 
-showMacawC :: forall s t . Command s t '[]
-showMacawC =
-  C.Command "show-macaw" doc PL.Nil PL.Nil callback
+showMacawBlockC :: forall s t . Command s t '[]
+showMacawBlockC =
+  C.Command "show-macaw-block" doc PL.Nil PL.Nil callback
   where
     doc = "Show the macaw IR of the currently-selected block"
     callback :: Callback s st '[]
@@ -32,3 +33,15 @@ showMacawC =
         Just (C.SomeNonce archNonce) -> do
           C.writeChan eventChan (C.LogDiagnostic (Just C.LogDebug) "Showing macaw IR")
           C.writeChan eventChan (C.ViewBlock archNonce C.MacawRepr)
+
+showBaseBlockC :: forall s t . Command s t '[]
+showBaseBlockC =
+  C.Command "show-base-block" doc PL.Nil PL.Nil callback
+  where
+    doc = "Show the base representation of the currently-selected block"
+    callback :: Callback s st '[]
+    callback = \eventChan mNonce PL.Nil ->
+      case mNonce of
+        Nothing -> return ()
+        Just (C.SomeNonce archNonce) ->
+          C.writeChan eventChan (C.ViewBlock archNonce C.BaseRepr)

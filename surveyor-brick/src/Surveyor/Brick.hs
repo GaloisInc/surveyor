@@ -205,5 +205,5 @@ emptyState mfp mloader ng customEventChan = do
              , C.sArchState = Nothing
              }
   where
-    extraKeys = [(C.Key (V.KChar 'm') [V.MAlt], Some BC.showMacawC)
+    extraKeys = [(C.Key (V.KChar 'm') [V.MAlt], Some BC.showMacawBlockC)
                 ]
