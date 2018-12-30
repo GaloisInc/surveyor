@@ -52,6 +52,7 @@ data Events s st where
   FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> Events s st
   ListBlocks :: PN.Nonce s arch -> [A.Block arch s] -> Events s st
   ViewBlock :: PN.Nonce s arch -> IR.IRRepr arch ir -> Events s st
+  ViewInstructionSemantics :: PN.Nonce s arch -> Events s st
 
   -- Informational messages
   DescribeCommand :: Some (C.Command (Events s st) cmdState a r) -> Events s st

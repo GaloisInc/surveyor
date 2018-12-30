@@ -4,6 +4,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Surveyor.Brick.Command (
   showMacawBlockC,
+  showBaseBlockC,
+  showInstructionSemanticsC,
   extraCommands
   ) where
 
@@ -19,6 +21,7 @@ type Callback s st tps = C.Chan (C.Events s st) -> Maybe (C.SomeNonce s) -> PL.L
 extraCommands :: [Some (C.Command (C.Events s st) (Maybe (C.SomeNonce s)) (Argument s st) C.TypeRepr)]
 extraCommands = [ Some showMacawBlockC
                 , Some showBaseBlockC
+                , Some showInstructionSemanticsC
                 ]
 
 showMacawBlockC :: forall s t . Command s t '[]
@@ -45,3 +48,15 @@ showBaseBlockC =
         Nothing -> return ()
         Just (C.SomeNonce archNonce) ->
           C.writeChan eventChan (C.ViewBlock archNonce C.BaseRepr)
+
+showInstructionSemanticsC :: forall s t . Command s t '[]
+showInstructionSemanticsC =
+  C.Command "show-instruction-semantics" doc PL.Nil PL.Nil callback
+  where
+    doc = "Show the semantics for the currently-selected base IR instruction"
+    callback :: Callback s st '[]
+    callback = \eventChan mNonce PL.Nil ->
+      case mNonce of
+        Nothing -> return ()
+        Just (C.SomeNonce archNonce) ->
+          C.writeChan eventChan (C.ViewInstructionSemantics archNonce)

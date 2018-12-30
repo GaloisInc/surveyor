@@ -210,6 +210,9 @@ handleCustomEvent s0 evt =
     C.ViewFunction _archNonce -> do
       let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.FunctionViewer
       B.continue $! C.State s1
+    C.ViewInstructionSemantics _archNonce -> do
+      let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SemanticsViewer
+      B.continue $! C.State s1
     C.FindBlockContaining archNonce addr
       | Just archState <- s0 ^. C.lArchState
       , ares <- archState ^. C.lAnalysisResult

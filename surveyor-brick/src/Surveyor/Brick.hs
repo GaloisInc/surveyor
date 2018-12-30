@@ -34,6 +34,7 @@ import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.BlockViewer as BV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.FunctionViewer as FV
+import qualified Surveyor.Brick.Widget.InstructionSemanticsViewer as ISV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
 drawSummary :: (C.Architecture arch s) => FilePath -> C.AnalysisResult arch s -> B.Widget Names
@@ -138,6 +139,8 @@ drawUIMode binFileName archState s uim =
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing block viewer for IR: " ++ show repr)))
     C.FunctionViewer ->
       drawAppShell s (FV.renderFunctionViewer binfo (archState ^. BH.contextG) (archState ^. BH.functionViewerG ))
+    C.SemanticsViewer ->
+      drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. BH.contextG) ISV.instructionSemanticsViewer)
   where
     binfo = C.sAnalysisResult archState
 

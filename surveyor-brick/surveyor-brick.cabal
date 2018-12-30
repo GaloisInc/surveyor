@@ -22,6 +22,7 @@ library
                        Surveyor.Brick.Widget.FunctionSelector
                        Surveyor.Brick.Widget.FunctionViewer
                        Surveyor.Brick.Widget.Minibuffer
+                       Surveyor.Brick.Widget.InstructionSemanticsViewer
                        Brick.Match.Subword
                        Brick.Widget.FilterList
                        Brick.Widget.Graph

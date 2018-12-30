@@ -45,6 +45,8 @@ data UIMode s k where
   -- ^ View a block
   FunctionViewer :: UIMode s NormalK
   -- ^ View a function
+  SemanticsViewer :: UIMode s NormalK
+  -- ^ View the semantics for an individual selected base IR instruction
   MiniBuffer :: UIMode s NormalK -> UIMode s MiniBufferK
   -- ^ An interactive widget that takes focus and accepts all
   -- keystrokes except for C-g
@@ -58,6 +60,7 @@ prettyMode m =
     BlockSelector -> "Block Selector"
     BlockViewer _nonce repr -> Fmt.fmt ("Block Viewer[" +| repr ||+ "]")
     FunctionViewer -> "Function Viewer"
+    SemanticsViewer -> "Semantics Viewer"
 
 data SomeUIMode s where
   SomeMiniBuffer :: UIMode s MiniBufferK -> SomeUIMode s
