@@ -2,6 +2,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 -- | A widget to view individual basic blocks with fine granularity
 --
 -- It supports
@@ -23,9 +25,11 @@ import qualified Brick.Widgets.List as B
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Lens ( (^.), (^?), (&), (.~) )
 import qualified Data.List as L
+import           Data.Parameterized.Classes
+import           Data.Proxy ( Proxy(..) )
 import qualified Data.Vector as V
 import qualified Fmt as Fmt
-import           Fmt ( (+|), (||+) )
+import           Fmt ( (+|), (|+) )
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core as C
@@ -65,7 +69,8 @@ handleBlockViewerEvent evt (BlockViewer _ repr) cstk =
     V.EvKey V.KLeft [] -> return (C.selectPreviousOperand repr cstk)
     _ -> return cstk
 
-renderBlockViewer :: (C.Architecture arch s)
+renderBlockViewer :: forall arch s ir
+                   . (C.Architecture arch s)
                   => C.AnalysisResult arch s
                   -> C.ContextStack arch s
                   -> BlockViewer arch s ir
@@ -74,11 +79,18 @@ renderBlockViewer _ares cs (BlockViewer names repr)
   | Just ctx <- cs ^? C.currentContext
   , Just blkState <- ctx ^. C.blockStateFor repr =
       let blk = blkState ^. C.blockStateBlock
-          header = B.txt (Fmt.fmt ("Basic Block " +| C.prettyAddress (C.blockAddress blk) ||+ ""))
+          header = B.txt (Fmt.fmt ("Basic Block " +| C.prettyAddress (C.blockAddress blk) |+ ""))
           bl = mkBlockListState names blkState
           body = B.renderList (renderListItem (blkState ^. C.blockStateSelection)) False bl
-      in B.borderWithLabel header body
-  | otherwise = B.txt "No block"
+      in B.borderWithLabel (B.hBox (map pad (irIndicators ++ [header]))) body
+  | otherwise = B.borderWithLabel (B.txt "No block") (B.hBox (map pad irIndicators))
+  where
+    pad = B.padLeftRight 1
+    irIndicators = map toIRLabel (C.SomeIRRepr C.BaseRepr : C.alternativeIRs (Proxy @(arch, s)))
+    toIRLabel (C.SomeIRRepr r)
+      | Just Refl <- testEquality r repr =
+          B.withAttr B.listSelectedFocusedAttr (B.str (showF r))
+      | otherwise = B.str (showF r)
 
 -- | Construct a state for the block list widget on-demand based on the state in
 -- the context
