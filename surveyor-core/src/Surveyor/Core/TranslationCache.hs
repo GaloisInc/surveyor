@@ -17,7 +17,7 @@ newtype TranslationCache arch s =
   TranslationCache (IOR.IORef (MapF.MapF (IRRepr arch) (TranslatedBlocks arch s)))
 
 newtype TranslatedBlocks arch s ir =
-  TranslatedBlocks (Map.Map (CA.FunctionHandle arch s) (Map.Map (CA.Address arch s) (CA.Block arch s, CA.Block ir s)))
+  TranslatedBlocks (Map.Map (CA.FunctionHandle arch s) (Maybe (CA.BlockMapping arch ir s)))
 
 -- | Construct a new (empty) 'TranslationCache'
 newTranslationCache :: IO (TranslationCache arch s)
@@ -35,7 +35,7 @@ translateFunctionBlocks :: (CA.Architecture arch s, CA.ArchConstraints arch s)
                         -> CA.AnalysisResult arch s
                         -> IRRepr arch ir
                         -> CA.FunctionHandle arch s
-                        -> IO (Map.Map (CA.Address arch s) (CA.Block arch s, CA.Block ir s))
+                        -> IO (Maybe (CA.BlockMapping arch ir s))
 translateFunctionBlocks (TranslationCache cacheRef) ares rep fh = do
   m0 <- IOR.readIORef cacheRef
   case MapF.lookup rep m0 of
@@ -44,18 +44,12 @@ translateFunctionBlocks (TranslationCache cacheRef) ares rep fh = do
         Just tr -> return tr
         Nothing -> do
           blocks <- CA.asAlternativeIR rep ares fh
-          let tr = toBlockMap blocks
-          let m1' = Map.insert fh tr m1
+          let m1' = Map.insert fh blocks m1
           IOR.writeIORef cacheRef (MapF.insert rep (TranslatedBlocks m1') m0)
-          return tr
+          return blocks
     Nothing -> do
       -- There is no entry at all for this repr, so build a fresh block translation cache
       blocks <- CA.asAlternativeIR rep ares fh
-      let tr = toBlockMap blocks
-      let m1 = Map.singleton fh tr
+      let m1 = Map.singleton fh blocks
       IOR.writeIORef cacheRef (MapF.insert rep (TranslatedBlocks m1) m0)
-      return tr
-  where
-    toBlockMap pairs = Map.fromList [ (CA.blockAddress origBlock, (origBlock, trBlock))
-                                    | (origBlock, trBlock) <- pairs
-                                    ]
+      return blocks

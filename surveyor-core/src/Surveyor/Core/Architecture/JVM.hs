@@ -152,7 +152,7 @@ instance Architecture JVM s where
   containingBlocks _ _ = []
   genericSemantics _ _ = Nothing
   alternativeIRs _ = []
-  asAlternativeIR _ _ _ = return []
+  asAlternativeIR _ _ _ = return Nothing
 
 jvmFunctions :: JVMResult s -> [FunctionHandle JVM s]
 jvmFunctions r =

@@ -23,6 +23,7 @@ module Surveyor.Core.Architecture.Macaw (
 import           Control.DeepSeq ( NFData(rnf), deepseq )
 import           Control.Lens ( (^.) )
 import qualified Control.Exception as X
+import qualified Data.Foldable as F
 import qualified Data.IORef as IOR
 import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Discovery.State as MC
@@ -35,6 +36,7 @@ import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import           Data.Word ( Word64 )
@@ -49,13 +51,14 @@ import Surveyor.Core.Architecture.Class
 import Surveyor.Core.IRRepr ( Macaw )
 
 macawForBlocks :: forall arch s
-                . (MC.MemWidth (MC.ArchAddrWidth arch))
-               => PN.NonceGenerator IO s
+                . (MC.MemWidth (MC.ArchAddrWidth arch), Ord (Address arch s))
+               => (MC.MemAddr (MC.ArchAddrWidth arch) -> Address arch s)
+               -> PN.NonceGenerator IO s
                -> R.BlockInfo arch
                -> R.ConcreteAddress arch
                -> [(MC.ArchSegmentOff arch, Block arch s)]
-               -> IO [(Block arch s, Block (Macaw arch) s)]
-macawForBlocks nonceGen binfo faddr blocks = do
+               -> IO (BlockMapping arch (Macaw arch) s)
+macawForBlocks toArchAddr nonceGen binfo faddr blocks = do
   case M.lookup faddr (R.biFunctions binfo) of
     Nothing -> X.throwIO (NoMacawFunctionFor faddr)
     Just (_, Some dfi) -> do
@@ -63,7 +66,45 @@ macawForBlocks nonceGen binfo faddr blocks = do
           fh = FunctionHandle { fhAddress = MacawAddress (R.absoluteAddress faddr)
                               , fhName = T.pack (show faddr)
                               }
-      mapM (toMacawBlock nonceGen dfi fh) blocks
+      blks <- mapM (toMacawBlock nonceGen dfi fh) blocks
+      let (_, macawInsnIdx) = foldr (buildMacawInstIndex toArchAddr) (Nothing, M.empty) (concatMap (blockInstructions . snd) blks)
+      return $ BlockMapping { blockMapping = toBlockMap blks
+                            , irToBaseAddrs = macawInsnIdx
+                            , baseToIRAddrs = flipAddressMap macawInsnIdx
+                            }
+  where
+    toBlockMap pairs = M.fromList [ (blockAddress origBlock, (origBlock, mblock))
+                                  | (origBlock, mblock) <- pairs
+                                  ]
+
+buildMacawInstIndex :: (Ord (Address arch s))
+                    => (MC.MemAddr (MC.ArchAddrWidth arch) -> Address arch s)
+                    -> (Address (Macaw arch) s, Instruction (Macaw arch) s)
+                    -> (Maybe (Address arch s), M.Map (Address (Macaw arch) s) (S.Set (Address arch s)))
+                    -> (Maybe (Address arch s), M.Map (Address (Macaw arch) s) (S.Set (Address arch s)))
+buildMacawInstIndex toArchAddr (iaddr, i) acc@(mCurrentInsnAddr, m) =
+  case mCurrentInsnAddr of
+    -- If we can't establish a mapping, just omit it from the map entirely
+    Nothing -> acc
+    Just cia ->
+      case i of
+        MacawTermStmt _ _ ->
+          (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
+        MacawStmt s _ _ ->
+          case s of
+            MC.Comment {} -> acc
+            MC.InstructionStart addr _ ->
+              let cia' = toArchAddr (MC.absoluteAddr addr)
+              in (Just cia', M.insertWith S.union iaddr (S.singleton cia') m)
+            _ -> (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
+
+flipAddressMap :: (Ord (Address arch s))
+               => M.Map (Address (Macaw arch) s) (S.Set (Address arch s))
+               -> M.Map (Address arch s) (S.Set (Address (Macaw arch) s))
+flipAddressMap = foldr doFlip M.empty . M.toList
+  where
+    doFlip (macawAddr, mcAddrs) m = F.foldr (addMachineAddrs macawAddr) m mcAddrs
+    addMachineAddrs macawAddr machineAddr = M.insertWith S.union machineAddr (S.singleton macawAddr)
 
 toMacawBlock :: forall arch s ids
               . (MC.MemWidth (MC.ArchAddrWidth arch))

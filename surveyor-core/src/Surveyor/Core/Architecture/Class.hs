@@ -15,6 +15,7 @@ module Surveyor.Core.Architecture.Class (
   SomeResult(..),
   ResultIndex(..),
   AnalysisResult(..),
+  BlockMapping(..),
   ParameterizedFormula(..),
   prettyParameterizedFormula,
   Block(..),
@@ -97,7 +98,13 @@ class (IR arch s) => Architecture (arch :: *) (s :: *) where
   --
   -- FIXME: Some source IR blocks may translate to *multiple* alternative IR
   -- blocks (esp. Crucible)
-  asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO [(Block arch s, Block ir s)]
+  asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe (BlockMapping arch ir s))
+
+data BlockMapping arch ir s =
+  BlockMapping { blockMapping :: M.Map (Address arch s) (Block arch s, Block ir s)
+               , baseToIRAddrs :: M.Map (Address arch s) (S.Set (Address ir s))
+               , irToBaseAddrs :: M.Map (Address ir s) (S.Set (Address arch s))
+               }
 
 -- | An abstraction over intermediate representations for display in a UI
 --

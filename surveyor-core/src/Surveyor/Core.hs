@@ -22,6 +22,7 @@ module Surveyor.Core (
   CA.SomeIRRepr(..),
   CA.Architecture(..),
   CA.Block(..),
+  CA.BlockMapping(..),
   CA.FunctionHandle(..),
   CA.ParameterizedFormula(..),
   CA.prettyParameterizedFormula,

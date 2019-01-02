@@ -194,7 +194,7 @@ instance Architecture LLVM s where
   functionBlocks (AnalysisResult (LLVMAnalysisResult lr) _) fh =
     llvmFunctionBlocks lr fh
   alternativeIRs _ = []
-  asAlternativeIR _ _ _ = return []
+  asAlternativeIR _ _ _ = return Nothing
 
 instance Eq (Address LLVM s) where
   LLVMAddress a1 == LLVMAddress a2 = isJust (testEquality a1 a2)

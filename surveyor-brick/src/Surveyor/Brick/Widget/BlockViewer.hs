@@ -28,6 +28,7 @@ import qualified Data.ByteString as BS
 import qualified Data.List as L
 import           Data.Parameterized.Classes
 import           Data.Proxy ( Proxy(..) )
+import qualified Data.Set as S
 import qualified Data.Vector as V
 import qualified Fmt as Fmt
 import           Fmt ( (+|), (|+) )
@@ -149,7 +150,9 @@ renderListItemWithSelection sel idx addr i =
     C.SingleSelection selIdx (Just selectedOperand)
       | selIdx /= idx -> renderInstruction addr i Nothing
       | otherwise -> renderInstruction addr i (Just selectedOperand)
-    C.MultipleSelection {} -> error "Multiple selections not yet implemented"
+    C.MultipleSelection selIdx tagged
+      | idx == selIdx || idx `S.member` tagged -> highlightWidget True (renderInstruction addr i Nothing)
+      | otherwise -> renderInstruction addr i Nothing
 
 highlightWidget :: Bool -> B.Widget n -> B.Widget n
 highlightWidget isFocused w

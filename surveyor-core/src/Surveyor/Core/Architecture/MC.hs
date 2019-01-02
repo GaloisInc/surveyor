@@ -269,7 +269,7 @@ instance Architecture PPC.PPC32 s where
   alternativeIRs _ = [SomeIRRepr MacawRepr]
   asAlternativeIR repr ar@(AnalysisResult (PPC32AnalysisResult bar@BinaryAnalysisResult {rLoadedBinary = img}) _) fh =
     case repr of
-      BaseRepr -> return []
+      BaseRepr -> return Nothing
       MacawRepr -> do
         let mem = MBL.memoryImage img
         let blocks = [ (segOff, b)
@@ -279,7 +279,7 @@ instance Architecture PPC.PPC32 s where
                      ]
         let PPC32Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
-          Just memAbsAddr -> AM.macawForBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Just memAbsAddr -> Just <$> AM.macawForBlocks PPC32Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
 
 instance Eq (Address PPC.PPC32 s) where
@@ -346,7 +346,7 @@ instance Architecture PPC.PPC64 s where
                  ]
     let PPC64Address memAddr = fhAddress fh
     case MM.asAbsoluteAddr memAddr of
-      Just memAbsAddr -> AM.macawForBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+      Just memAbsAddr -> Just <$> AM.macawForBlocks PPC64Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
       Nothing -> error ("Invalid address for function: " ++ show memAddr)
 
 instance Eq (Address PPC.PPC64 s) where
@@ -407,7 +407,7 @@ instance Architecture X86.X86_64 s where
                  ]
     let X86Address memAddr = fhAddress fh
     case MM.asAbsoluteAddr memAddr of
-      Just memAbsAddr -> AM.macawForBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+      Just memAbsAddr -> Just <$> AM.macawForBlocks X86Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
       Nothing -> error ("Invalid address for function: " ++ show memAddr)
 
 

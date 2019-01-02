@@ -188,20 +188,20 @@ makeBlockState :: forall arch ir s
                -> IR.IRRepr arch ir
                -> IO (Maybe (MapF.Pair (IR.IRRepr arch) (BlockState arch s)))
 makeBlockState tcache ares origBlock rep = do
-  blockMapping <- TC.translateFunctionBlocks tcache ares rep fh
-  case Map.lookup (CA.blockAddress origBlock) blockMapping of
-    Nothing -> return Nothing
-    Just (_, trBlock) -> do
-      let insnList = [ (ix, addr, i)
-                     | (ix, (addr, i)) <- zip [0..] (CA.blockInstructions trBlock)
-                     ]
-      let bs :: BlockState arch s ir
-          bs = BlockState { bsSelection = NoSelection
-                          , bsBlock = trBlock
-                          , bsList = V.fromList insnList
-                          , withConstraints = \a -> a
-                          }
-      return (Just (MapF.Pair rep bs))
+  mBlockMapping <- TC.translateFunctionBlocks tcache ares rep fh
+  return $ do
+    bm <- mBlockMapping
+    (_, trBlock) <- Map.lookup (CA.blockAddress origBlock) (CA.blockMapping bm)
+    let insnList = [ (ix, addr, i)
+                   | (ix, (addr, i)) <- zip [0..] (CA.blockInstructions trBlock)
+                   ]
+    let bs :: BlockState arch s ir
+        bs = BlockState { bsSelection = NoSelection
+                        , bsBlock = trBlock
+                        , bsList = V.fromList insnList
+                        , withConstraints = \a -> a
+                        }
+    return (MapF.Pair rep bs)
   where
     fh = CA.blockFunction origBlock
 
