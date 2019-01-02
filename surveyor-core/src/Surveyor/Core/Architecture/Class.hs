@@ -26,7 +26,10 @@ import           GHC.Generics ( Generic )
 
 import           Control.DeepSeq ( NFData, rnf, deepseq )
 import qualified Control.Once as O
+import qualified Data.ByteString as BS
+import qualified Data.Map as M
 import qualified Data.Parameterized.Nonce as NG
+import qualified Data.Set as S
 import qualified Data.Text as T
 
 import qualified SemMC.Architecture as SA
@@ -117,6 +120,10 @@ class (ArchConstraints arch s) => IR (arch :: *) (s :: *) where
   prettyInstruction :: Address arch s -> Instruction arch s -> T.Text
   prettyOperand :: Address arch s -> Operand arch s -> T.Text
   prettyOpcode :: Opcode arch s -> T.Text
+
+  -- | If the IR has a "raw" representation of instructions (as
+  -- bytes), this is a function that computes it
+  rawRepr :: Maybe (Instruction arch s -> Maybe BS.ByteString)
 
 -- | A formula describing the semantics of an instruction
 data ParameterizedFormula arch s where

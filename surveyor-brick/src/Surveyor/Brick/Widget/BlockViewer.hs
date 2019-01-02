@@ -24,6 +24,7 @@ import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Lens ( (^.), (^?), (&), (.~) )
+import qualified Data.ByteString as BS
 import qualified Data.List as L
 import           Data.Parameterized.Classes
 import           Data.Proxy ( Proxy(..) )
@@ -31,6 +32,7 @@ import qualified Data.Vector as V
 import qualified Fmt as Fmt
 import           Fmt ( (+|), (|+) )
 import qualified Graphics.Vty as V
+import           Text.Printf ( printf )
 
 import qualified Surveyor.Core as C
 import           Surveyor.Brick.Names ( Names(..) )
@@ -118,8 +120,19 @@ renderListItem :: (C.IR arch s)
                -> B.Widget Names
 renderListItem sel _isFocused (idx, addr, i) =
   B.hBox [ B.padRight (B.Pad 2) (B.txt (C.prettyAddress addr))
+         , maybe B.emptyWidget (renderRawRepr i) C.rawRepr
          , renderListItemWithSelection sel idx addr i
          ]
+
+renderRawRepr :: C.Instruction arch s
+              -> (C.Instruction arch s -> Maybe BS.ByteString)
+              -> B.Widget Names
+renderRawRepr i asBytes =
+  case asBytes i of
+    Nothing -> B.txt "<error>"
+    Just bs -> B.padRight (B.Pad 1) (B.hBox (map fmtByte (BS.unpack bs)))
+  where
+    fmtByte b = B.padRight (B.Pad 1) (B.str (printf "%02x" b))
 
 renderListItemWithSelection :: (C.IR arch s)
                             => C.InstructionSelection

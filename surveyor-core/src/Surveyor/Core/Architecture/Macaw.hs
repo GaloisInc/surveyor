@@ -192,6 +192,8 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
     macawPrettyOperand opr
   parseAddress t = (MacawAddress . fromIntegral) <$> ((readMaybe t) :: Maybe Word64)
 
+  rawRepr = Nothing
+
 deriving instance Eq (Address (Macaw arch) s)
 deriving instance Ord (Address (Macaw arch) s)
 instance (MacawConstraints arch s) => Show (Address (Macaw arch) s) where

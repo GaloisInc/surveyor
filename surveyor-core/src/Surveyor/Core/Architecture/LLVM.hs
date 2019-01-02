@@ -181,6 +181,7 @@ instance IR LLVM s where
   -- Will work on what this means - we can probably do something if we also pass
   -- in the analysisresult
   parseAddress _ = Nothing
+  rawRepr = Nothing
 
 instance Architecture LLVM s where
   data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
