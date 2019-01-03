@@ -44,8 +44,8 @@ import qualified Data.Foldable as F
 import qualified Data.Generics.Product as GL
 import qualified Data.Graph.Haggle as H
 import qualified Data.Map as Map
-import           Data.Maybe ( catMaybes, fromMaybe, listToMaybe )
-import           Data.Parameterized.Classes ( atF )
+import           Data.Maybe ( catMaybes, fromMaybe, listToMaybe, mapMaybe )
+import           Data.Parameterized.Classes ( testEquality, (:~:)(Refl), atF )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.TraversableF as TF
 import           Data.Proxy ( Proxy(..) )
@@ -123,14 +123,24 @@ forceBlockState bs@BlockState { withConstraints = withC } =
 
 data BlockState arch s ir =
   BlockState { bsBlock :: CA.Block ir s
-             , bsSelection :: InstructionSelection
+             , bsSelection :: InstructionSelection ir s
              , bsList :: V.Vector (Int, CA.Address ir s, CA.Instruction ir s)
              -- ^ The list is the index of each instruction, the instruction
              -- address, and the instruction itself.
              --
              -- The index is there to make identifying selected instructions
              -- easier
+             , bsBlockMapping :: Maybe (CA.BlockMapping arch ir s)
+             -- ^ We keep the whole block mapping here so that we can sync up
+             -- block selection states across IRs.  We won't necessarily have a
+             -- block map for two reasons:
+             --
+             -- 1) The Base IR won't have one
+             --
+             -- 2) Translation could fail for a block
              , withConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
+             -- ^ A way to recover the 'CA.ArchConstraints' dictionary
+             , bsRepr :: IR.IRRepr arch ir
              }
 
 -- | Make a 'CA.Context' given a 'CA.FunctionHandle' and a 'CA.Block'
@@ -150,7 +160,9 @@ makeContext tcache ares b = do
                              , bsList = V.fromList [ (ix, addr, i)
                                                    | (ix, (addr, i)) <- zip [0..] (CA.blockInstructions b)
                                                    ]
+                             , bsBlockMapping = Nothing
                              , withConstraints = \a -> a
+                             , bsRepr = IR.BaseRepr
                              }
   let (cfg, vm) = mkCFG ares (CA.blockFunction b)
   return Context { cBaseBlock = b
@@ -199,7 +211,9 @@ makeBlockState tcache ares origBlock rep = do
         bs = BlockState { bsSelection = NoSelection
                         , bsBlock = trBlock
                         , bsList = V.fromList insnList
+                        , bsBlockMapping = mBlockMapping
                         , withConstraints = \a -> a
+                        , bsRepr = rep
                         }
     return (MapF.Pair rep bs)
   where
@@ -217,27 +231,27 @@ blockStateBlock = L.to bsBlock
 blockStateList :: L.Getter (BlockState arch s ir) (V.Vector (Int, CA.Address ir s, CA.Instruction ir s))
 blockStateList = L.to bsList
 
-blockStateSelection :: L.Lens' (BlockState arch s ir) InstructionSelection
+blockStateSelection :: L.Lens' (BlockState arch s ir) (InstructionSelection ir s)
 blockStateSelection f bs = fmap (\sel' -> bs { bsSelection = sel' }) (f (bsSelection bs))
 
-data InstructionSelection = NoSelection
-                          | SingleSelection Int (Maybe Int)
-                          -- ^ A single instruction is selected and it may have an operand selected
-                          | MultipleSelection Int (Set.Set Int)
-                          -- ^ Multiple instructions are selected; operands may
-                          -- not be selected in this case.  The primary
-                          -- selection is the first Int.  The other selected
-                          -- instructions are *tagged*
+data InstructionSelection ir s = NoSelection
+                               | SingleSelection Int (CA.Address ir s) (Maybe Int)
+                               -- ^ A single instruction is selected and it may have an operand selected
+                               | MultipleSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
+                               -- ^ Multiple instructions are selected; operands may
+                               -- not be selected in this case.  The primary
+                               -- selection is the first Int.  The other selected
+                               -- instructions are *tagged*
   deriving (Generic)
 
-instance NFData InstructionSelection
+instance (NFData (CA.Address ir s)) => NFData (InstructionSelection ir s)
 
-selectedIndex :: InstructionSelection -> Maybe Int
+selectedIndex :: InstructionSelection ir s -> Maybe Int
 selectedIndex i =
   case i of
     NoSelection -> Nothing
-    SingleSelection ix _ -> Just ix
-    MultipleSelection ix _ -> Just ix
+    SingleSelection ix _ _ -> Just ix
+    MultipleSelection ix _ _ -> Just ix
 
 data ContextStack arch s =
   ContextStack { cStack :: !(Seq.Seq (Context arch s))
@@ -282,10 +296,16 @@ resetBlockSelection cs =
 --
 -- The 'IR.IRRepr' tells us which primary block state to update (while the rest
 -- must be synced to that)
-selectNextInstruction :: IR.IRRepr arch ir -> ContextStack arch s -> ContextStack arch s
+selectNextInstruction :: (Ord (CA.Address ir s), Ord (CA.Address arch s), Show (CA.Address arch s))
+                      => IR.IRRepr arch ir
+                      -> ContextStack arch s
+                      -> ContextStack arch s
 selectNextInstruction = moveInstructionSelection (\nInsns n -> min (nInsns - 1) (n + 1))
 
-selectPreviousInstruction :: IR.IRRepr arch ir -> ContextStack arch s -> ContextStack arch s
+selectPreviousInstruction :: (Ord (CA.Address ir s), Ord (CA.Address arch s), Show (CA.Address arch s))
+                          => IR.IRRepr arch ir
+                          -> ContextStack arch s
+                          -> ContextStack arch s
 selectPreviousInstruction = moveInstructionSelection (\_nInsns n -> max 0 (n - 1))
 
 -- | If possible, move the operand selection to the right by one
@@ -316,8 +336,8 @@ modifyOperandSelection xfrm def mbs = do
     modifyOperand nOperands i =
       case i of
         NoSelection -> NoSelection
-        SingleSelection n Nothing -> SingleSelection n (Just (def nOperands))
-        SingleSelection n (Just opIdx) -> SingleSelection n (Just (xfrm nOperands opIdx))
+        SingleSelection n addr Nothing -> SingleSelection n addr (Just (def nOperands))
+        SingleSelection n addr (Just opIdx) -> SingleSelection n addr (Just (xfrm nOperands opIdx))
         MultipleSelection {} -> i
 
 moveBlockSelection :: (H.PatriciaTree (CA.Block arch s) () -> H.Vertex -> [H.Vertex])
@@ -341,17 +361,65 @@ selectPreviousBlock = moveBlockSelection H.predecessors
 -- This is complicated because state has to be synced across our internal view
 -- and the Brick list UI widget view.  Moreover, moving the selection in one
 -- view forces us to sync across the other views, too.
-moveInstructionSelection :: (Int -> Int -> Int)
+moveInstructionSelection :: (Ord (CA.Address ir s), Ord (CA.Address arch s), Show (CA.Address arch s))
+                         => (Int -> Int -> Int)
                          -- ^ A numeric transformation on the currently-selected index
                          -> IR.IRRepr arch ir
                          -> ContextStack arch s
                          -> ContextStack arch s
 moveInstructionSelection modSel repr cs0 =
-  cs1 & currentContext . contextBlockStates %~ TF.fmapF (syncOtherStates repr)
+  cs2 & currentContext . contextBlockStates %~ TF.fmapF (syncOtherStates repr (cs2 ^? currentContext . contextBlockStates))
   where
     cs1 = cs0 & currentContext . contextBlockStates . atF repr %~ moveNext
+    cs2 = cs1 & currentContext . contextBlockStates . atF IR.BaseRepr %~ syncBaseState repr (cs1 ^? currentContext . contextBlockStates)
     moveNext Nothing = Nothing
     moveNext (Just bs) = Just (bs & blockStateSelection %~ modifySelection modSel bs)
+
+-- | Sync the base IR state to the target IR state using irToBaseAddrs (unless base is target)
+syncBaseState :: (Ord (CA.Address targetIR s), Ord (CA.Address arch s))
+              => IR.IRRepr arch targetIR
+              -- ^ The IR whose state that the user updated
+              -> Maybe (MapF.MapF (IR.IRRepr arch) (BlockState arch s))
+              -- ^ The current states (where the target IR has been updated, but
+              -- none of the others have).  It will always be a Just, but our
+              -- lens doesn't really let us state that easily.
+              -> Maybe (BlockState arch s arch)
+              -- ^ State to update
+              -> Maybe (BlockState arch s arch)
+syncBaseState _ _ Nothing = Nothing
+syncBaseState updatedIR mBlkStMap (Just bs)
+  | Just Refl <- testEquality updatedIR (bsRepr bs) = Just bs
+  | otherwise = fromMaybe (Just bs) $ do
+      blkStMap <- mBlkStMap
+      updatedBS <- MapF.lookup updatedIR blkStMap
+      bm <- bsBlockMapping updatedBS
+      case bsSelection updatedBS of
+        NoSelection -> return (Just bs)
+        SingleSelection _ix addr _ -> do
+          baseAddrs <- Map.lookup addr (CA.irToBaseAddrs bm)
+          -- Find the indices of the addrs here in bs
+          makeNextSelection baseAddrs
+        MultipleSelection _ix addr tagged -> do
+          let addrs = addr : map snd (F.toList tagged)
+          let baseAddrs = Set.unions (mapMaybe (\a -> Map.lookup a (CA.irToBaseAddrs bm)) addrs)
+          makeNextSelection baseAddrs
+  where
+    makeNextSelection baseAddrs =
+      case F.foldr (addSelectedAddrs baseAddrs) [] (bsList bs) of
+        [] -> return (Just bs)
+        [(singIx, singAddr)] -> return $ Just bs { bsSelection = SingleSelection singIx singAddr Nothing }
+        (selIx, selAddr) : rest ->
+          return $ Just bs { bsSelection = MultipleSelection selIx selAddr (Set.fromList rest) }
+
+addSelectedAddrs :: (Ord (CA.Address ir s))
+                 => Set.Set (CA.Address ir s)
+                 -> (Int, CA.Address ir s, a)
+                 -> [(Int, CA.Address ir s)]
+                 -> [(Int, CA.Address ir s)]
+addSelectedAddrs selAddrs (ix, addr, _i) lst =
+  case Set.member addr selAddrs of
+    True -> (ix, addr) : lst
+    False -> lst
 
 -- | Given a 'BlockState', sync all of the selected instructions of the
 -- different IRs to the state of the IR with the given repr.
@@ -359,20 +427,64 @@ moveInstructionSelection modSel repr cs0 =
 -- This requires support from the underlying class infrastructure to determine
 -- the correspondences between instructions.
 --
--- FIXME: Implement this
-syncOtherStates :: IR.IRRepr arch targetIR -> BlockState arch s ir -> BlockState arch s ir
-syncOtherStates _ = id
+-- The idea is that we'll first update the base IR (outside of this function)
+-- and then, for each IR:
+--
+-- * If the IR is the modified IR (passed as an argument), do nothing (already updated)
+--
+-- * If the IR is base, do nothing (already updated)
+--
+-- * Otherwise, use the baseToIRAddrs map to update this state
+syncOtherStates :: (Ord (CA.Address arch s), Show (CA.Address arch s))
+                => IR.IRRepr arch targetIR
+                -> Maybe (MapF.MapF (IR.IRRepr arch) (BlockState arch s))
+                -> BlockState arch s ir
+                -> BlockState arch s ir
+syncOtherStates updatedIR mBlkStMap bs
+  | Just Refl <- testEquality updatedIR (bsRepr bs) = bs
+  | Just Refl <- testEquality IR.BaseRepr (bsRepr bs) = bs
+  | otherwise = withConstraints bs $ fromMaybe bs $ do
+      blkStMap <- mBlkStMap
+      -- The Base IR has been synced to whatever the update was, so we can use
+      -- 'baseToIRAddrs' (of *bs*) to figure out what should be selected.
+      baseBS <- MapF.lookup IR.BaseRepr blkStMap
+      bm <- bsBlockMapping bs
+      case bsSelection baseBS of
+        NoSelection -> return bs
+        SingleSelection _ix addr _ -> do
+          irAddrs <- Map.lookup addr (CA.baseToIRAddrs bm)
+          makeNextSelection irAddrs
+        MultipleSelection _ix addr tagged -> do
+          let oldIRSels = addr : map snd (F.toList tagged)
+          let irAddrs = Set.unions (mapMaybe (\a -> Map.lookup a (CA.baseToIRAddrs bm)) oldIRSels)
+          makeNextSelection irAddrs
+  where
+    makeNextSelection irAddrs = withConstraints bs $
+      case F.foldr (addSelectedAddrs irAddrs) [] (bsList bs) of
+        [] -> return bs
+        [(singIx, singAddr)] -> return bs { bsSelection = SingleSelection singIx singAddr Nothing }
+        (selIx, selAddr) : rest ->
+          return bs { bsSelection = MultipleSelection selIx selAddr (Set.fromList rest) }
+
 
 -- | Increment the current selection
 --
 -- If nothing is selected, we select the first instruction
-modifySelection :: (Int -> Int -> Int) -> BlockState arch s ir -> InstructionSelection -> InstructionSelection
+modifySelection :: (Int -> Int -> Int) -> BlockState arch s ir -> InstructionSelection ir s -> InstructionSelection ir s
 modifySelection modSel bs i =
   case i of
     NoSelection
-      | nInsns > 0 -> SingleSelection 0 Nothing
+      | nInsns > 0 ->
+        let (_, addr, _) = bsList bs V.! 0
+        in SingleSelection 0 addr Nothing
       | otherwise -> NoSelection
-    SingleSelection n _ -> SingleSelection (modSel nInsns n) Nothing
-    MultipleSelection n sels -> MultipleSelection (modSel nInsns n) sels
+    SingleSelection n _ _ -> fromMaybe i $ do
+      let newIdx = modSel nInsns n
+      (_, addr, _) <- bsList bs V.!? newIdx
+      return (SingleSelection newIdx addr Nothing)
+    MultipleSelection n _ sels -> fromMaybe i $ do
+      let newIdx = modSel nInsns n
+      (_, addr, _) <- bsList bs V.!? newIdx
+      return (MultipleSelection newIdx addr sels)
   where
     nInsns = F.length (bs ^. blockStateList)

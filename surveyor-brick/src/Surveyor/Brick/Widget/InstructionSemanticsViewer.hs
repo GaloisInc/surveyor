@@ -45,7 +45,7 @@ renderInstructionSemanticsViewer ares cs _
       case blkState ^. C.blockStateSelection of
         C.NoSelection -> B.txt "No selected instruction"
         C.MultipleSelection {} -> B.txt "Multiple instructions selected"
-        C.SingleSelection ix _ ->
+        C.SingleSelection ix _addr _ ->
           let insns = blkState ^. C.blockStateList
           in case insns V.!? ix of
             Nothing -> B.txt (Fmt.fmt ("ERROR: Instruction index out of range: " +| ix |+ ""))

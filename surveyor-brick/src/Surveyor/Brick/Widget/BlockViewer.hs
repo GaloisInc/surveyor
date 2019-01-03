@@ -115,7 +115,7 @@ mkBlockListState names blkState =
     l0 = B.list names (blkState ^. C.blockStateList) 1
 
 renderListItem :: (C.IR arch s)
-               => C.InstructionSelection
+               => C.InstructionSelection arch s
                -> Bool
                -> (Int, C.Address arch s, C.Instruction arch s)
                -> B.Widget Names
@@ -136,7 +136,7 @@ renderRawRepr i asBytes =
     fmtByte b = B.padRight (B.Pad 1) (B.str (printf "%02x" b))
 
 renderListItemWithSelection :: (C.IR arch s)
-                            => C.InstructionSelection
+                            => C.InstructionSelection arch s
                             -> Int
                             -> C.Address arch s
                             -> C.Instruction arch s
@@ -144,14 +144,14 @@ renderListItemWithSelection :: (C.IR arch s)
 renderListItemWithSelection sel idx addr i =
   case sel of
     C.NoSelection -> renderInstruction addr i Nothing
-    C.SingleSelection selIdx Nothing
+    C.SingleSelection selIdx _addr Nothing
       | selIdx /= idx -> renderInstruction addr i Nothing
       | otherwise -> highlightWidget True (renderInstruction addr i Nothing)
-    C.SingleSelection selIdx (Just selectedOperand)
+    C.SingleSelection selIdx _addr (Just selectedOperand)
       | selIdx /= idx -> renderInstruction addr i Nothing
       | otherwise -> renderInstruction addr i (Just selectedOperand)
-    C.MultipleSelection selIdx tagged
-      | idx == selIdx || idx `S.member` tagged -> highlightWidget True (renderInstruction addr i Nothing)
+    C.MultipleSelection selIdx _addr tagged
+      | idx == selIdx || idx `S.member` S.map fst tagged -> highlightWidget True (renderInstruction addr i Nothing)
       | otherwise -> renderInstruction addr i Nothing
 
 highlightWidget :: Bool -> B.Widget n -> B.Widget n

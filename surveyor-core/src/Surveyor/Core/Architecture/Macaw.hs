@@ -51,7 +51,7 @@ import Surveyor.Core.Architecture.Class
 import Surveyor.Core.IRRepr ( Macaw )
 
 macawForBlocks :: forall arch s
-                . (MC.MemWidth (MC.ArchAddrWidth arch), Ord (Address arch s))
+                . (MC.MemWidth (MC.ArchAddrWidth arch), Ord (Address arch s), MC.ArchConstraints arch, Show (Address arch s))
                => (MC.MemAddr (MC.ArchAddrWidth arch) -> Address arch s)
                -> PN.NonceGenerator IO s
                -> R.BlockInfo arch
@@ -77,26 +77,26 @@ macawForBlocks toArchAddr nonceGen binfo faddr blocks = do
                                   | (origBlock, mblock) <- pairs
                                   ]
 
-buildMacawInstIndex :: (Ord (Address arch s))
+buildMacawInstIndex :: (Ord (Address arch s), MC.MemWidth (MC.ArchAddrWidth arch))
                     => (MC.MemAddr (MC.ArchAddrWidth arch) -> Address arch s)
                     -> (Address (Macaw arch) s, Instruction (Macaw arch) s)
                     -> (Maybe (Address arch s), M.Map (Address (Macaw arch) s) (S.Set (Address arch s)))
                     -> (Maybe (Address arch s), M.Map (Address (Macaw arch) s) (S.Set (Address arch s)))
 buildMacawInstIndex toArchAddr (iaddr, i) acc@(mCurrentInsnAddr, m) =
-  case mCurrentInsnAddr of
-    -- If we can't establish a mapping, just omit it from the map entirely
-    Nothing -> acc
-    Just cia ->
-      case i of
-        MacawTermStmt _ _ ->
-          (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
-        MacawStmt s _ _ ->
-          case s of
-            MC.Comment {} -> acc
-            MC.InstructionStart addr _ ->
-              let cia' = toArchAddr (MC.absoluteAddr addr)
-              in (Just cia', M.insertWith S.union iaddr (S.singleton cia') m)
-            _ -> (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
+  case i of
+    MacawTermStmt _ _
+      | Just cia <- mCurrentInsnAddr ->
+        (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
+      | otherwise -> acc
+    MacawInstructionStart baddr off _stmt _ ->
+      let cia' = toArchAddr (MC.incAddr (fromIntegral off) (MC.segoffAddr baddr))
+      in (Just cia', M.insertWith S.union iaddr (S.singleton cia') m)
+    MacawStmt s _ _ ->
+      case s of
+        MC.Comment {} -> acc
+        _ | Just cia <- mCurrentInsnAddr ->
+              (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
+          | otherwise -> acc
 
 flipAddressMap :: (Ord (Address arch s))
                => M.Map (Address (Macaw arch) s) (S.Set (Address arch s))
@@ -134,11 +134,17 @@ toMacawBlock nonceGen dfi fh (baddr, b) = do
           [] -> do
             ops <- macawTermStmtOperands cache nonceGen term
             return [(InstructionNumber insnIdx, MacawTermStmt term ops)]
-          s:stmts -> do
-            mbv <- macawBoundValue cache nonceGen s
-            ops <- macawStmtOperands cache nonceGen s
-            rest <- buildInsnList cache (insnIdx + 1) stmts term
-            return ((InstructionNumber insnIdx, MacawStmt s mbv ops) : rest)
+          s:stmts ->
+            case s of
+              MC.InstructionStart off _ -> do
+                ops <- macawStmtOperands cache nonceGen s
+                rest <- buildInsnList cache (insnIdx + 1) stmts term
+                return ((InstructionNumber insnIdx, MacawInstructionStart baddr off s ops) : rest)
+              _ -> do
+                mbv <- macawBoundValue cache nonceGen s
+                ops <- macawStmtOperands cache nonceGen s
+                rest <- buildInsnList cache (insnIdx + 1) stmts term
+                return ((InstructionNumber insnIdx, MacawStmt s mbv ops) : rest)
 
 data NonceCache ids s where
   NonceCache :: forall (oldNonce :: MT.Type -> *) (newNonce :: MT.Type -> *) ids s
@@ -202,6 +208,7 @@ type MacawConstraints arch s = ( Ord (Address (Macaw arch) s)
 
 instance (MacawConstraints arch s) => IR (Macaw arch) s where
   data Instruction (Macaw arch) s = forall ids . MacawStmt (MC.Stmt arch ids) (Maybe (Operand (Macaw arch) s)) [Operand (Macaw arch) s]
+                                  | forall ids . MacawInstructionStart (MC.ArchSegmentOff arch) (MC.ArchAddrWord arch) (MC.Stmt arch ids) [Operand (Macaw arch) s]
                                   | forall ids . MacawTermStmt (MC.ParsedTermStmt arch ids) [Operand (Macaw arch) s]
   data Address (Macaw arch) s = MacawAddress (MC.ArchAddrWord arch)
                               | BlockNumber Word64
@@ -210,18 +217,21 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
   data Opcode (Macaw arch) s = MacawOpcode (MacawOpcode arch s)
 
   boundValue (MacawStmt _stmt mbv _) = mbv
+  boundValue (MacawInstructionStart {}) = Nothing
   boundValue (MacawTermStmt _ _) = Nothing
 
   operands (MacawStmt _stmt _ ops) = ops
+  operands (MacawInstructionStart _ _ _ ops) = ops
   operands (MacawTermStmt _stmt ops) = ops
   opcode (MacawStmt stmt _ _) = macawStmtOpcode stmt
+  opcode (MacawInstructionStart _ _ stmt _) = macawStmtOpcode stmt
   opcode (MacawTermStmt stmt _) = macawTermStmtOpcode stmt
   prettyInstruction addr (MacawStmt stmt _ _) =
     case addr of
       MacawAddress a -> T.pack (show (MC.ppStmt (\off -> PP.text (show (a + off))) stmt))
       BlockNumber _ -> Fmt.fmt ("" +|MC.ppStmt (\off -> PP.text (show off)) stmt||+ "")
       InstructionNumber i -> Fmt.fmt ("i" +|i|+ "")
-
+  prettyInstruction _ (MacawInstructionStart _ _ stmt _) = T.pack (show stmt)
   prettyInstruction _ (MacawTermStmt stmt _) = T.pack (show stmt)
   prettyAddress a =
     case a of
@@ -251,6 +261,7 @@ instance NFData (Instruction (Macaw arch) s) where
     case i of
       MacawStmt !_s binder ops -> binder `deepseq` ops `deepseq` ()
       MacawTermStmt !_ts ops -> ops `deepseq` ()
+      MacawInstructionStart !_ !_ !_ ops -> ops `deepseq` ()
 
 instance NFData (Operand (Macaw arch) s) where
   rnf (MacawOperand !_nonce mo) = mo `deepseq` ()
