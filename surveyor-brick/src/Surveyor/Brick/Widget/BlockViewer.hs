@@ -92,8 +92,8 @@ renderBlockViewer _ares cs (BlockViewer names repr)
     irIndicators = map toIRLabel (C.SomeIRRepr C.BaseRepr : C.alternativeIRs (Proxy @(arch, s)))
     toIRLabel (C.SomeIRRepr r)
       | Just Refl <- testEquality r repr =
-          B.withAttr B.listSelectedFocusedAttr (B.str (showF r))
-      | otherwise = B.str (showF r)
+          B.withAttr B.listSelectedFocusedAttr (B.txt (Fmt.fmt ("[" +| showF r |+ "]")))
+      | otherwise = B.txt (Fmt.fmt ("[" +| showF r |+ "]"))
 
 -- | Construct a state for the block list widget on-demand based on the state in
 -- the context
