@@ -62,6 +62,11 @@ import           Surveyor.Core.IRRepr ( Crucible )
 -- different for JVM and LLVM
 type family CrucibleExt arch
 
+-- | Build a 'BlockMapping' for a given function, mapping machine code blocks to
+-- their crucible equivalents.  Note: there are some cases where some blocks
+-- will not have a direct mapping.
+--
+-- NOTE: We also currently do not build the base-to-ir instruction address mapping
 crucibleForMCBlocks :: forall arch s
                      . (CrucibleConstraints arch s, CrucibleExt arch ~ MS.MacawExt arch)
                     => PN.NonceGenerator IO s
@@ -90,8 +95,11 @@ crucibleForMCBlocks ng binfo faddr blocks = do
                                     | (origBlock, cblock) <- pairs
                                     ]
 
+-- | Turn a single Crucible block into a block in our representation, pairing it
+-- up with the machine code block that corresponds to it.
+--
 -- There is no good way to establish a mapping from machine blocks to crucible
--- blocks right now
+-- blocks right now, so we have to resort to a heuristic.
 --
 -- We can do something reasonable by looking at the archstateupdate instructions
 -- to figure out which addresses are covered, and just pick the first one for
@@ -135,6 +143,9 @@ toMCCrucibleBlock ng blockIndex faddr fh b = do
           let iaddr = CrucibleAddress (InstructionAddr baddr iidx)
           case stmt of
             C.ExtendAssign (MS.MacawArchStateUpdate mcAddr _) ->
+              -- In this case, we use the metadata instruction to attempt to
+              -- figure out which machine code block this crucible block
+              -- corresponds to.
               return (Just (takeMinAddr (Proxy @arch) mMinAddr mcAddr), ((iaddr, cstmt) : rest))
             _ -> return (mMinAddr, ((iaddr, cstmt) : rest))
         C.TermStmt _loc term -> do
@@ -159,25 +170,6 @@ type CrucibleConstraints arch s = ( Ord (Address (Crucible arch) s)
                                   , C.PrettyExt (CrucibleExt arch)
                                   )
 
-instance NFData (Address (Crucible arch) s) where
-  rnf (CrucibleAddress a) =
-    case a of
-      FunctionAddr !_w -> ()
-      BlockAddr !_fa !_idx -> ()
-      InstructionAddr !_ba !_idx -> ()
-
-instance Eq (Address (Crucible arch) s) where
-  CrucibleAddress a1 == CrucibleAddress a2 = isJust (testEquality a1 a2)
-
-instance Ord (Address (Crucible arch) s) where
-  compare (CrucibleAddress a1) (CrucibleAddress a2) = toOrdering (compareF a1 a2)
-
-instance Show (Address (Crucible arch) s) where
-  show (CrucibleAddress a) = show a
-
-instance NFData (Instruction (Crucible arch) s) where
-  rnf _i = ()
-
 data AddrK = FunctionK
            | BlockK
            | InstructionK
@@ -186,13 +178,6 @@ data Addr tp where
   FunctionAddr :: Word64 -> Addr 'FunctionK
   BlockAddr :: Addr 'FunctionK -> Int -> Addr 'BlockK
   InstructionAddr :: Addr 'BlockK -> Int -> Addr 'InstructionK
-
-instance Show (Addr tp) where
-  show a =
-    case a of
-      FunctionAddr w -> printf "0x%x" w
-      BlockAddr fa idx -> printf "%s[%s]" (show fa) (show idx)
-      InstructionAddr ba idx -> printf "%s@%s" (show ba) (show idx)
 
 instance (CrucibleConstraints arch s) => IR (Crucible arch) s where
   data Instruction (Crucible arch) s =
@@ -236,6 +221,8 @@ data CrucibleOperand arch s where
   FloatLit :: Float -> CrucibleOperand arch s
   DoubleLit :: Double -> CrucibleOperand arch s
 
+  BaseTypedBinder :: C.BaseTypeRepr tp -> C.Reg ctx (C.BaseToType tp) -> CrucibleOperand arch s
+  TypedBinder :: C.TypeRepr tp -> C.Reg ctx tp -> CrucibleOperand arch s
   Reg :: C.Reg ctx tp -> CrucibleOperand arch s
   GlobalVar :: C.GlobalVar tp -> CrucibleOperand arch s
   RoundingMode :: C.RoundingMode -> CrucibleOperand arch s
@@ -317,6 +304,8 @@ cruciblePrettyOperand o =
     DoubleLit d -> T.pack (show d)
 
     Reg r -> T.pack (show r)
+    TypedBinder tp r -> Fmt.fmt ("" +| r ||+ ":[" +| tp ||+ "]")
+    BaseTypedBinder tp r -> Fmt.fmt ("" +| r ||+ ":[" +| tp ||+ "]")
     GlobalVar g -> T.pack (show g)
     RoundingMode rm -> T.pack (show rm)
     FnHandle fh -> T.pack (show fh)
@@ -324,12 +313,12 @@ cruciblePrettyOperand o =
     BaseTerm bt -> Fmt.fmt ("" +| C.baseTermVal bt ||+ ":" +| C.baseTermType bt ||+ "")
     JumpTarget bid -> T.pack (show bid)
 
-    BaseTypeRepr rep -> T.pack (show rep)
-    TypeRepr rep -> T.pack (show rep)
-    FloatInfoRepr rep -> T.pack (show rep)
-    NatRepr rep -> Fmt.fmt ("NatRep[" +| rep ||+ "]")
-    SymbolRepr rep -> Fmt.fmt ("SymbolRep[" +| rep ||+ "]")
-    CtxRepr rep -> T.pack (show rep)
+    BaseTypeRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
+    TypeRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
+    FloatInfoRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
+    NatRepr rep -> Fmt.fmt ("[NatRepr " +| rep ||+ "]")
+    SymbolRepr rep -> Fmt.fmt ("[SymbolRepr " +| rep ||+ "]")
+    CtxRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
 
 cruciblePrettyOpcode :: (CrucibleConstraints arch s) => CrucibleOpcode arch s -> T.Text
 cruciblePrettyOpcode o =
@@ -551,12 +540,16 @@ toRegOp cache r =
 
 nextCache :: Ctx.Assignment (PN.Nonce s) ctx
           -> PN.NonceGenerator IO s
-          -> IO (NonceCache s (ctx Ctx.::> x), Operand (Crucible arch) s)
-nextCache cache ng = do
+          -> Maybe (C.Reg (ctx Ctx.::> tp) tp -> CrucibleOperand arch s)
+          -> IO (NonceCache s (ctx Ctx.::> tp), Operand (Crucible arch) s)
+nextCache cache ng mTyCon = do
   n <- PN.freshNonce ng
   let creg = C.Reg (Ctx.nextIndex (Ctx.size cache))
-  let reg = CrucibleOperand n (Reg creg)
-  return (NonceCache (Ctx.extend cache n), reg)
+  case mTyCon of
+    Nothing -> do
+      let reg = CrucibleOperand n (Reg creg)
+      return (NonceCache (Ctx.extend cache n), reg)
+    Just con -> return (NonceCache (Ctx.extend cache n), CrucibleOperand n (con creg))
 
 initialCache :: PN.NonceGenerator IO s -> C.CtxRepr ctx -> IO (NonceCache s ctx)
 initialCache ng cr = NonceCache <$> FC.traverseFC (\_ -> PN.freshNonce ng) cr
@@ -614,12 +607,12 @@ crucibleStmtOperands nc@(NonceCache cache) ng stmt =
                            ])
     C.ReadGlobal gv -> do
       n1 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng
+      (nc', binder) <- nextCache cache ng (Just (TypedBinder (C.globalType gv)))
       return (nc', Just binder, [CrucibleOperand n1 (GlobalVar gv)])
     C.FreshConstant tp msym -> do
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng
+      (nc', binder) <- nextCache cache ng (Just (BaseTypedBinder tp))
       case msym of
         Nothing -> return (nc', Just binder, [CrucibleOperand n2 (BaseTypeRepr tp)])
         Just sym -> return (nc', Just binder, [ CrucibleOperand n2 (BaseTypeRepr tp)
@@ -627,16 +620,16 @@ crucibleStmtOperands nc@(NonceCache cache) ng stmt =
                                               ])
     C.NewRefCell tp r -> do
       n1 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng
+      (nc', binder) <- nextCache cache ng Nothing
       return (nc', Just binder, [ CrucibleOperand n1 (TypeRepr tp)
                                 , toRegOp cache r
                                 ])
     C.NewEmptyRefCell tp -> do
       n1 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng
+      (nc', binder) <- nextCache cache ng Nothing
       return (nc', Just binder, [CrucibleOperand n1 (TypeRepr tp)])
     C.ReadRefCell r -> do
-      (nc', binder) <- nextCache cache ng
+      (nc', binder) <- nextCache cache ng Nothing
       return (nc', Just binder, [toRegOp cache r])
     C.WriteRefCell rr r -> do
       return (nc, Nothing, [toRegOp cache rr, toRegOp cache r])
@@ -648,20 +641,17 @@ crucibleStmtOperands nc@(NonceCache cache) ng stmt =
       return (nc, Nothing, [toRegOp cache r, toRegOp cache msg])
     C.ExtendAssign ext -> do
       -- FIXME: Need a mechanism to traverse the extensions
-      (nc', binder) <- nextCache cache ng
+      (nc', binder) <- nextCache cache ng Nothing
       return (nc', Just binder, [])
     C.CallHandle rep fh _reprs args -> do
-      n1 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng
-      return (nc', Just binder, ( CrucibleOperand n1 (TypeRepr rep)
-                                  : toRegOp cache fh
-                                  : FC.toListFC (toRegOp cache) args
+      (nc', binder) <- nextCache cache ng (Just (TypedBinder rep))
+      return (nc', Just binder, ( toRegOp cache fh
+                                : FC.toListFC (toRegOp cache) args
                                 ))
     C.SetReg tp (C.App app) -> do
-      n1 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng
+      (nc', binder) <- nextCache cache ng (Just (TypedBinder tp))
       ops <- crucibleAppOperands nc ng app
-      return (nc', Just binder, CrucibleOperand n1 (TypeRepr tp) : ops )
+      return (nc', Just binder, ops)
 
 -- | Note that this cannot add cache entries
 crucibleAppOperands :: NonceCache s ctx
@@ -1020,11 +1010,9 @@ crucibleAppOperands (NonceCache cache) ng app =
     C.BVUndef nrep -> do
       n1 <- PN.freshNonce ng
       return [ CrucibleOperand n1 (NatRepr nrep) ]
-    C.BVLit nr i -> do
-      n1 <- PN.freshNonce ng
+    C.BVLit _nr i -> do
       n2 <- PN.freshNonce ng
-      return [ CrucibleOperand n1 (NatRepr nr)
-             , CrucibleOperand n2 (IntegerLit i)
+      return [ CrucibleOperand n2 (IntegerLit i)
              ]
     C.BVConcat nrep1 nrep2 r1 r2 -> do
       n1 <- PN.freshNonce ng
@@ -1344,6 +1332,34 @@ crucibleAppOperands (NonceCache cache) ng app =
 
     -- FIXME
     C.ExtensionApp _ -> return []
+
+
+instance NFData (Address (Crucible arch) s) where
+  rnf (CrucibleAddress a) =
+    case a of
+      FunctionAddr !_w -> ()
+      BlockAddr !_fa !_idx -> ()
+      InstructionAddr !_ba !_idx -> ()
+
+instance Eq (Address (Crucible arch) s) where
+  CrucibleAddress a1 == CrucibleAddress a2 = isJust (testEquality a1 a2)
+
+instance Ord (Address (Crucible arch) s) where
+  compare (CrucibleAddress a1) (CrucibleAddress a2) = toOrdering (compareF a1 a2)
+
+instance Show (Address (Crucible arch) s) where
+  show (CrucibleAddress a) = show a
+
+instance NFData (Instruction (Crucible arch) s) where
+  rnf _i = ()
+
+instance Show (Addr tp) where
+  show a =
+    case a of
+      FunctionAddr w -> printf "0x%x" w
+      BlockAddr fa idx -> printf "%s[%s]" (show fa) (show idx)
+      InstructionAddr ba idx -> printf "%s@%s" (show ba) (show idx)
+
 
 $(return [])
 
