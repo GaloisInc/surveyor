@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Surveyor.Brick.Command (
   showMacawBlockC,
+  showCrucibleBlockC,
   showBaseBlockC,
   showInstructionSemanticsC,
   extraCommands
@@ -20,6 +21,7 @@ type Callback s st tps = C.Chan (C.Events s st) -> Maybe (C.SomeNonce s) -> PL.L
 
 extraCommands :: [Some (C.Command (C.Events s st) (Maybe (C.SomeNonce s)) (Argument s st) C.TypeRepr)]
 extraCommands = [ Some showMacawBlockC
+                , Some showCrucibleBlockC
                 , Some showBaseBlockC
                 , Some showInstructionSemanticsC
                 ]
@@ -36,6 +38,19 @@ showMacawBlockC =
         Just (C.SomeNonce archNonce) -> do
           C.writeChan eventChan (C.LogDiagnostic (Just C.LogDebug) "Showing macaw IR")
           C.writeChan eventChan (C.ViewBlock archNonce C.MacawRepr)
+
+showCrucibleBlockC :: forall s t . Command s t '[]
+showCrucibleBlockC =
+  C.Command "show-crucible-block" doc PL.Nil PL.Nil callback
+  where
+    doc = "Show the crucible IR of the currently-selected block"
+    callback :: Callback s st '[]
+    callback = \eventChan mNonce PL.Nil ->
+      case mNonce of
+        Nothing -> return ()
+        Just (C.SomeNonce archNonce) -> do
+          C.writeChan eventChan (C.LogDiagnostic (Just C.LogDebug) "Showing crucible IR")
+          C.writeChan eventChan (C.ViewBlock archNonce C.CrucibleRepr)
 
 showBaseBlockC :: forall s t . Command s t '[]
 showBaseBlockC =

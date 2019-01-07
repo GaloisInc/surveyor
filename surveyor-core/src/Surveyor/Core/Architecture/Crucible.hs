@@ -1,0 +1,1356 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+module Surveyor.Core.Architecture.Crucible (
+  Crucible,
+  CrucibleExt,
+  crucibleForMCBlocks
+  ) where
+
+import           Control.DeepSeq ( NFData(rnf) )
+import           Control.Lens ( (^.) )
+import qualified Data.Foldable as F
+import           Data.Functor.Const ( Const(Const, getConst) )
+import           Data.Kind ( Type )
+import qualified Data.Macaw.CFG as MC
+import qualified Data.Macaw.Symbolic as MS
+import qualified Data.Macaw.Symbolic.CrucGen as MS
+import qualified Data.Map as Map
+import           Data.Maybe ( catMaybes, isJust )
+import           Data.Parameterized.Classes ( TestEquality(testEquality), OrdF(compareF), toOrdering )
+import qualified Data.Parameterized.Context as Ctx
+import qualified Data.Parameterized.NatRepr as NR
+import qualified Data.Parameterized.Nonce as PN
+import qualified Data.Parameterized.SymbolRepr as PS
+import qualified Data.Parameterized.TraversableFC as FC
+import qualified Data.Parameterized.TH.GADT as PTH
+import           Data.Proxy ( Proxy(..) )
+import qualified Data.Text as T
+import           Data.Word ( Word64 )
+import qualified Fmt as Fmt
+import           Fmt ( (+|), (|+), (||+) )
+import qualified Lang.Crucible.CFG.Core as C
+import qualified Lang.Crucible.CFG.Expr as C
+import qualified Lang.Crucible.FunctionHandle as CFH
+import           Numeric.Natural ( Natural )
+import qualified Renovate as R
+import qualified Text.PrettyPrint.ANSI.Leijen as PP
+import           Text.Printf ( printf )
+import qualified What4.FunctionName as WF
+import qualified What4.Symbol as WS
+
+import           Surveyor.Core.Architecture.Class
+import           Surveyor.Core.IRRepr ( Crucible )
+
+-- | The type of the crucible extension for this architecture
+--
+-- For machine code architectures, it will be the MacawExt.  It will be
+-- different for JVM and LLVM
+type family CrucibleExt arch
+
+crucibleForMCBlocks :: forall arch s
+                     . (CrucibleConstraints arch s, CrucibleExt arch ~ MS.MacawExt arch)
+                    => PN.NonceGenerator IO s
+                    -> R.BlockInfo arch
+                    -> R.ConcreteAddress arch
+                    -> [(MC.ArchSegmentOff arch, Block arch s)]
+                    -> IO (Maybe (BlockMapping arch (Crucible arch) s))
+crucibleForMCBlocks ng binfo faddr blocks = do
+  case Map.lookup faddr (R.biCFG binfo) of
+    Nothing -> return Nothing
+    Just symCFGRef -> do
+      C.SomeCFG symCFG <- R.getSymbolicCFG symCFGRef
+      let fa = FunctionAddr (fromIntegral (R.absoluteAddress faddr))
+      let fh :: FunctionHandle (Crucible arch) s
+          fh = FunctionHandle { fhAddress = CrucibleAddress fa
+                              , fhName = WF.functionName (CFH.handleName (C.cfgHandle symCFG))
+                              }
+      let blkIdx = Map.fromList [(MC.segoffAddr a, b) | (a, b) <- blocks]
+      blks <- FC.traverseFC (toMCCrucibleBlock ng blkIdx fa fh) (C.cfgBlockMap symCFG)
+      return $ Just $ BlockMapping { baseToIRAddrs = Map.empty
+                                   , irToBaseAddrs = Map.empty
+                                   , blockMapping = toBlockMap (catMaybes (FC.toListFC getConst blks))
+                                   }
+  where
+    toBlockMap pairs = Map.fromList [ (blockAddress origBlock, (origBlock, cblock))
+                                    | (origBlock, cblock) <- pairs
+                                    ]
+
+-- There is no good way to establish a mapping from machine blocks to crucible
+-- blocks right now
+--
+-- We can do something reasonable by looking at the archstateupdate instructions
+-- to figure out which addresses are covered, and just pick the first one for
+-- each crucible block.
+toMCCrucibleBlock :: forall arch s blocks ret ctx
+                   . (CrucibleConstraints arch s, CrucibleExt arch ~ MS.MacawExt arch)
+                  => PN.NonceGenerator IO s
+                  -> Map.Map (MC.MemAddr (MC.ArchAddrWidth arch)) (Block arch s)
+                  -> Addr 'FunctionK
+                  -> FunctionHandle (Crucible arch) s
+                  -> C.Block (CrucibleExt arch) blocks ret ctx
+                  -> IO (Const (Maybe (Block arch s, Block (Crucible arch) s)) ctx)
+toMCCrucibleBlock ng blockIndex faddr fh b = do
+  c0 <- initialCache ng (C.blockInputs b)
+  let baddr = BlockAddr faddr (Ctx.indexVal (C.blockIDIndex (C.blockID b)))
+  (mMinAddr, stmts) <- buildBlock c0 baddr 0 (b ^. C.blockStmts)
+  let cb = Block { blockFunction = fh
+                 , blockAddress = CrucibleAddress baddr
+                 , blockInstructions = stmts
+                 }
+  case mMinAddr of
+    Just minAddr ->
+      case Map.lookup minAddr blockIndex of
+        Just archBlock -> return (Const (Just (archBlock, cb)))
+        Nothing -> return (Const Nothing)
+    Nothing -> return (Const Nothing)
+  where
+    buildBlock :: NonceCache s ctx'
+               -> Addr 'BlockK
+               -> Int
+               -> C.StmtSeq (CrucibleExt arch) blocks ret ctx'
+               -> IO (Maybe (MC.MemAddr (MC.ArchAddrWidth arch))
+                     , [(Address (Crucible arch) s, Instruction (Crucible arch) s)])
+    buildBlock nc baddr iidx ss =
+      case ss of
+        C.ConsStmt _loc stmt ss' -> do
+          (nc', mBinder, ops) <- crucibleStmtOperands nc ng stmt
+          (mMinAddr, rest) <- buildBlock nc' baddr (iidx + 1) ss'
+          let sz = cacheSize nc
+          let cstmt = CrucibleStmt sz stmt mBinder ops
+          let iaddr = CrucibleAddress (InstructionAddr baddr iidx)
+          case stmt of
+            C.ExtendAssign (MS.MacawArchStateUpdate mcAddr _) ->
+              return (Just (takeMinAddr (Proxy @arch) mMinAddr mcAddr), ((iaddr, cstmt) : rest))
+            _ -> return (mMinAddr, ((iaddr, cstmt) : rest))
+        C.TermStmt _loc term -> do
+          ops <- crucibleTermStmtOperands nc ng term
+          let iaddr = CrucibleAddress (InstructionAddr baddr iidx)
+          let cstmt = CrucibleTermStmt term ops
+          return (Nothing, [(iaddr, cstmt)])
+
+takeMinAddr :: proxy arch
+            -> Maybe (MC.MemAddr (MC.ArchAddrWidth arch))
+            -> MC.MemAddr (MC.ArchAddrWidth arch)
+            -> MC.MemAddr (MC.ArchAddrWidth arch)
+takeMinAddr _ Nothing a = a
+takeMinAddr _ (Just a1) a2
+  | a1 < a2 = a1
+  | otherwise = a2
+
+type CrucibleConstraints arch s = ( Ord (Address (Crucible arch) s)
+                                  , Show (Address (Crucible arch) s)
+                                  , Ord (Address arch s)
+                                  , MC.MemWidth (MC.ArchAddrWidth arch)
+                                  , C.PrettyExt (CrucibleExt arch)
+                                  )
+
+instance NFData (Address (Crucible arch) s) where
+  rnf (CrucibleAddress a) =
+    case a of
+      FunctionAddr !_w -> ()
+      BlockAddr !_fa !_idx -> ()
+      InstructionAddr !_ba !_idx -> ()
+
+instance Eq (Address (Crucible arch) s) where
+  CrucibleAddress a1 == CrucibleAddress a2 = isJust (testEquality a1 a2)
+
+instance Ord (Address (Crucible arch) s) where
+  compare (CrucibleAddress a1) (CrucibleAddress a2) = toOrdering (compareF a1 a2)
+
+instance Show (Address (Crucible arch) s) where
+  show (CrucibleAddress a) = show a
+
+instance NFData (Instruction (Crucible arch) s) where
+  rnf _i = ()
+
+data AddrK = FunctionK
+           | BlockK
+           | InstructionK
+
+data Addr tp where
+  FunctionAddr :: Word64 -> Addr 'FunctionK
+  BlockAddr :: Addr 'FunctionK -> Int -> Addr 'BlockK
+  InstructionAddr :: Addr 'BlockK -> Int -> Addr 'InstructionK
+
+instance Show (Addr tp) where
+  show a =
+    case a of
+      FunctionAddr w -> printf "0x%x" w
+      BlockAddr fa idx -> printf "%s[%s]" (show fa) (show idx)
+      InstructionAddr ba idx -> printf "%s@%s" (show ba) (show idx)
+
+instance (CrucibleConstraints arch s) => IR (Crucible arch) s where
+  data Instruction (Crucible arch) s =
+      forall ctx ctx' . CrucibleStmt (Ctx.Size ctx) (C.Stmt (CrucibleExt arch) ctx ctx') (Maybe (Operand (Crucible arch) s)) [Operand (Crucible arch) s]
+    | forall blocks ret ctx . CrucibleTermStmt (C.TermStmt blocks ret ctx) [Operand (Crucible arch) s]
+  data Address (Crucible arch) s = forall tp . CrucibleAddress (Addr tp)
+  data Operand (Crucible arch) s = forall tp . CrucibleOperand (PN.Nonce s tp) (CrucibleOperand arch s)
+  data Opcode (Crucible arch) s = CrucibleOpcode (CrucibleOpcode arch s)
+
+  boundValue (CrucibleStmt _ _ mbv _) = mbv
+  boundValue (CrucibleTermStmt {}) = Nothing
+
+  operands (CrucibleStmt _ _ _ ops) = ops
+  operands (CrucibleTermStmt _ ops) = ops
+
+  opcode (CrucibleStmt _ s _ _) = crucibleStmtOpcode s
+  opcode (CrucibleTermStmt s _) = crucibleTermStmtOpcode s
+
+  prettyInstruction _ (CrucibleStmt sz s _ _) =
+    Fmt.fmt ("" +| C.ppStmt sz s ||+ "")
+  prettyInstruction _ (CrucibleTermStmt ts _) =
+    Fmt.fmt ("" +| PP.pretty ts ||+ "")
+  prettyOpcode (CrucibleOpcode o) = cruciblePrettyOpcode o
+  prettyOperand _addr (CrucibleOperand _ o) = cruciblePrettyOperand o
+  prettyAddress (CrucibleAddress a) =
+    case a of
+      FunctionAddr w -> Fmt.fmt ("" +| Fmt.hexF w |+ "")
+      BlockAddr fa idx -> Fmt.fmt ("" +| fa ||+ "[" +| idx ||+ "]")
+      InstructionAddr ba idx -> Fmt.fmt ("" +| ba ||+ "@" +| idx ||+ "")
+
+
+  parseAddress _ = Nothing
+  rawRepr = Nothing
+
+data CrucibleOperand arch s where
+  BoolLit :: Bool -> CrucibleOperand arch s
+  NatLit :: Natural -> CrucibleOperand arch s
+  IntegerLit :: Integer -> CrucibleOperand arch s
+  RationalLit :: Rational -> CrucibleOperand arch s
+  StringLiteral :: T.Text -> CrucibleOperand arch s
+  FloatLit :: Float -> CrucibleOperand arch s
+  DoubleLit :: Double -> CrucibleOperand arch s
+
+  Reg :: C.Reg ctx tp -> CrucibleOperand arch s
+  GlobalVar :: C.GlobalVar tp -> CrucibleOperand arch s
+  RoundingMode :: C.RoundingMode -> CrucibleOperand arch s
+  FnHandle :: CFH.FnHandle args ret -> CrucibleOperand arch s
+  Index :: Ctx.Index ctx tp -> CrucibleOperand arch s
+  BaseTerm :: C.BaseTerm (C.Reg ctx) tp -> CrucibleOperand arch s
+  JumpTarget :: C.BlockID blocks args -> CrucibleOperand arch s
+
+  BaseTypeRepr :: C.BaseTypeRepr btp -> CrucibleOperand arch s
+  TypeRepr :: C.TypeRepr tp -> CrucibleOperand arch s
+  FloatInfoRepr :: C.FloatInfoRepr fi -> CrucibleOperand arch s
+  NatRepr :: NR.NatRepr n -> CrucibleOperand arch s
+  SymbolRepr :: PS.SymbolRepr nm -> CrucibleOperand arch s
+  CtxRepr :: C.CtxRepr args -> CrucibleOperand arch s
+
+data CrucibleOpcode arch s where
+  -- Normal statements
+  SetReg :: C.Expr (CrucibleExt arch) ctx tp -> CrucibleOpcode arch s
+  CallHandle :: CrucibleOpcode arch s
+  Print :: CrucibleOpcode arch s
+  ReadGlobal :: CrucibleOpcode arch s
+  WriteGlobal :: CrucibleOpcode arch s
+  FreshConstant :: CrucibleOpcode arch s
+  NewRefCell :: CrucibleOpcode arch s
+  NewEmptyRefCell :: CrucibleOpcode arch s
+  ReadRefCell :: CrucibleOpcode arch s
+  WriteRefCell :: CrucibleOpcode arch s
+  DropRefCell :: CrucibleOpcode arch s
+  Assert :: CrucibleOpcode arch s
+  Assume :: CrucibleOpcode arch s
+  ExtendAssign :: C.StmtExtension (CrucibleExt arch) (C.Reg ctx) tp -> CrucibleOpcode arch s
+  -- Terminators
+  Jump :: CrucibleOpcode arch s
+  Br :: CrucibleOpcode arch s
+  MaybeBranch :: CrucibleOpcode arch s
+  VariantElim :: CrucibleOpcode arch s
+  Return :: CrucibleOpcode arch s
+  TailCall :: CrucibleOpcode arch s
+  ErrorStmt :: CrucibleOpcode arch s
+
+crucibleStmtOpcode :: C.Stmt (CrucibleExt arch) ctx ctx' -> Opcode (Crucible arch) s
+crucibleStmtOpcode s =
+  case s of
+    C.SetReg _ e -> CrucibleOpcode (SetReg e)
+    C.CallHandle {} -> CrucibleOpcode CallHandle
+    C.Print {} -> CrucibleOpcode Print
+    C.ReadGlobal {} -> CrucibleOpcode ReadGlobal
+    C.WriteGlobal {} -> CrucibleOpcode WriteGlobal
+    C.FreshConstant {} -> CrucibleOpcode FreshConstant
+    C.NewRefCell {} -> CrucibleOpcode NewRefCell
+    C.NewEmptyRefCell {} -> CrucibleOpcode NewEmptyRefCell
+    C.ReadRefCell {} -> CrucibleOpcode ReadRefCell
+    C.WriteRefCell {} -> CrucibleOpcode WriteRefCell
+    C.DropRefCell {} -> CrucibleOpcode DropRefCell
+    C.Assert {} -> CrucibleOpcode Assert
+    C.Assume {} -> CrucibleOpcode Assume
+    C.ExtendAssign stmtExt -> CrucibleOpcode (ExtendAssign stmtExt)
+
+crucibleTermStmtOpcode :: C.TermStmt blocks ret ctx -> Opcode (Crucible arch) s
+crucibleTermStmtOpcode ts =
+  case ts of
+    C.Jump {} -> CrucibleOpcode Jump
+    C.Br {} -> CrucibleOpcode Br
+    C.MaybeBranch {} -> CrucibleOpcode MaybeBranch
+    C.VariantElim {} -> CrucibleOpcode VariantElim
+    C.Return {} -> CrucibleOpcode Return
+    C.TailCall {} -> CrucibleOpcode TailCall
+    C.ErrorStmt {} -> CrucibleOpcode ErrorStmt
+
+cruciblePrettyOperand :: CrucibleOperand arch s -> T.Text
+cruciblePrettyOperand o =
+  case o of
+    BoolLit b -> T.pack (show b)
+    NatLit n -> T.pack (show n)
+    IntegerLit i -> T.pack (show i)
+    RationalLit r -> T.pack (show r)
+    StringLiteral s -> T.pack (show s)
+    FloatLit f -> T.pack (show f)
+    DoubleLit d -> T.pack (show d)
+
+    Reg r -> T.pack (show r)
+    GlobalVar g -> T.pack (show g)
+    RoundingMode rm -> T.pack (show rm)
+    FnHandle fh -> T.pack (show fh)
+    Index idx -> T.pack (show idx)
+    BaseTerm bt -> Fmt.fmt ("" +| C.baseTermVal bt ||+ ":" +| C.baseTermType bt ||+ "")
+    JumpTarget bid -> T.pack (show bid)
+
+    BaseTypeRepr rep -> T.pack (show rep)
+    TypeRepr rep -> T.pack (show rep)
+    FloatInfoRepr rep -> T.pack (show rep)
+    NatRepr rep -> Fmt.fmt ("NatRep[" +| rep ||+ "]")
+    SymbolRepr rep -> Fmt.fmt ("SymbolRep[" +| rep ||+ "]")
+    CtxRepr rep -> T.pack (show rep)
+
+cruciblePrettyOpcode :: (CrucibleConstraints arch s) => CrucibleOpcode arch s -> T.Text
+cruciblePrettyOpcode o =
+  case o of
+    CallHandle -> "call"
+    Print -> "print"
+    ReadGlobal -> "read-global"
+    WriteGlobal -> "write-global"
+    FreshConstant -> "fresh"
+    NewRefCell -> "new-ref"
+    NewEmptyRefCell -> "new-empty-ref"
+    ReadRefCell -> "read-ref"
+    WriteRefCell -> "write-ref"
+    DropRefCell -> "drop-ref"
+    Assert -> "assert"
+    Assume -> "assume"
+    ExtendAssign _ -> "<FIXME:extension>"
+    Jump -> "jump"
+    Br -> "br"
+    MaybeBranch -> "maybe-branch"
+    VariantElim -> "variant-elim"
+    Return -> "return"
+    TailCall -> "tail-call"
+    ErrorStmt -> "error"
+    SetReg (C.App app) ->
+      case app of
+        C.ExtensionApp _ -> "<FIXME:extension-app>"
+        C.BaseIsEq {} -> "eq"
+        C.BaseIte {} -> "ite"
+        C.EmptyApp -> "()"
+        C.PackAny {} -> "pack"
+        C.UnpackAny {} -> "unpack"
+
+        C.BoolLit {} -> "bool-lit"
+        C.Not {} -> "not"
+        C.And {} -> "and"
+        C.Or {} -> "or"
+        C.BoolXor {} -> "xor"
+
+        C.NatLit {} -> "nat-lit"
+        C.NatLt {} -> "nat-lt"
+        C.NatLe {} -> "nat-le"
+        C.NatAdd {} -> "nat-add"
+        C.NatSub {} -> "nat-sub"
+        C.NatMul {} -> "nat-mul"
+        C.NatDiv {} -> "nat-div"
+        C.NatMod {} -> "nat-mod"
+
+        C.IntLit {} -> "int-lit"
+        C.IntLt {} -> "int-lt"
+        C.IntLe {} -> "int-le"
+        C.IntNeg {} -> "int-neg"
+        C.IntAdd {} -> "int-add"
+        C.IntSub {} -> "int-sub"
+        C.IntMul {} -> "int-mul"
+        C.IntDiv {} -> "int-div"
+        C.IntMod {} -> "int-mod"
+        C.IntAbs {} -> "int-abs"
+
+        C.RationalLit {} -> "rational-lit"
+        C.RealLt {} -> "real-lt"
+        C.RealLe {} -> "real-le"
+        C.RealNeg {} -> "real-neg"
+        C.RealAdd {} -> "real-add"
+        C.RealSub {} -> "real-sub"
+        C.RealMul {} -> "real-mul"
+        C.RealDiv {} -> "real-div"
+        C.RealMod {} -> "real-mod"
+        C.RealIsInteger {} -> "real-is-integer"
+
+        C.FloatLit {} -> "float-lit"
+        C.DoubleLit {} -> "double-lit"
+        C.FloatNaN {} -> "float-nan"
+        C.FloatPInf {} -> "float-pinf"
+        C.FloatNInf {} -> "float-ninf"
+        C.FloatPZero {} -> "float-pzero"
+        C.FloatNZero {} -> "float-nzero"
+        C.FloatNeg {} -> "float-neg"
+        C.FloatAbs {} -> "float-abs"
+        C.FloatSqrt {} -> "float-sqrt"
+        C.FloatAdd {} -> "float-add"
+        C.FloatSub {} -> "float-sub"
+        C.FloatMul {} -> "float-mul"
+        C.FloatDiv {} -> "float-div"
+        C.FloatRem {} -> "float-rem"
+        C.FloatMin {} -> "float-min"
+        C.FloatMax {} -> "float-max"
+        C.FloatFMA {} -> "float-fma"
+        C.FloatEq {} -> "float-eq"
+        C.FloatFpEq {} -> "float-fpeq"
+        C.FloatGt {} -> "float-gt"
+        C.FloatGe {} -> "float-ge"
+        C.FloatLt {} -> "float-lt"
+        C.FloatLe {} -> "float-le"
+        C.FloatNe {} -> "float-ne"
+        C.FloatFpNe {} -> "float-fpne"
+        C.FloatIte {} -> "float-ite"
+        C.FloatCast {} -> "float-cast"
+        C.FloatFromBinary {} -> "float-from-binary"
+        C.FloatToBinary {} -> "float-to-binary"
+        C.FloatFromBV {} -> "float-from-bv"
+        C.FloatFromSBV {} -> "float-from-sbv"
+        C.FloatFromReal {} -> "float-from-real"
+        C.FloatToBV {} -> "float-to-bv"
+        C.FloatToSBV {} -> "float-to-sbv"
+        C.FloatToReal {} -> "float-to-real"
+        C.FloatIsNaN {} -> "float-is-nan"
+        C.FloatIsInfinite {} -> "float-is-infinite"
+        C.FloatIsZero {} -> "float-is-zero"
+        C.FloatIsPositive {} -> "float-is-positive"
+        C.FloatIsNegative {} -> "float-is-negative"
+        C.FloatIsSubnormal {} -> "float-is-subnormal"
+        C.FloatIsNormal {} -> "float-is-normal"
+
+        C.JustValue {} -> "just"
+        C.NothingValue {} -> "nothing"
+        C.FromJustValue {} -> "from-just"
+
+        C.AddSideCondition {} -> "add-side-condition"
+
+        C.RollRecursive {} -> "roll"
+        C.UnrollRecursive {} -> "unroll"
+
+        C.VectorLit {} -> "vector-lit"
+        C.VectorReplicate {} -> "vector-replicate"
+        C.VectorIsEmpty {} -> "vector-is-empty"
+        C.VectorSize {} -> "vector-size"
+        C.VectorGetEntry {} -> "vector-get"
+        C.VectorSetEntry {} -> "vector-set"
+        C.VectorCons {} -> "vector-cons"
+
+        C.HandleLit {} -> "handle-lit"
+        C.Closure {} -> "closure"
+
+        C.NatToInteger {} -> "nat-to-integer"
+        C.IntegerToReal {} -> "integer-to-real"
+        C.RealRound {} -> "real-round"
+        C.RealFloor {} -> "real-floor"
+        C.RealCeil {} -> "real-ceil"
+        C.IntegerToBV {} -> "integer-to-bv"
+        C.RealToNat {} -> "real-to-nat"
+
+        C.Complex {} -> "complex"
+        C.RealPart {} -> "real-part"
+        C.ImagPart {} -> "imag-part"
+
+        C.BVUndef {} -> "bv-undef"
+        C.BVLit {} -> "bv-lit"
+        C.BVConcat {} -> "bv-concat"
+        C.BVSelect {} -> "bv-select"
+        C.BVTrunc {} -> "bv-trunc"
+        C.BVZext {} -> "bv-zext"
+        C.BVSext {} -> "bv-sext"
+        C.BVNot {} -> "bv-not"
+        C.BVAnd {} -> "bv-and"
+        C.BVOr {} -> "bv-or"
+        C.BVXor {} -> "bv-xor"
+        C.BVNeg {} -> "bv-neg"
+        C.BVAdd {} -> "bv-add"
+        C.BVSub {} -> "bv-sub"
+        C.BVMul {} -> "bv-mul"
+        C.BVUdiv {} -> "bv-udiv"
+        C.BVSdiv {} -> "bv-sdiv"
+        C.BVUrem {} -> "bv-urem"
+        C.BVSrem {} -> "bv-srem"
+        C.BVUle {} -> "bv-ule"
+        C.BVUlt {} -> "bv-ult"
+        C.BVSle {} -> "bv-sle"
+        C.BVSlt {} -> "bv-slt"
+        C.BVCarry {} -> "bv-carry"
+        C.BVSCarry {} -> "bv-scarry"
+        C.BVSBorrow {} -> "bv-sborrow"
+        C.BVShl {} -> "bv-shl"
+        C.BVLshr {} -> "bv-lshr"
+        C.BVAshr {} -> "bv-ashr"
+        C.BoolToBV {} -> "bool-to-bv"
+        C.BvToInteger {} -> "bv-to-integer"
+        C.SbvToInteger {} -> "sbv-to-integer"
+        C.BvToNat {} -> "bv-to-nat"
+        C.BVNonzero {} -> "bv-nonzero"
+
+        C.EmptyWordMap {} -> "empty-wordmap"
+        C.InsertWordMap {} -> "insert-wordmap"
+        C.LookupWordMap {} -> "lookup-wordmap"
+        C.LookupWordMapWithDefault {} -> "lookup-wordmap-with-default"
+
+        C.InjectVariant {} -> "inject"
+        C.ProjectVariant {} -> "project"
+
+        C.MkStruct {} -> "mk-struct"
+        C.GetStruct {} -> "get-struct"
+        C.SetStruct {} -> "set-struct"
+
+        C.EmptyStringMap {} -> "empty-stringmap"
+        C.LookupStringMapEntry {} -> "lookup-stringmap"
+        C.InsertStringMapEntry {} -> "insert-stringmap"
+
+        C.TextLit {} -> "text-lit"
+        C.ShowValue {} -> "show"
+        C.AppendString {} -> "append"
+
+        C.SymArrayLookup {} -> "symarray-lookup"
+        C.SymArrayUpdate {} -> "symarray-update"
+
+        C.IsConcrete {} -> "is-concrete"
+        C.ReferenceEq {} -> "reference-eq"
+
+data NonceCache s ctx where
+  NonceCache :: forall s ctx (k :: C.CrucibleType -> Type) . (k ~ PN.Nonce s) => Ctx.Assignment k ctx -> NonceCache s ctx
+
+cacheSize :: NonceCache s ctx -> Ctx.Size ctx
+cacheSize (NonceCache a) = Ctx.size a
+
+toRegOp :: Ctx.Assignment (PN.Nonce s) ctx
+        -> C.Reg ctx tp
+        -> Operand (Crucible arch) s
+toRegOp cache r =
+  CrucibleOperand (cache Ctx.! C.regIndex r) (Reg r)
+
+nextCache :: Ctx.Assignment (PN.Nonce s) ctx
+          -> PN.NonceGenerator IO s
+          -> IO (NonceCache s (ctx Ctx.::> x), Operand (Crucible arch) s)
+nextCache cache ng = do
+  n <- PN.freshNonce ng
+  let creg = C.Reg (Ctx.nextIndex (Ctx.size cache))
+  let reg = CrucibleOperand n (Reg creg)
+  return (NonceCache (Ctx.extend cache n), reg)
+
+initialCache :: PN.NonceGenerator IO s -> C.CtxRepr ctx -> IO (NonceCache s ctx)
+initialCache ng cr = NonceCache <$> FC.traverseFC (\_ -> PN.freshNonce ng) cr
+
+-- | Extract operands from a terminal statement
+--
+-- Terminal statements cannot bind new values, so this function does not need to
+-- update the cache or return binders.
+crucibleTermStmtOperands :: NonceCache s ctx
+                         -> PN.NonceGenerator IO s
+                         -> C.TermStmt blocks ret ctx
+                         -> IO [Operand (Crucible arch) s]
+crucibleTermStmtOperands (NonceCache cache) ng stmt =
+  case stmt of
+    C.Jump (C.JumpTarget bid _ args) -> do
+      n1 <- PN.freshNonce ng
+      return ( CrucibleOperand n1 (JumpTarget bid)
+             : FC.toListFC (toRegOp cache) args
+             )
+    C.Br r (C.JumpTarget bid1 _ args1) (C.JumpTarget bid2 _ args2) -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return $ concat [ [toRegOp cache r, CrucibleOperand n1 (JumpTarget bid1)]
+                      , FC.toListFC (toRegOp cache) args1
+                      , [CrucibleOperand n2 (JumpTarget bid2)]
+                      , FC.toListFC (toRegOp cache) args2
+                      ]
+    C.MaybeBranch trep r (C.SwitchTarget bid1 _ args1) (C.JumpTarget bid2 _ args2) -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      n3 <- PN.freshNonce ng
+      return $ concat [ [CrucibleOperand n1 (TypeRepr trep), toRegOp cache r]
+                      , [CrucibleOperand n2 (JumpTarget bid1)]
+                      , FC.toListFC (toRegOp cache) args1
+                      , [CrucibleOperand n3 (JumpTarget bid2)]
+                      , FC.toListFC (toRegOp cache) args2
+                      ]
+    C.VariantElim _ r targets -> return [toRegOp cache r]
+    C.TailCall r _ args -> return (toRegOp cache r : FC.toListFC (toRegOp cache) args)
+    C.Return r -> return [toRegOp cache r]
+    C.ErrorStmt r -> return [toRegOp cache r]
+
+crucibleStmtOperands :: NonceCache s ctx
+                     -> PN.NonceGenerator IO s
+                     -> C.Stmt (CrucibleExt arch) ctx ctx'
+                     -> IO (NonceCache s ctx', Maybe (Operand (Crucible arch) s), [Operand (Crucible arch) s])
+crucibleStmtOperands nc@(NonceCache cache) ng stmt =
+  case stmt of
+    C.Print r ->
+      return (nc, Nothing, [toRegOp cache r])
+    C.WriteGlobal gv r -> do
+      n1 <- PN.freshNonce ng
+      return (nc, Nothing, [ CrucibleOperand n1 (GlobalVar gv)
+                           , toRegOp cache r
+                           ])
+    C.ReadGlobal gv -> do
+      n1 <- PN.freshNonce ng
+      (nc', binder) <- nextCache cache ng
+      return (nc', Just binder, [CrucibleOperand n1 (GlobalVar gv)])
+    C.FreshConstant tp msym -> do
+      n2 <- PN.freshNonce ng
+      n3 <- PN.freshNonce ng
+      (nc', binder) <- nextCache cache ng
+      case msym of
+        Nothing -> return (nc', Just binder, [CrucibleOperand n2 (BaseTypeRepr tp)])
+        Just sym -> return (nc', Just binder, [ CrucibleOperand n2 (BaseTypeRepr tp)
+                                              , CrucibleOperand n3 (StringLiteral (WS.solverSymbolAsText sym))
+                                              ])
+    C.NewRefCell tp r -> do
+      n1 <- PN.freshNonce ng
+      (nc', binder) <- nextCache cache ng
+      return (nc', Just binder, [ CrucibleOperand n1 (TypeRepr tp)
+                                , toRegOp cache r
+                                ])
+    C.NewEmptyRefCell tp -> do
+      n1 <- PN.freshNonce ng
+      (nc', binder) <- nextCache cache ng
+      return (nc', Just binder, [CrucibleOperand n1 (TypeRepr tp)])
+    C.ReadRefCell r -> do
+      (nc', binder) <- nextCache cache ng
+      return (nc', Just binder, [toRegOp cache r])
+    C.WriteRefCell rr r -> do
+      return (nc, Nothing, [toRegOp cache rr, toRegOp cache r])
+    C.DropRefCell r ->
+      return (nc, Nothing, [toRegOp cache r])
+    C.Assert r msg ->
+      return (nc, Nothing, [toRegOp cache r, toRegOp cache msg])
+    C.Assume r msg ->
+      return (nc, Nothing, [toRegOp cache r, toRegOp cache msg])
+    C.ExtendAssign ext -> do
+      -- FIXME: Need a mechanism to traverse the extensions
+      (nc', binder) <- nextCache cache ng
+      return (nc', Just binder, [])
+    C.CallHandle rep fh _reprs args -> do
+      n1 <- PN.freshNonce ng
+      (nc', binder) <- nextCache cache ng
+      return (nc', Just binder, ( CrucibleOperand n1 (TypeRepr rep)
+                                  : toRegOp cache fh
+                                  : FC.toListFC (toRegOp cache) args
+                                ))
+    C.SetReg tp (C.App app) -> do
+      n1 <- PN.freshNonce ng
+      (nc', binder) <- nextCache cache ng
+      ops <- crucibleAppOperands nc ng app
+      return (nc', Just binder, CrucibleOperand n1 (TypeRepr tp) : ops )
+
+-- | Note that this cannot add cache entries
+crucibleAppOperands :: NonceCache s ctx
+                    -> PN.NonceGenerator IO s
+                    -> C.App (CrucibleExt arch) (C.Reg ctx) tp
+                    -> IO [Operand (Crucible arch) s]
+crucibleAppOperands (NonceCache cache) ng app =
+  case app of
+    C.BaseIsEq btp r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BaseTypeRepr btp)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BaseIte btp r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BaseTypeRepr btp)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             , toRegOp cache r3
+             ]
+    C.EmptyApp -> return []
+
+    C.PackAny tp r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr tp)
+             , toRegOp cache r
+             ]
+    C.UnpackAny tp r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr tp)
+             , toRegOp cache r
+             ]
+
+    C.BoolLit b -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BoolLit b) ]
+    C.Not r -> return [ toRegOp cache r ]
+    C.And r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.Or r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.BoolXor r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+
+    C.NatLit nat -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatLit nat) ]
+    C.NatLt r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.NatLe r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.NatAdd r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.NatSub r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.NatMul r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.NatDiv r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.NatMod r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+
+    C.IntLit i -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (IntegerLit i) ]
+    C.IntLt r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.IntLe r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.IntNeg r1 -> return [ toRegOp cache r1 ]
+    C.IntAdd r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.IntSub r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.IntMul r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.IntDiv r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.IntMod r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.IntAbs r1 -> return [ toRegOp cache r1 ]
+
+    C.RationalLit r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (RationalLit r) ]
+    C.RealLt r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealLe r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealNeg r -> return [ toRegOp cache r ]
+    C.RealAdd r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealSub r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealMul r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealDiv r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealMod r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealIsInteger r -> return [ toRegOp cache r ]
+
+    C.FloatLit f -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatLit f) ]
+    C.DoubleLit d -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (DoubleLit d) ]
+    C.FloatNaN frep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+    C.FloatPInf frep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+    C.FloatNInf frep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+    C.FloatPZero frep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+    C.FloatNZero frep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+    C.FloatNeg frep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r
+             ]
+    C.FloatAbs frep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r
+             ]
+    C.FloatSqrt frep rm r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r
+             ]
+    C.FloatAdd frep rm r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.FloatSub frep rm r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.FloatMul frep rm r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.FloatDiv frep rm r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.FloatRem frep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.FloatMin frep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.FloatMax frep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.FloatFMA frep rm r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             , toRegOp cache r3
+             ]
+    C.FloatEq r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.FloatFpEq r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.FloatGt r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.FloatGe r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.FloatLt r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.FloatLe r1 r2 -> return [ toRegOp cache r1 , toRegOp cache r2 ]
+    C.FloatNe r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.FloatFpNe r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.FloatIte frep r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             , toRegOp cache r3
+             ]
+    C.FloatCast frep rm r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r
+             ]
+    C.FloatFromBinary frep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r
+             ]
+    C.FloatToBinary frep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , toRegOp cache r
+             ]
+    C.FloatFromBV frep rm r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r
+             ]
+    C.FloatFromSBV frep rm r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r
+             ]
+    C.FloatFromReal frep rm r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FloatInfoRepr frep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r
+             ]
+    C.FloatToBV nrep rm r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r
+             ]
+    C.FloatToSBV nrep rm r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , CrucibleOperand n2 (RoundingMode rm)
+             , toRegOp cache r
+             ]
+    C.FloatToReal r -> return [ toRegOp cache r ]
+    C.FloatIsNaN r -> return [ toRegOp cache r ]
+    C.FloatIsInfinite r -> return [ toRegOp cache r ]
+    C.FloatIsZero r -> return [ toRegOp cache r ]
+    C.FloatIsPositive r -> return [ toRegOp cache r ]
+    C.FloatIsNegative r -> return [ toRegOp cache r ]
+    C.FloatIsSubnormal r -> return [ toRegOp cache r ]
+    C.FloatIsNormal r -> return [ toRegOp cache r ]
+
+    C.JustValue trep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r
+             ]
+    C.NothingValue trep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep) ]
+    C.FromJustValue trep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+
+    C.AddSideCondition trep r1 s r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BaseTypeRepr trep)
+             , toRegOp cache r1
+             , CrucibleOperand n2 (StringLiteral (T.pack s))
+             , toRegOp cache r2
+             ]
+    C.RollRecursive sr cr r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (SymbolRepr sr)
+             , CrucibleOperand n2 (CtxRepr cr)
+             , toRegOp cache r
+             ]
+    C.UnrollRecursive sr cr r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (SymbolRepr sr)
+             , CrucibleOperand n2 (CtxRepr cr)
+             , toRegOp cache r
+             ]
+
+    C.VectorLit trep vrs -> do
+      n1 <- PN.freshNonce ng
+      -- FIXME: It might be nice to syntactically differentiate the type list elts
+      return ( CrucibleOperand n1 (TypeRepr trep)
+             : map (toRegOp cache) (F.toList vrs)
+             )
+    C.VectorReplicate trep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.VectorIsEmpty r -> return [ toRegOp cache r ]
+    C.VectorSize r -> return [ toRegOp cache r ]
+    C.VectorGetEntry trep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.VectorSetEntry trep r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             , toRegOp cache r3
+             ]
+    C.VectorCons trep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+
+    C.HandleLit hdl -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (FnHandle hdl) ]
+
+    C.Closure crep trep1 r1 trep2 r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      n3 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (CtxRepr crep)
+             , CrucibleOperand n2 (TypeRepr trep1)
+             , toRegOp cache r1
+             , CrucibleOperand n3 (TypeRepr trep2)
+             , toRegOp cache r2
+             ]
+
+    C.NatToInteger r -> return [ toRegOp cache r ]
+    C.IntegerToReal r -> return [ toRegOp cache r ]
+    C.RealRound r -> return [ toRegOp cache r ]
+    C.RealFloor r -> return [ toRegOp cache r ]
+    C.RealCeil r -> return [ toRegOp cache r ]
+    C.IntegerToBV nrep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r
+             ]
+    C.RealToNat r -> return [ toRegOp cache r ]
+
+    C.Complex r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+    C.RealPart r -> return [ toRegOp cache r ]
+    C.ImagPart r -> return [ toRegOp cache r ]
+
+    C.BVUndef nrep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep) ]
+    C.BVLit nr i -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , CrucibleOperand n2 (IntegerLit i)
+             ]
+    C.BVConcat nrep1 nrep2 r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep1)
+             , CrucibleOperand n2 (NatRepr nrep2)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSelect nrep1 nrep2 nrep3 r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      n3 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep1)
+             , CrucibleOperand n2 (NatRepr nrep2)
+             , CrucibleOperand n3 (NatRepr nrep3)
+             , toRegOp cache r
+             ]
+    C.BVTrunc nrep1 nrep2 r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep1)
+             , CrucibleOperand n2 (NatRepr nrep2)
+             , toRegOp cache r
+             ]
+    C.BVZext nrep1 nrep2 r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep1)
+             , CrucibleOperand n2 (NatRepr nrep2)
+             , toRegOp cache r
+             ]
+    C.BVSext nrep1 nrep2 r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep1)
+             , CrucibleOperand n2 (NatRepr nrep2)
+             , toRegOp cache r
+             ]
+    C.BVNot nrep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r
+             ]
+    C.BVAnd nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVOr nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVXor nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVNeg nrep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r
+             ]
+    C.BVAdd nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSub nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVMul nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVUdiv nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSdiv nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVUrem nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSrem nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVUle nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVUlt nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSle nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSlt nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVCarry nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSCarry nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVSBorrow nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVShl nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVLshr nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BVAshr nrep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nrep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.BoolToBV nr r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , toRegOp cache r
+             ]
+    C.BvToInteger nr r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , toRegOp cache r
+             ]
+    C.SbvToInteger nr r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , toRegOp cache r
+             ]
+    C.BvToNat nr r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , toRegOp cache r
+             ]
+    C.BVNonzero nr r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , toRegOp cache r
+             ]
+
+    C.EmptyWordMap nr btr -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , CrucibleOperand n2 (BaseTypeRepr btr)
+             ]
+    C.InsertWordMap nr btr r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , CrucibleOperand n2 (BaseTypeRepr btr)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             , toRegOp cache r3
+             ]
+    C.LookupWordMap btr r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BaseTypeRepr btr)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.LookupWordMapWithDefault btr r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BaseTypeRepr btr)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             , toRegOp cache r3
+             ]
+
+    C.InjectVariant crepr idx r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (CtxRepr crepr)
+             , CrucibleOperand n2 (Index idx)
+             , toRegOp cache r
+             ]
+    C.ProjectVariant crepr idx r -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (CtxRepr crepr)
+             , CrucibleOperand n2 (Index idx)
+             , toRegOp cache r
+             ]
+
+    C.MkStruct crep regs -> do
+      n1 <- PN.freshNonce ng
+      return ( CrucibleOperand n1 (CtxRepr crep)
+             : FC.toListFC (toRegOp cache) regs
+             )
+    C.GetStruct r idx trep -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ toRegOp cache r
+             , CrucibleOperand n1 (Index idx)
+             , CrucibleOperand n2 (TypeRepr trep)
+             ]
+    C.SetStruct crep r1 idx r2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (CtxRepr crep)
+             , toRegOp cache r1
+             , CrucibleOperand n2 (Index idx)
+             , toRegOp cache r2
+             ]
+
+    C.EmptyStringMap trep -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep) ]
+    C.LookupStringMapEntry trep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+    C.InsertStringMapEntry trep r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             , toRegOp cache r3
+             ]
+
+    C.TextLit t -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (StringLiteral t) ]
+    C.ShowValue btrep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BaseTypeRepr btrep)
+             , toRegOp cache r
+             ]
+    C.AppendString r1 r2 -> return [ toRegOp cache r1, toRegOp cache r2 ]
+
+    C.SymArrayLookup btr r bts -> do
+      n1 <- PN.freshNonce ng
+      bts' <- sequence $ FC.toListFC (\bt -> do
+                      n <- PN.freshNonce ng
+                      return (CrucibleOperand n (BaseTerm bt))) bts
+      return ( CrucibleOperand n1 (BaseTypeRepr btr)
+             : toRegOp cache r
+             : bts'
+             )
+    C.SymArrayUpdate btr r1 bts r2 -> do
+      n1 <- PN.freshNonce ng
+      bts' <- sequence $ FC.toListFC (\bt -> do
+                      n <- PN.freshNonce ng
+                      return (CrucibleOperand n (BaseTerm bt))) bts
+      return ( CrucibleOperand n1 (BaseTypeRepr btr)
+             : toRegOp cache r1
+             : bts' ++ [toRegOp cache r2]
+             )
+    C.IsConcrete btrep r -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (BaseTypeRepr btrep)
+             , toRegOp cache r
+             ]
+    C.ReferenceEq trep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return [ CrucibleOperand n1 (TypeRepr trep)
+             , toRegOp cache r1
+             , toRegOp cache r2
+             ]
+
+    -- FIXME
+    C.ExtensionApp _ -> return []
+
+$(return [])
+
+instance TestEquality Addr where
+  testEquality = $(PTH.structuralTypeEquality [t| Addr |]
+                   [(PTH.TypeApp (PTH.ConType [t| Addr |]) PTH.AnyType, [|testEquality|])])
+
+instance OrdF Addr where
+  compareF = $(PTH.structuralTypeOrd [t| Addr |]
+               [(PTH.TypeApp (PTH.ConType [t| Addr |]) PTH.AnyType, [|compareF|])])

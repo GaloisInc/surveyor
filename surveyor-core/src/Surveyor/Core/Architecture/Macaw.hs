@@ -47,8 +47,8 @@ import qualified Text.PrettyPrint.ANSI.Leijen as PP
 import           Text.Printf ( printf )
 import           Text.Read ( readMaybe )
 
-import Surveyor.Core.Architecture.Class
-import Surveyor.Core.IRRepr ( Macaw )
+import           Surveyor.Core.Architecture.Class
+import           Surveyor.Core.IRRepr ( Macaw )
 
 macawForBlocks :: forall arch s
                 . (MC.MemWidth (MC.ArchAddrWidth arch), Ord (Address arch s), MC.ArchConstraints arch, Show (Address arch s))
@@ -619,23 +619,23 @@ macawPrettyOpcode opc =
         MC.Trunc {} -> T.pack "trunc"
         MC.SExt {} -> T.pack "sext"
         MC.UExt {} -> T.pack "uext"
-        MC.BVAdd {} -> T.pack "bv_add"
-        MC.BVAdc {} -> T.pack "bv_adc"
-        MC.BVSub {} -> T.pack "bv_sub"
-        MC.BVSbb {} -> T.pack "bv_sbb"
-        MC.BVMul {} -> T.pack "bv_mul"
-        MC.BVUnsignedLe {} -> T.pack "bv_ule"
-        MC.BVUnsignedLt {} -> T.pack "bv_ult"
-        MC.BVSignedLe {} -> T.pack "bv_sle"
-        MC.BVSignedLt {} -> T.pack "bv_slt"
+        MC.BVAdd {} -> T.pack "bv-add"
+        MC.BVAdc {} -> T.pack "bv-adc"
+        MC.BVSub {} -> T.pack "bv-sub"
+        MC.BVSbb {} -> T.pack "bv-sbb"
+        MC.BVMul {} -> T.pack "bv-mul"
+        MC.BVUnsignedLe {} -> T.pack "bv-ule"
+        MC.BVUnsignedLt {} -> T.pack "bv-ult"
+        MC.BVSignedLe {} -> T.pack "bv-sle"
+        MC.BVSignedLt {} -> T.pack "bv-slt"
         MC.BVTestBit {} -> T.pack "test_bit"
-        MC.BVComplement {} -> T.pack "bv_complement"
-        MC.BVAnd {} -> T.pack "bv_and"
-        MC.BVOr {} -> T.pack "bv_or"
-        MC.BVXor {} -> T.pack "bv_xor"
-        MC.BVShl {} -> T.pack "bv_shl"
-        MC.BVShr {} -> T.pack "bv_shr"
-        MC.BVSar {} -> T.pack "bv_sar"
+        MC.BVComplement {} -> T.pack "bv-complement"
+        MC.BVAnd {} -> T.pack "bv-and"
+        MC.BVOr {} -> T.pack "bv-or"
+        MC.BVXor {} -> T.pack "bv-xor"
+        MC.BVShl {} -> T.pack "bv-shl"
+        MC.BVShr {} -> T.pack "bv-shr"
+        MC.BVSar {} -> T.pack "bv-sar"
         MC.UadcOverflows {} -> T.pack "uadc_overflows"
         MC.SadcOverflows {} -> T.pack "sadc_overflows"
         MC.UsbbOverflows {} -> T.pack "usbb_overflows"

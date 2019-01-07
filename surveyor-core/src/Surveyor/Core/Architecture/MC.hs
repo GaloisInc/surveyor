@@ -37,6 +37,9 @@ import           Text.Read ( readMaybe )
 import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MM
 import qualified Data.Macaw.Discovery as MD
+import qualified Data.Macaw.Symbolic as MS
+import           Data.Macaw.X86.Symbolic ()
+import           Data.Macaw.PPC.Symbolic ()
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
 import qualified Renovate as R
@@ -46,8 +49,13 @@ import qualified Data.Parameterized.HasRepr as HR
 
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Macaw as AM
+import qualified Surveyor.Core.Architecture.Crucible as AC
 import           Surveyor.Core.BinaryAnalysisResult
-import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr) )
+import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr) )
+
+type instance AC.CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
+type instance AC.CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
+type instance AC.CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
 
 mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32
               -> SomeResult s PPC.PPC32
@@ -266,7 +274,7 @@ instance Architecture PPC.PPC32 s where
         addr1 = MM.addrOffset addr0
         addr2 = R.concreteFromAbsolute addr1
     in mcFunctionBlocks (toBlockPPC32 ares fh) ares addr2
-  alternativeIRs _ = [SomeIRRepr MacawRepr]
+  alternativeIRs _ = [SomeIRRepr MacawRepr, SomeIRRepr CrucibleRepr]
   asAlternativeIR repr ar@(AnalysisResult (PPC32AnalysisResult bar@BinaryAnalysisResult {rLoadedBinary = img}) _) fh =
     case repr of
       BaseRepr -> return Nothing
@@ -280,6 +288,17 @@ instance Architecture PPC.PPC32 s where
         let PPC32Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> Just <$> AM.macawForBlocks PPC32Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+      CrucibleRepr -> do
+        let mem = MBL.memoryImage img
+        let blocks = [ (segOff, b)
+                     | b <- functionBlocks ar fh
+                     , let PPC32Address memAddr = blockAddress b
+                     , Just segOff <- [MM.asSegmentOff mem memAddr]
+                     ]
+        let PPC32Address memAddr = fhAddress fh
+        case MM.asAbsoluteAddr memAddr of
+          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
 
 instance Eq (Address PPC.PPC32 s) where
@@ -336,18 +355,33 @@ instance Architecture PPC.PPC64 s where
         addr1 = MM.addrOffset addr0
         addr2 = R.concreteFromAbsolute addr1
     in mcFunctionBlocks (toBlockPPC64 ares fh) ares addr2
-  alternativeIRs _ = [SomeIRRepr MacawRepr]
-  asAlternativeIR MacawRepr ar@(AnalysisResult (PPC64AnalysisResult bar@BinaryAnalysisResult{rLoadedBinary = img}) _) fh = do
-    let mem = MBL.memoryImage img
-    let blocks = [ (segOff, b)
-                 | b <- functionBlocks ar fh
-                 , let PPC64Address memAddr = blockAddress b
-                 , Just segOff <- [MM.asSegmentOff mem memAddr]
-                 ]
-    let PPC64Address memAddr = fhAddress fh
-    case MM.asAbsoluteAddr memAddr of
-      Just memAbsAddr -> Just <$> AM.macawForBlocks PPC64Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-      Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  alternativeIRs _ = [SomeIRRepr MacawRepr, SomeIRRepr CrucibleRepr]
+  asAlternativeIR repr ar@(AnalysisResult (PPC64AnalysisResult bar@BinaryAnalysisResult{rLoadedBinary = img}) _) fh =
+    case repr of
+      BaseRepr -> return Nothing
+      MacawRepr -> do
+        let mem = MBL.memoryImage img
+        let blocks = [ (segOff, b)
+                     | b <- functionBlocks ar fh
+                     , let PPC64Address memAddr = blockAddress b
+                     , Just segOff <- [MM.asSegmentOff mem memAddr]
+                     ]
+        let PPC64Address memAddr = fhAddress fh
+        case MM.asAbsoluteAddr memAddr of
+          Just memAbsAddr -> Just <$> AM.macawForBlocks PPC64Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+      CrucibleRepr -> do
+        let mem = MBL.memoryImage img
+        let blocks = [ (segOff, b)
+                     | b <- functionBlocks ar fh
+                     , let PPC64Address memAddr = blockAddress b
+                     , Just segOff <- [MM.asSegmentOff mem memAddr]
+                     ]
+        let PPC64Address memAddr = fhAddress fh
+        case MM.asAbsoluteAddr memAddr of
+          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+
 
 instance Eq (Address PPC.PPC64 s) where
   PPC64Address a1 == PPC64Address a2 = a1 == a2
@@ -398,17 +432,32 @@ instance Architecture X86.X86_64 s where
         addr2 = R.concreteFromAbsolute addr1
     in mcFunctionBlocks (toBlockX86 ares fh) ares addr2
   alternativeIRs _ = [SomeIRRepr MacawRepr]
-  asAlternativeIR MacawRepr ar@(AnalysisResult (X86AnalysisResult bar@BinaryAnalysisResult {rLoadedBinary = img}) _) fh = do
-    let mem = MBL.memoryImage img
-    let blocks = [ (segOff, b)
-                 | b <- functionBlocks ar fh
-                 , let X86Address memAddr = blockAddress b
-                 , Just segOff <- [MM.asSegmentOff mem memAddr]
-                 ]
-    let X86Address memAddr = fhAddress fh
-    case MM.asAbsoluteAddr memAddr of
-      Just memAbsAddr -> Just <$> AM.macawForBlocks X86Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-      Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  asAlternativeIR repr ar@(AnalysisResult (X86AnalysisResult bar@BinaryAnalysisResult {rLoadedBinary = img}) _) fh =
+    case repr of
+      BaseRepr -> return Nothing
+      MacawRepr -> do
+        let mem = MBL.memoryImage img
+        let blocks = [ (segOff, b)
+                     | b <- functionBlocks ar fh
+                     , let X86Address memAddr = blockAddress b
+                     , Just segOff <- [MM.asSegmentOff mem memAddr]
+                     ]
+        let X86Address memAddr = fhAddress fh
+        case MM.asAbsoluteAddr memAddr of
+          Just memAbsAddr -> Just <$> AM.macawForBlocks X86Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+      CrucibleRepr -> do
+        let mem = MBL.memoryImage img
+        let blocks = [ (segOff, b)
+                     | b <- functionBlocks ar fh
+                     , let X86Address memAddr = blockAddress b
+                     , Just segOff <- [MM.asSegmentOff mem memAddr]
+                     ]
+        let X86Address memAddr = fhAddress fh
+        case MM.asAbsoluteAddr memAddr of
+          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+
 
 
 instance Eq (Address X86.X86_64 s) where
