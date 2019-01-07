@@ -607,12 +607,12 @@ crucibleStmtOperands nc@(NonceCache cache) ng stmt =
                            ])
     C.ReadGlobal gv -> do
       n1 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng (Just (TypedBinder (C.globalType gv)))
+      (nc', binder) <- nextCache cache ng Nothing
       return (nc', Just binder, [CrucibleOperand n1 (GlobalVar gv)])
     C.FreshConstant tp msym -> do
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
-      (nc', binder) <- nextCache cache ng (Just (BaseTypedBinder tp))
+      (nc', binder) <- nextCache cache ng Nothing
       case msym of
         Nothing -> return (nc', Just binder, [CrucibleOperand n2 (BaseTypeRepr tp)])
         Just sym -> return (nc', Just binder, [ CrucibleOperand n2 (BaseTypeRepr tp)
@@ -644,12 +644,14 @@ crucibleStmtOperands nc@(NonceCache cache) ng stmt =
       (nc', binder) <- nextCache cache ng Nothing
       return (nc', Just binder, [])
     C.CallHandle rep fh _reprs args -> do
-      (nc', binder) <- nextCache cache ng (Just (TypedBinder rep))
-      return (nc', Just binder, ( toRegOp cache fh
+      n1 <- PN.freshNonce ng
+      (nc', binder) <- nextCache cache ng Nothing
+      return (nc', Just binder, ( CrucibleOperand n1 (TypeRepr rep)
+                                : toRegOp cache fh
                                 : FC.toListFC (toRegOp cache) args
                                 ))
-    C.SetReg tp (C.App app) -> do
-      (nc', binder) <- nextCache cache ng (Just (TypedBinder tp))
+    C.SetReg _tp (C.App app) -> do
+      (nc', binder) <- nextCache cache ng Nothing
       ops <- crucibleAppOperands nc ng app
       return (nc', Just binder, ops)
 
@@ -1010,9 +1012,11 @@ crucibleAppOperands (NonceCache cache) ng app =
     C.BVUndef nrep -> do
       n1 <- PN.freshNonce ng
       return [ CrucibleOperand n1 (NatRepr nrep) ]
-    C.BVLit _nr i -> do
+    C.BVLit nr i -> do
+      n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return [ CrucibleOperand n2 (IntegerLit i)
+      return [ CrucibleOperand n1 (NatRepr nr)
+             , CrucibleOperand n2 (IntegerLit i)
              ]
     C.BVConcat nrep1 nrep2 r1 r2 -> do
       n1 <- PN.freshNonce ng
