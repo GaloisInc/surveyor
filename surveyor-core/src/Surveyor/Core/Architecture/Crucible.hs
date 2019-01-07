@@ -17,7 +17,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Surveyor.Core.Architecture.Crucible (
   Crucible,
-  CrucibleExt,
+  CrucibleExtension(..),
   crucibleForMCBlocks
   ) where
 
@@ -60,7 +60,10 @@ import           Surveyor.Core.IRRepr ( Crucible )
 --
 -- For machine code architectures, it will be the MacawExt.  It will be
 -- different for JVM and LLVM
-type family CrucibleExt arch
+class CrucibleExtension arch where
+  type family CrucibleExt arch
+  prettyExtensionStmt :: proxy arch -> C.StmtExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
+  prettyExtensionApp :: proxy arch -> C.ExprExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
 
 -- | Build a 'BlockMapping' for a given function, mapping machine code blocks to
 -- their crucible equivalents.  Note: there are some cases where some blocks
@@ -179,7 +182,7 @@ data Addr tp where
   BlockAddr :: Addr 'FunctionK -> Int -> Addr 'BlockK
   InstructionAddr :: Addr 'BlockK -> Int -> Addr 'InstructionK
 
-instance (CrucibleConstraints arch s) => IR (Crucible arch) s where
+instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible arch) s where
   data Instruction (Crucible arch) s =
       forall ctx ctx' . CrucibleStmt (Ctx.Size ctx) (C.Stmt (CrucibleExt arch) ctx ctx') (Maybe (Operand (Crucible arch) s)) [Operand (Crucible arch) s]
     | forall blocks ret ctx . CrucibleTermStmt (C.TermStmt blocks ret ctx) [Operand (Crucible arch) s]
@@ -320,7 +323,7 @@ cruciblePrettyOperand o =
     SymbolRepr rep -> Fmt.fmt ("[SymbolRepr " +| rep ||+ "]")
     CtxRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
 
-cruciblePrettyOpcode :: (CrucibleConstraints arch s) => CrucibleOpcode arch s -> T.Text
+cruciblePrettyOpcode :: forall arch s . (CrucibleConstraints arch s, CrucibleExtension arch) => CrucibleOpcode arch s -> T.Text
 cruciblePrettyOpcode o =
   case o of
     CallHandle -> "call"
@@ -335,7 +338,7 @@ cruciblePrettyOpcode o =
     DropRefCell -> "drop-ref"
     Assert -> "assert"
     Assume -> "assume"
-    ExtendAssign _ -> "<FIXME:extension>"
+    ExtendAssign ext -> prettyExtensionStmt (Proxy @arch) ext
     Jump -> "jump"
     Br -> "br"
     MaybeBranch -> "maybe-branch"
@@ -345,7 +348,7 @@ cruciblePrettyOpcode o =
     ErrorStmt -> "error"
     SetReg (C.App app) ->
       case app of
-        C.ExtensionApp _ -> "<FIXME:extension-app>"
+        C.ExtensionApp extApp -> prettyExtensionApp (Proxy @arch) extApp
         C.BaseIsEq {} -> "eq"
         C.BaseIte {} -> "ite"
         C.EmptyApp -> "()"

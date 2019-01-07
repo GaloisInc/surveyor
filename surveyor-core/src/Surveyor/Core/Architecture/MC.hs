@@ -38,6 +38,7 @@ import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MM
 import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Symbolic as MS
+import qualified Data.Macaw.Symbolic.CrucGen as MS
 import           Data.Macaw.X86.Symbolic ()
 import           Data.Macaw.PPC.Symbolic ()
 import qualified Dismantle.PPC as DPPC
@@ -53,9 +54,42 @@ import qualified Surveyor.Core.Architecture.Crucible as AC
 import           Surveyor.Core.BinaryAnalysisResult
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr) )
 
-type instance AC.CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
-type instance AC.CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
-type instance AC.CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
+instance AC.CrucibleExtension PPC.PPC32 where
+  type CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
+  prettyExtensionStmt _ = prettyMacawExtensionStmt
+  prettyExtensionApp _ = prettyMacawExtensionApp
+
+instance AC.CrucibleExtension PPC.PPC64 where
+  type CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
+  prettyExtensionStmt _ = prettyMacawExtensionStmt
+  prettyExtensionApp _ = prettyMacawExtensionApp
+
+instance AC.CrucibleExtension X86.X86_64 where
+  type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
+  prettyExtensionStmt _ = prettyMacawExtensionStmt
+  prettyExtensionApp _ = prettyMacawExtensionApp
+
+prettyMacawExtensionStmt :: MS.MacawStmtExtension arch f tp -> T.Text
+prettyMacawExtensionStmt s =
+  case s of
+    MS.MacawReadMem {} -> "macaw:read-mem"
+    MS.MacawCondReadMem {} -> "macaw:cond-read-mem"
+    MS.MacawWriteMem {} -> "macaw:write-mem"
+    MS.MacawGlobalPtr {} -> "macaw:global-ptr"
+    MS.MacawFreshSymbolic {} -> "macaw:fresh-symbolic"
+    MS.MacawLookupFunctionHandle {} -> "macaw:lookup-function-handle"
+    MS.MacawArchStmtExtension {} -> "macaw:arch-stmt-extension"
+    MS.MacawArchStateUpdate {} -> "macaw:arch-state-update"
+    MS.PtrEq {} -> "macaw:ptr-eq"
+    MS.PtrLeq {} -> "macaw:ptr-leq"
+    MS.PtrLt {} -> "macaw:ptr-lt"
+    MS.PtrMux {} -> "macaw:ptr-mux"
+    MS.PtrAdd {} -> "macaw:ptr-add"
+    MS.PtrSub {} -> "macaw:ptr-sub"
+    MS.PtrAnd {} -> "macaw:ptr-and"
+
+prettyMacawExtensionApp :: MS.MacawExprExtension arch f tp -> T.Text
+prettyMacawExtensionApp _ = "macaw:app<>"
 
 mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32
               -> SomeResult s PPC.PPC32
