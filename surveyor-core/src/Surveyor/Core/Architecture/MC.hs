@@ -2,6 +2,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
@@ -20,8 +21,10 @@ import qualified Data.Functor.Const as C
 import           Data.Int ( Int16, Int64 )
 import qualified Data.Map as M
 import           Data.Monoid ( (<>) )
+import           Data.Parameterized.Classes ( ShowF(showF) )
 import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Parameterized.Map as MapF
+import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
@@ -30,6 +33,8 @@ import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.Prettyprint.Doc as PP
 import           Data.Word ( Word32, Word64 )
 import           Data.Void
+import qualified Fmt as Fmt
+import           Fmt ( (+|), (|+) )
 import           Numeric ( showHex )
 import qualified Text.PrettyPrint.HughesPJClass as HPJ
 import           Text.Read ( readMaybe )
@@ -39,10 +44,12 @@ import qualified Data.Macaw.CFG as MM
 import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Symbolic as MS
 import qualified Data.Macaw.Symbolic.CrucGen as MS
+import qualified Data.Macaw.Types as MT
 import           Data.Macaw.X86.Symbolic ()
 import           Data.Macaw.PPC.Symbolic ()
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
+import qualified Lang.Crucible.CFG.Core as C
 import qualified Renovate as R
 import qualified Renovate.Arch.PPC as PPC
 import qualified Renovate.Arch.X86_64 as X86
@@ -56,18 +63,30 @@ import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr
 
 instance AC.CrucibleExtension PPC.PPC32 where
   type CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
+  type CrucibleExtensionOperand PPC.PPC32 = MacawOperand PPC.PPC32
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
+  prettyExtensionOperand _ = prettyMacawExtensionOperand
+  extensionExprOperands = macawExtensionExprOperands
+  extensionStmtOperands = macawExtensionStmtOperands
 
 instance AC.CrucibleExtension PPC.PPC64 where
   type CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
+  type CrucibleExtensionOperand PPC.PPC64 = MacawOperand PPC.PPC64
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
+  prettyExtensionOperand _ = prettyMacawExtensionOperand
+  extensionExprOperands = macawExtensionExprOperands
+  extensionStmtOperands = macawExtensionStmtOperands
 
 instance AC.CrucibleExtension X86.X86_64 where
   type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
+  type CrucibleExtensionOperand X86.X86_64 = MacawOperand X86.X86_64
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
+  prettyExtensionOperand _ = prettyMacawExtensionOperand
+  extensionExprOperands = macawExtensionExprOperands
+  extensionStmtOperands = macawExtensionStmtOperands
 
 prettyMacawExtensionStmt :: MS.MacawStmtExtension arch f tp -> T.Text
 prettyMacawExtensionStmt s =
@@ -89,7 +108,160 @@ prettyMacawExtensionStmt s =
     MS.PtrAnd {} -> "macaw:ptr-and"
 
 prettyMacawExtensionApp :: MS.MacawExprExtension arch f tp -> T.Text
-prettyMacawExtensionApp _ = "macaw:app<>"
+prettyMacawExtensionApp e =
+  case e of
+    MS.MacawOverflows {} -> "macaw:overflows"
+    MS.PtrToBits {} -> "macaw:ptr-to-bits"
+    MS.BitsToPtr {} -> "macaw:bits-to-ptr"
+    MS.MacawNullPtr {} -> "macaw:nullptr"
+
+data MacawOperand arch s where
+  AddrRepr :: MS.ArchAddrWidthRepr arch -> MacawOperand arch s
+  MemRepr :: MM.MemRepr tp -> MacawOperand arch s
+  MachineAddress :: MM.MemAddr (MM.ArchAddrWidth arch) -> MacawOperand arch s
+  MacawTypeRepr :: MT.TypeRepr tp -> MacawOperand arch s
+  MachineRegister :: MM.ArchReg arch tp -> MacawOperand arch s
+  NatRepr :: NR.NatRepr w -> MacawOperand arch s
+  MacawOverflowOp :: MS.MacawOverflowOp -> MacawOperand arch s
+
+prettyMacawExtensionOperand :: (ShowF (MM.ArchReg arch), MM.MemWidth (MM.ArchAddrWidth arch))
+                            => MacawOperand arch s
+                            -> T.Text
+prettyMacawExtensionOperand o =
+  case o of
+    AddrRepr arep -> Fmt.fmt ("[" +| show arep |+ "]")
+    MemRepr mrep -> Fmt.fmt ("[" +| show mrep |+ "]")
+    MachineAddress addr -> T.pack (show addr)
+    MacawTypeRepr mrep -> Fmt.fmt ("[" +| show mrep |+ "]")
+    NatRepr mrep -> Fmt.fmt ("[" +| show mrep |+ "]")
+    MachineRegister r -> T.pack (showF r)
+    MacawOverflowOp oop -> T.pack (show oop)
+
+macawExtensionExprOperands :: (AC.CrucibleExtensionOperand arch ~ MacawOperand arch)
+                           => AC.NonceCache s ctx
+                           -> NG.NonceGenerator IO s
+                           -> MS.MacawExprExtension arch (C.Reg ctx) tp
+                           -> IO [Operand (AC.Crucible arch) s]
+macawExtensionExprOperands cache ng ext =
+  case ext of
+    MS.PtrToBits nrep r -> do
+      n <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n (NatRepr nrep)
+             , AC.toRegisterOperand cache r
+             ]
+    MS.BitsToPtr nrep r -> do
+      n <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n (NatRepr nrep)
+             , AC.toRegisterOperand cache r
+             ]
+    MS.MacawNullPtr arep -> do
+      n <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n (AddrRepr arep) ]
+    MS.MacawOverflows oop nr r1 r2 r3 -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (MacawOverflowOp oop)
+             , AC.toExtensionOperand n2 (NatRepr nr)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             , AC.toRegisterOperand cache r3
+             ]
+
+macawExtensionStmtOperands :: (AC.CrucibleExtensionOperand arch ~ MacawOperand arch)
+                           => AC.NonceCache s ctx
+                           -> NG.NonceGenerator IO s
+                           -> MS.MacawStmtExtension arch (C.Reg ctx) tp
+                           -> IO [Operand (AC.Crucible arch) s]
+macawExtensionStmtOperands cache ng ext =
+  case ext of
+    MS.MacawReadMem arep mrep reg -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toExtensionOperand n2 (MemRepr mrep)
+             , AC.toRegisterOperand cache reg
+             ]
+    MS.MacawCondReadMem arep mrep r1 r2 r3 -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toExtensionOperand n2 (MemRepr mrep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             , AC.toRegisterOperand cache r3
+             ]
+    MS.MacawWriteMem arep mrep r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toExtensionOperand n2 (MemRepr mrep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    MS.MacawGlobalPtr arep addr -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toExtensionOperand n2 (MachineAddress addr)
+             ]
+    MS.MacawFreshSymbolic mtp -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (MacawTypeRepr mtp) ]
+    MS.MacawLookupFunctionHandle tps r -> do
+      return [ AC.toRegisterOperand cache r ]
+    MS.MacawArchStmtExtension archExt -> return [] -- FIXME
+    MS.MacawArchStateUpdate addr m -> do
+      n1 <- NG.freshNonce ng
+      let makeOpPairs (MapF.Pair machReg (MS.MacawCrucibleValue reg)) = do
+            n <- NG.freshNonce ng
+            return [AC.toExtensionOperand n (MachineRegister machReg), AC.toRegisterOperand cache reg]
+      ops <- mapM makeOpPairs (MapF.toList m)
+      return ( AC.toExtensionOperand n1 (MachineAddress addr)
+             : concat ops
+             )
+    MS.PtrEq arep r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    MS.PtrLeq arep r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    MS.PtrLt arep r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    MS.PtrAdd arep r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    MS.PtrSub arep r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    MS.PtrAnd arep r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    MS.PtrMux arep r1 r2 r3 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             , AC.toRegisterOperand cache r3
+             ]
 
 mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32
               -> SomeResult s PPC.PPC32
