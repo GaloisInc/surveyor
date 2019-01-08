@@ -79,6 +79,7 @@ class CrucibleExtension arch where
                         -> PN.NonceGenerator IO s
                         -> C.StmtExtension (CrucibleExt arch) (C.Reg ctx) tp
                         -> IO [Operand (Crucible arch) s]
+  extensionOperandSelectable :: proxy arch -> CrucibleExtensionOperand arch s -> Bool
 
 -- | Build a 'BlockMapping' for a given function, mapping machine code blocks to
 -- their crucible equivalents.  Note: there are some cases where some blocks
@@ -237,6 +238,34 @@ instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible ar
   rawRepr = Nothing
   showInstructionAddresses _ = False
 
+  operandSelectable (CrucibleOperand _ o) =
+    case o of
+      BoolLit {} -> False
+      NatLit {} -> False
+      IntegerLit {} -> False
+      RationalLit {} -> False
+      StringLiteral {} -> False
+      FloatLit {} -> False
+      DoubleLit {} -> False
+
+      Reg {} -> True
+      GlobalVar {} -> True
+      RoundingMode {} -> False
+      FnHandle {} -> True
+      Index {} -> False
+      BaseTerm {} -> True
+      JumpTarget {} -> True
+
+      BaseTypeRepr {} -> False
+      TypeRepr {} -> False
+      FloatInfoRepr {} -> False
+      NatRepr {} -> False
+      SymbolRepr {} -> False
+      CtxRepr {} -> False
+
+      ExtensionOperand ext -> extensionOperandSelectable (Proxy @arch) ext
+
+
 data CrucibleOperand arch s where
   BoolLit :: Bool -> CrucibleOperand arch s
   NatLit :: Natural -> CrucibleOperand arch s
@@ -246,8 +275,6 @@ data CrucibleOperand arch s where
   FloatLit :: Float -> CrucibleOperand arch s
   DoubleLit :: Double -> CrucibleOperand arch s
 
-  BaseTypedBinder :: C.BaseTypeRepr tp -> C.Reg ctx (C.BaseToType tp) -> CrucibleOperand arch s
-  TypedBinder :: C.TypeRepr tp -> C.Reg ctx tp -> CrucibleOperand arch s
   Reg :: C.Reg ctx tp -> CrucibleOperand arch s
   GlobalVar :: C.GlobalVar tp -> CrucibleOperand arch s
   RoundingMode :: C.RoundingMode -> CrucibleOperand arch s
@@ -334,8 +361,6 @@ cruciblePrettyOperand o =
     DoubleLit d -> T.pack (show d)
 
     Reg r -> T.pack (show r)
-    TypedBinder tp r -> Fmt.fmt ("" +| r ||+ ":[" +| tp ||+ "]")
-    BaseTypedBinder tp r -> Fmt.fmt ("" +| r ||+ ":[" +| tp ||+ "]")
     GlobalVar g -> T.pack (show g)
     RoundingMode rm -> T.pack (show rm)
     FnHandle fh -> T.pack (show fh)

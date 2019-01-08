@@ -26,6 +26,7 @@ import           Control.DeepSeq ( NFData, rnf )
 import           Control.Lens ( (^.), (^?), (&), (.~) )
 import qualified Data.ByteString as BS
 import qualified Data.List as L
+import           Data.Maybe ( isJust )
 import           Data.Parameterized.Classes
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as S
@@ -175,8 +176,11 @@ renderInstruction addr i mSelOperand =
   where
     opc = B.txt (C.prettyOpcode (C.opcode i))
     rhs = B.padRight (B.Pad 1) opc : L.intersperse (B.txt ",") operandWidgets
-    operandWidgets = V.toList (V.imap renderOperand (V.fromList (C.operands i)))
-    renderOperand opIdx op
-      | Just opIdx == mSelOperand = highlightWidget True (B.txt (C.prettyOperand addr op))
+    tagOperand ctr op
+      | C.operandSelectable op = (ctr + 1, (op, Just ctr))
+      | otherwise = (ctr, (op, Nothing))
+    (_, taggedOperands) = L.mapAccumL tagOperand 0 (C.operands i)
+    operandWidgets = map renderOperand taggedOperands
+    renderOperand (op, mIdx)
+      | isJust mIdx && mSelOperand == mIdx = highlightWidget True (B.txt (C.prettyOperand addr op))
       | otherwise = B.txt (C.prettyOperand addr op)
-

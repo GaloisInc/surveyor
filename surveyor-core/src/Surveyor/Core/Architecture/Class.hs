@@ -129,6 +129,7 @@ class (ArchConstraints arch s) => IR (arch :: *) (s :: *) where
   prettyOpcode :: Opcode arch s -> T.Text
 
   showInstructionAddresses :: proxy (arch, s) -> Bool
+  operandSelectable :: Operand arch s -> Bool
 
   -- | If the IR has a "raw" representation of instructions (as
   -- bytes), this is a function that computes it

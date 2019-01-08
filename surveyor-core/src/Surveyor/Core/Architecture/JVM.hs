@@ -129,6 +129,24 @@ instance IR JVM s where
   parseAddress _ = Nothing
   rawRepr = Nothing
   showInstructionAddresses _ = False
+  operandSelectable (JVMOperand o) =
+    case o of
+      MethodKey {} -> True
+      LocalVariableIndex {} -> True
+      -- FIXME: Want to break the switch table down
+      SwitchTable {} -> False
+      -- FIXME
+      PCList {} -> False
+      -- Not selectable
+      Type {} -> False
+      FieldId {} -> False
+      PC {} -> False
+      ConstantPoolValue {} -> False
+      StringOp {} -> False
+      I16 {} -> False
+      I32 {} -> False
+      W8 {} -> False
+      W16 {} -> False
 
 instance Architecture JVM s where
   data ArchResult JVM s = JVMAnalysisResult (JVMResult s)

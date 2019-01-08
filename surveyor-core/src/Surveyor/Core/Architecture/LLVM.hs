@@ -183,6 +183,20 @@ instance IR LLVM s where
   parseAddress _ = Nothing
   rawRepr = Nothing
   showInstructionAddresses _ = False
+  operandSelectable (LLVMOperand o) =
+    case o of
+      Value {} -> True
+      TypedValue {} -> True
+      -- So that we can quick jump to blocks
+      BlockLabel {} -> True
+      -- Same
+      SwitchTarget {} -> True
+      -- Not selectable
+      Type {} -> False
+      ConstantInt {} -> False
+      ConstantString {} -> False
+      Ordering {} -> False
+      AtomicOp {} -> False
 
 instance Architecture LLVM s where
   data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)

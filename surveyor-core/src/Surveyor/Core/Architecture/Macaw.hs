@@ -245,6 +245,28 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
 
   rawRepr = Nothing
   showInstructionAddresses _ = False
+  operandSelectable (MacawOperand _ o) =
+    case o of
+      Binder {} -> True
+      AddressLiteral {} -> True
+      Value {} -> True
+      Addr {} -> True
+      SegmentOffset {} -> True
+      BlockId {} -> True
+      Relocation {} -> True
+      -- FIXME: Break this down
+      JumpTable {} -> False
+      -- FIXME: Break this down
+      RegState {} -> False
+      -- FIXME: Break this down
+      StateUpdate {} -> False
+      -- Not selectable
+      TypeRepr {} -> False
+      TypeReprs {} -> False
+      Index {} -> False
+      NatRepr {} -> False
+      MemRepr {} -> False
+      CommentText {} -> False
 
 deriving instance Eq (Address (Macaw arch) s)
 deriving instance Ord (Address (Macaw arch) s)

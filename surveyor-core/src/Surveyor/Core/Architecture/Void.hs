@@ -29,6 +29,7 @@ instance IR Void s where
   parseAddress _ = Nothing
   rawRepr = Nothing
   showInstructionAddresses _ = False
+  operandSelectable _ = False
 
 instance Architecture Void s where
   data ArchResult Void s = VoidAnalysisResult Void

@@ -331,7 +331,9 @@ modifyOperandSelection xfrm def mbs = do
   selIdx <- selectedIndex (bs ^. blockStateSelection)
   case (bs ^. blockStateList) V.!? selIdx of
     Nothing -> error ("Index out of bounds in modifyOperandSelection: " ++ show selIdx)
-    Just (_, _, insn) -> return (bs & blockStateSelection %~ modifyOperand (length (CA.operands insn)))
+    Just (_, _, insn) -> do
+      let nSelectableOperands = length (filter CA.operandSelectable (CA.operands insn))
+      return (bs & blockStateSelection %~ modifyOperand nSelectableOperands)
   where
     modifyOperand nOperands i =
       case i of

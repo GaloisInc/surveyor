@@ -69,6 +69,7 @@ instance AC.CrucibleExtension PPC.PPC32 where
   prettyExtensionOperand _ = prettyMacawExtensionOperand
   extensionExprOperands = macawExtensionExprOperands
   extensionStmtOperands = macawExtensionStmtOperands
+  extensionOperandSelectable _ = macawExtensionOperandSelectable
 
 instance AC.CrucibleExtension PPC.PPC64 where
   type CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
@@ -78,6 +79,7 @@ instance AC.CrucibleExtension PPC.PPC64 where
   prettyExtensionOperand _ = prettyMacawExtensionOperand
   extensionExprOperands = macawExtensionExprOperands
   extensionStmtOperands = macawExtensionStmtOperands
+  extensionOperandSelectable _ = macawExtensionOperandSelectable
 
 instance AC.CrucibleExtension X86.X86_64 where
   type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
@@ -87,6 +89,18 @@ instance AC.CrucibleExtension X86.X86_64 where
   prettyExtensionOperand _ = prettyMacawExtensionOperand
   extensionExprOperands = macawExtensionExprOperands
   extensionStmtOperands = macawExtensionStmtOperands
+  extensionOperandSelectable _ = macawExtensionOperandSelectable
+
+macawExtensionOperandSelectable :: MacawOperand arch s -> Bool
+macawExtensionOperandSelectable o =
+  case o of
+    AddrRepr {} -> False
+    MemRepr {} -> False
+    MachineAddress {} -> True
+    MacawTypeRepr {} -> False
+    MachineRegister {} -> True
+    NatRepr {} -> False
+    MacawOverflowOp {} -> False
 
 prettyMacawExtensionStmt :: MS.MacawStmtExtension arch f tp -> T.Text
 prettyMacawExtensionStmt s =
@@ -460,6 +474,48 @@ instance IR PPC.PPC32 s where
   parseAddress t = PPC32Address <$> mcParseAddress32 t
   rawRepr = Just (\(PPC32Instruction i) -> PPC.assemble i)
   showInstructionAddresses _ = True
+  operandSelectable (PPC32Operand o) = ppcOperandSelectable o
+
+ppcOperandSelectable :: DPPC.Operand tp -> Bool
+ppcOperandSelectable o =
+  case o of
+    DPPC.Gprc {} -> True
+    DPPC.Gprc_nor0 {} -> True
+    DPPC.Crrc {} -> True
+    DPPC.Fprc {} -> True
+    DPPC.Vrrc {} -> True
+    DPPC.Vsrc {} -> True
+    DPPC.Memrr {} -> True
+    DPPC.Memri {} -> True
+    DPPC.Memrix {} -> True
+    DPPC.Memrix16 {} -> True
+
+    DPPC.Abscondbrtarget {} -> True
+    DPPC.Absdirectbrtarget {} -> True
+    DPPC.Condbrtarget {} -> True
+    DPPC.Directbrtarget {} -> True
+    DPPC.Calltarget {} -> True
+    DPPC.Abscalltarget {} -> True
+
+    DPPC.Crbitm {} -> False
+    DPPC.Crbitrc {} -> False
+    DPPC.I1imm {} -> False
+    DPPC.I32imm {} -> False
+    DPPC.S16imm {} -> False
+    DPPC.S16imm64 {} -> False
+    DPPC.S17imm {} -> False
+    DPPC.S17imm64 {} -> False
+    DPPC.S5imm {} -> False
+    DPPC.U1imm {} -> False
+    DPPC.U2imm {} -> False
+    DPPC.U4imm {} -> False
+    DPPC.U5imm {} -> False
+    DPPC.U6imm {} -> False
+    DPPC.U7imm {} -> False
+    DPPC.U8imm {} -> False
+    DPPC.U10imm {} -> False
+    DPPC.U16imm {} -> False
+    DPPC.U16imm64 {} -> False
 
 instance Architecture PPC.PPC32 s where
   data ArchResult PPC.PPC32 s =
@@ -543,6 +599,7 @@ instance IR PPC.PPC64 s where
   parseAddress t = PPC64Address <$> mcParseAddress64 t
   rawRepr = Just (\(PPC64Instruction i) -> PPC.assemble i)
   showInstructionAddresses _ = True
+  operandSelectable (PPC64Operand o) = ppcOperandSelectable o
 
 instance Architecture PPC.PPC64 s where
   data ArchResult PPC.PPC64 s =
@@ -624,6 +681,40 @@ instance IR X86.X86_64 s where
   parseAddress t = X86Address <$> mcParseAddress64 t
   rawRepr = Just (\(X86Instruction i) -> X86.assemble i)
   showInstructionAddresses _ = True
+  operandSelectable (X86Operand o _) =
+    case o of
+      FD.ByteReg {} -> True
+      FD.WordReg {} -> True
+      FD.DWordReg {} -> True
+      FD.QWordReg {} -> True
+      FD.JumpOffset {} -> True
+      FD.ControlReg {} -> True
+      FD.DebugReg {} -> True
+      FD.MMXReg {} -> True
+      FD.XMMReg {} -> True
+      FD.YMMReg {} -> True
+      FD.X87Register {} -> True
+      FD.FarPointer {} -> True
+      FD.VoidMem {} -> True
+      FD.Mem8 {} -> True
+      FD.Mem16 {} -> True
+      FD.Mem32 {} -> True
+      FD.Mem64 {} -> True
+      FD.Mem128 {} -> True
+      FD.Mem256 {} -> True
+      FD.FPMem32 {} -> True
+      FD.FPMem64 {} -> True
+      FD.FPMem80 {} -> True
+
+      FD.ByteImm {} -> False
+      FD.WordImm {} -> False
+      FD.DWordImm {} -> False
+      FD.QWordImm {} -> False
+      FD.ByteSignedImm {} -> False
+      FD.WordSignedImm {} -> False
+      FD.DWordSignedImm {} -> False
+
+      FD.SegmentValue {} -> False
 
 instance Architecture X86.X86_64 s where
   data ArchResult X86.X86_64 s =
