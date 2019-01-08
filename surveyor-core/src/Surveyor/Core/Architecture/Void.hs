@@ -28,6 +28,7 @@ instance IR Void s where
   prettyOpcode (VoidOpcode v) = absurd v
   parseAddress _ = Nothing
   rawRepr = Nothing
+  showInstructionAddresses _ = False
 
 instance Architecture Void s where
   data ArchResult Void s = VoidAnalysisResult Void

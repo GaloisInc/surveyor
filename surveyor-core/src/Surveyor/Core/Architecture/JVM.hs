@@ -128,6 +128,7 @@ instance IR JVM s where
   operands (JVMInstruction i) = jvmOperands i
   parseAddress _ = Nothing
   rawRepr = Nothing
+  showInstructionAddresses _ = False
 
 instance Architecture JVM s where
   data ArchResult JVM s = JVMAnalysisResult (JVMResult s)

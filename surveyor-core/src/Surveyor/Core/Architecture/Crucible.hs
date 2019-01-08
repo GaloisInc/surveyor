@@ -235,6 +235,7 @@ instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible ar
 
   parseAddress _ = Nothing
   rawRepr = Nothing
+  showInstructionAddresses _ = False
 
 data CrucibleOperand arch s where
   BoolLit :: Bool -> CrucibleOperand arch s

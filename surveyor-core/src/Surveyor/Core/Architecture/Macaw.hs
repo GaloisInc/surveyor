@@ -244,6 +244,7 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
   parseAddress t = (MacawAddress . fromIntegral) <$> ((readMaybe t) :: Maybe Word64)
 
   rawRepr = Nothing
+  showInstructionAddresses _ = False
 
 deriving instance Eq (Address (Macaw arch) s)
 deriving instance Ord (Address (Macaw arch) s)

@@ -182,6 +182,7 @@ instance IR LLVM s where
   -- in the analysisresult
   parseAddress _ = Nothing
   rawRepr = Nothing
+  showInstructionAddresses _ = False
 
 instance Architecture LLVM s where
   data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)

@@ -114,13 +114,16 @@ mkBlockListState names blkState =
   where
     l0 = B.list names (blkState ^. C.blockStateList) 1
 
-renderListItem :: (C.IR arch s)
+renderListItem :: forall arch s
+                . (C.IR arch s)
                => C.InstructionSelection arch s
                -> Bool
                -> (Int, C.Address arch s, C.Instruction arch s)
                -> B.Widget Names
 renderListItem sel _isFocused (idx, addr, i) =
-  B.hBox [ B.padRight (B.Pad 2) (B.txt (C.prettyAddress addr))
+  B.hBox [ if C.showInstructionAddresses (Proxy @(arch, s))
+           then B.padRight (B.Pad 2) (B.txt (C.prettyAddress addr))
+           else B.emptyWidget
          , maybe B.emptyWidget (renderRawRepr i) C.rawRepr
          , renderListItemWithSelection sel idx addr i
          ]

@@ -459,6 +459,7 @@ instance IR PPC.PPC32 s where
   prettyOpcode (PPC32Opcode opc) = T.pack (show opc)
   parseAddress t = PPC32Address <$> mcParseAddress32 t
   rawRepr = Just (\(PPC32Instruction i) -> PPC.assemble i)
+  showInstructionAddresses _ = True
 
 instance Architecture PPC.PPC32 s where
   data ArchResult PPC.PPC32 s =
@@ -541,6 +542,7 @@ instance IR PPC.PPC64 s where
   prettyOpcode (PPC64Opcode opc) = T.pack (show opc)
   parseAddress t = PPC64Address <$> mcParseAddress64 t
   rawRepr = Just (\(PPC64Instruction i) -> PPC.assemble i)
+  showInstructionAddresses _ = True
 
 instance Architecture PPC.PPC64 s where
   data ArchResult PPC.PPC64 s =
@@ -621,6 +623,7 @@ instance IR X86.X86_64 s where
     T.pack (show (FD.ppInstruction (X86.toFlexInst i)))
   parseAddress t = X86Address <$> mcParseAddress64 t
   rawRepr = Just (\(X86Instruction i) -> X86.assemble i)
+  showInstructionAddresses _ = True
 
 instance Architecture X86.X86_64 s where
   data ArchResult X86.X86_64 s =
