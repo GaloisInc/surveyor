@@ -90,7 +90,7 @@ buildMacawInstIndex toArchAddr (iaddr, i) acc@(mCurrentInsnAddr, m) =
       | otherwise -> acc
     MacawInstructionStart baddr off _stmt _ ->
       let cia' = toArchAddr (MC.incAddr (fromIntegral off) (MC.segoffAddr baddr))
-      in (Just cia', M.insertWith S.union iaddr (S.singleton cia') m)
+      in (Just cia', m)
     MacawStmt s _ _ ->
       case s of
         MC.Comment {} -> acc
