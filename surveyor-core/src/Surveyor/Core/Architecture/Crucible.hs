@@ -265,6 +265,8 @@ instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible ar
 
       ExtensionOperand ext -> extensionOperandSelectable (Proxy @arch) ext
 
+      Syntax {} -> False
+
 
 data CrucibleOperand arch s where
   BoolLit :: Bool -> CrucibleOperand arch s
@@ -291,6 +293,9 @@ data CrucibleOperand arch s where
   CtxRepr :: C.CtxRepr args -> CrucibleOperand arch s
 
   ExtensionOperand :: CrucibleExtensionOperand arch s -> CrucibleOperand arch s
+
+  -- Pseudo-operands for display purposes
+  Syntax :: T.Text -> CrucibleOperand arch s
 
 toExtensionOperand :: PN.Nonce s tp -> CrucibleExtensionOperand arch s -> Operand (Crucible arch) s
 toExtensionOperand n eo = CrucibleOperand n (ExtensionOperand eo)
@@ -376,6 +381,8 @@ cruciblePrettyOperand o =
     CtxRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
 
     ExtensionOperand ce -> prettyExtensionOperand (Proxy @arch) ce
+
+    Syntax t -> t
 
 cruciblePrettyOpcode :: forall arch s . (CrucibleConstraints arch s, CrucibleExtension arch) => CrucibleOpcode arch s -> T.Text
 cruciblePrettyOpcode o =
@@ -623,16 +630,28 @@ crucibleTermStmtOperands cache ng stmt =
   case stmt of
     C.Jump (C.JumpTarget bid _ args) -> do
       n1 <- PN.freshNonce ng
-      return ( CrucibleOperand n1 (JumpTarget bid)
-             : FC.toListFC (toRegisterOperand cache) args
-             )
+      n2 <- PN.freshNonce ng
+      n3 <- PN.freshNonce ng
+      return $ concat [ [CrucibleOperand n1 (JumpTarget bid)]
+                      , [CrucibleOperand n2 (Syntax "(")]
+                      , FC.toListFC (toRegisterOperand cache) args
+                      , [CrucibleOperand n3 (Syntax ")")]
+                      ]
     C.Br r (C.JumpTarget bid1 _ args1) (C.JumpTarget bid2 _ args2) -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
+      n3 <- PN.freshNonce ng
+      n4 <- PN.freshNonce ng
+      n5 <- PN.freshNonce ng
+      n6 <- PN.freshNonce ng
       return $ concat [ [toRegisterOperand cache r, CrucibleOperand n1 (JumpTarget bid1)]
+                      , [CrucibleOperand n2 (Syntax "(")]
                       , FC.toListFC (toRegisterOperand cache) args1
-                      , [CrucibleOperand n2 (JumpTarget bid2)]
+                      , [CrucibleOperand n3 (Syntax ")")]
+                      , [CrucibleOperand n4 (JumpTarget bid2)]
+                      , [CrucibleOperand n5 (Syntax "(")]
                       , FC.toListFC (toRegisterOperand cache) args2
+                      , [CrucibleOperand n6 (Syntax ")")]
                       ]
     C.MaybeBranch trep r (C.SwitchTarget bid1 _ args1) (C.JumpTarget bid2 _ args2) -> do
       n1 <- PN.freshNonce ng
@@ -645,7 +664,14 @@ crucibleTermStmtOperands cache ng stmt =
                       , FC.toListFC (toRegisterOperand cache) args2
                       ]
     C.VariantElim _ r targets -> return [toRegisterOperand cache r]
-    C.TailCall r _ args -> return (toRegisterOperand cache r : FC.toListFC (toRegisterOperand cache) args)
+    C.TailCall r _ args -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      return $ concat [ [toRegisterOperand cache r]
+                      , [CrucibleOperand n1 (Syntax "(")]
+                      , FC.toListFC (toRegisterOperand cache) args
+                      , [CrucibleOperand n2 (Syntax ")")]
+                      ]
     C.Return r -> return [toRegisterOperand cache r]
     C.ErrorStmt r -> return [toRegisterOperand cache r]
 
