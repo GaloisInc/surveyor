@@ -15,6 +15,7 @@ The core of surveyor is implemented in a UI independent core library.  Currently
 #+BEGIN_SRC shell
 git clone git@github.com:travitch/surveyor.git
 cd surveyor
+git submodule update --init
 ln -s cabal.project.dist cabal.project
 cabal v2-build surveyor-brick
 #+END_SRC
