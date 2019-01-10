@@ -1,0 +1,33 @@
+* Overview
+
+Surveyor aims to provide a UI for interactive exploration, inspection, and reasoning about programs.  It supports programs represented as:
+
+- Machine code (x86_64 and PowerPC 32 and PowerPC 64)
+- LLVM bitcode
+- JVM bytecode
+
+Programs can also be viewed in their native representations or in intermediate representations (e.g., [[https://github.com/GaloisInc/macaw][macaw]] and [[https://github.com/GaloisInc/crucible][crucible]]).  The eventual goal is to provide rich interaction, especially in these intermediate representations.  This will include interactive symbolic execution through crucible.
+
+The core of surveyor is implemented in a UI independent core library.  Currently, the supported UI is surveyor-brick, which is a terminal UI (TUI) in the style of ncurses using the [[http://hackage.haskell.org/package/brick][brick]] library.  There is a bitrotted proof-of-concept QML GUI.  Eventually, it will probably make sense to have a web UI and possibly a Qt UI.
+
+* Build
+
+#+BEGIN_SRC shell
+git clone git@github.com:travitch/surveyor.git
+cd surveyor
+ln -s cabal.project.dist cabal.project
+cabal v2-build surveyor-brick
+#+END_SRC
+
+* Usage
+
+#+BEGIN_SRC shell
+cabal v2-run surveyor-brick -- /path/to/binary
+#+END_SRC
+
+Surveyor will load the binary and make its contents available for exploration.  The interface is styled after emacs.  Commands can be run by pressing ~M-x~ and entering a command.  Some useful commands include
+
+- ~describe-command~
+- ~list-functions~
+
+Selecting a function will list its blocks (eventually, this will be a rendered control flow graph).  Within a block, the arrow keys can be used to select instructions.  Machine code blocks can be viewed in two alternative intermediate representations: macaw and crucible.  The relevant commands (accessible via ~M-x~) are ~show-macaw-block~ and ~show-crucible-block~, respectively.
