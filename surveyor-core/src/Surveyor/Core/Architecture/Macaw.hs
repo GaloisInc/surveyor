@@ -67,7 +67,7 @@ macawForBlocks toArchAddr nonceGen binfo faddr blocks = do
                               , fhName = T.pack (show faddr)
                               }
       blks <- mapM (toMacawBlock nonceGen dfi fh) blocks
-      let (_, macawInsnIdx) = foldr (buildMacawInstIndex toArchAddr) (Nothing, M.empty) (concatMap (blockInstructions . snd) blks)
+      let (_, macawInsnIdx) = F.foldl' (buildMacawInstIndex toArchAddr) (Nothing, M.empty) (concatMap (blockInstructions . snd) blks)
       return $ BlockMapping { blockMapping = toBlockMap blks
                             , irToBaseAddrs = macawInsnIdx
                             , baseToIRAddrs = flipAddressMap macawInsnIdx
@@ -79,10 +79,10 @@ macawForBlocks toArchAddr nonceGen binfo faddr blocks = do
 
 buildMacawInstIndex :: (Ord (Address arch s), MC.MemWidth (MC.ArchAddrWidth arch))
                     => (MC.MemAddr (MC.ArchAddrWidth arch) -> Address arch s)
+                    -> (Maybe (Address arch s), M.Map (Address (Macaw arch) s) (S.Set (Address arch s)))
                     -> (Address (Macaw arch) s, Instruction (Macaw arch) s)
                     -> (Maybe (Address arch s), M.Map (Address (Macaw arch) s) (S.Set (Address arch s)))
-                    -> (Maybe (Address arch s), M.Map (Address (Macaw arch) s) (S.Set (Address arch s)))
-buildMacawInstIndex toArchAddr (iaddr, i) acc@(mCurrentInsnAddr, m) =
+buildMacawInstIndex toArchAddr acc@(mCurrentInsnAddr, m) (iaddr, i) =
   case i of
     MacawTermStmt _ _
       | Just cia <- mCurrentInsnAddr ->
