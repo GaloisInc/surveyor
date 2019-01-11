@@ -100,6 +100,8 @@ macawExtensionOperandSelectable o =
     MachineRegister {} -> True
     NatRepr {} -> False
     MacawOverflowOp {} -> False
+    Offset {} -> False
+    Text {} -> False
 
 prettyMacawExtensionStmt :: MS.MacawStmtExtension arch f tp -> T.Text
 prettyMacawExtensionStmt s =
@@ -112,6 +114,7 @@ prettyMacawExtensionStmt s =
     MS.MacawLookupFunctionHandle {} -> "macaw:lookup-function-handle"
     MS.MacawArchStmtExtension {} -> "macaw:arch-stmt-extension"
     MS.MacawArchStateUpdate {} -> "macaw:arch-state-update"
+    MS.MacawInstructionStart {} -> "macaw:instruction-start"
     MS.PtrEq {} -> "macaw:ptr-eq"
     MS.PtrLeq {} -> "macaw:ptr-leq"
     MS.PtrLt {} -> "macaw:ptr-lt"
@@ -136,6 +139,8 @@ data MacawOperand arch s where
   MachineRegister :: MM.ArchReg arch tp -> MacawOperand arch s
   NatRepr :: NR.NatRepr w -> MacawOperand arch s
   MacawOverflowOp :: MS.MacawOverflowOp -> MacawOperand arch s
+  Offset :: MM.ArchAddrWord arch -> MacawOperand arch s
+  Text :: T.Text -> MacawOperand arch s
 
 prettyMacawExtensionOperand :: (ShowF (MM.ArchReg arch), MM.MemWidth (MM.ArchAddrWidth arch))
                             => MacawOperand arch s
@@ -149,6 +154,8 @@ prettyMacawExtensionOperand o =
     NatRepr mrep -> Fmt.fmt ("[" +| show mrep |+ "]")
     MachineRegister r -> T.pack (showF r)
     MacawOverflowOp oop -> T.pack (show oop)
+    Text t -> Fmt.fmt ("\"" +| t |+ "\"")
+    Offset off -> T.pack (show off)
 
 macawExtensionExprOperands :: (AC.CrucibleExtensionOperand arch ~ MacawOperand arch)
                            => AC.NonceCache s ctx
@@ -180,7 +187,9 @@ macawExtensionExprOperands cache ng ext =
              , AC.toRegisterOperand cache r3
              ]
 
-macawExtensionStmtOperands :: (AC.CrucibleExtensionOperand arch ~ MacawOperand arch)
+macawExtensionStmtOperands :: ( AC.CrucibleExtensionOperand arch ~ MacawOperand arch
+                              , MM.MemWidth (MM.ArchAddrWidth arch)
+                              )
                            => AC.NonceCache s ctx
                            -> NG.NonceGenerator IO s
                            -> MS.MacawStmtExtension arch (C.Reg ctx) tp
@@ -232,6 +241,14 @@ macawExtensionStmtOperands cache ng ext =
       return ( AC.toExtensionOperand n1 (MachineAddress addr)
              : concat ops
              )
+    MS.MacawInstructionStart baddr ioff t -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      n3 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (MachineAddress (MM.segoffAddr baddr))
+             , AC.toExtensionOperand n2 (Offset ioff)
+             , AC.toExtensionOperand n3 (Text t)
+             ]
     MS.PtrEq arep r1 r2 -> do
       n1 <- NG.freshNonce ng
       return [ AC.toExtensionOperand n1 (AddrRepr arep)
