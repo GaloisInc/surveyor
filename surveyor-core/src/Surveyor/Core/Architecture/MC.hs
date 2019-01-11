@@ -17,6 +17,7 @@ module Surveyor.Core.Architecture.MC (
 
 import           Control.DeepSeq ( NFData, rnf )
 import qualified Control.Once as O
+import qualified Data.Foldable as F
 import qualified Data.Functor.Const as C
 import           Data.Int ( Int16, Int64 )
 import qualified Data.Map as M
@@ -27,6 +28,7 @@ import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TE
@@ -49,6 +51,7 @@ import           Data.Macaw.PPC.Symbolic ()
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
 import qualified Lang.Crucible.CFG.Core as C
+import qualified Lang.Crucible.CFG.Extension as CE
 import qualified Renovate as R
 import qualified Renovate.Arch.PPC as PPC
 import qualified Renovate.Arch.X86_64 as X86
@@ -292,6 +295,42 @@ macawExtensionStmtOperands cache ng ext =
              , AC.toRegisterOperand cache r2
              , AC.toRegisterOperand cache r3
              ]
+
+indexCrucibleMCBlocks :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (AC.CrucibleExt arch)
+                         , MM.MemWidth (MM.ArchAddrWidth arch)
+                         , Ord (Address arch s)
+                         )
+                       => (MM.MemAddr (MM.ArchAddrWidth arch) -> Address arch s)
+                      -> [(Block arch s, Block (AC.Crucible arch) s)]
+                      -> M.Map (Address (AC.Crucible arch) s) (S.Set (Address arch s))
+indexCrucibleMCBlocks toArchAddr blks =
+  let s0 = (Nothing, M.empty)
+      instrs = concatMap (blockInstructions . snd) blks
+      (_, idx) = F.foldl' (buildCrucibleInstIndex toArchAddr) s0 instrs
+  in idx
+
+buildCrucibleInstIndex :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (AC.CrucibleExt arch)
+                          , MM.MemWidth (MM.ArchAddrWidth arch)
+                          , Ord (Address arch s)
+                          )
+                       => (MM.MemAddr (MM.ArchAddrWidth arch) -> Address arch s)
+                       -> (Maybe (Address arch s), M.Map (Address (AC.Crucible arch) s) (S.Set (Address arch s)))
+                       -> (Address (AC.Crucible arch) s, Instruction (AC.Crucible arch) s)
+                       -> (Maybe (Address arch s), M.Map (Address (AC.Crucible arch) s) (S.Set (Address arch s)))
+buildCrucibleInstIndex toArchAddr acc@(mCurrentInsnAddr, m) (iaddr, i) =
+  case i of
+    AC.CrucibleStmt _ s _ _ ->
+      case s of
+        C.ExtendAssign (MS.MacawInstructionStart baddr off _txt) ->
+          let cia' = toArchAddr (MM.incAddr (fromIntegral off) (MM.segoffAddr baddr))
+          in (Just cia', m)
+        _ | Just cia <- mCurrentInsnAddr ->
+            (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
+          | otherwise -> acc
+    AC.CrucibleTermStmt {}
+      | Just cia <- mCurrentInsnAddr ->
+        (mCurrentInsnAddr, M.insertWith S.union iaddr (S.singleton cia) m)
+      | otherwise -> acc
 
 mkPPC32Result :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32
               -> SomeResult s PPC.PPC32
@@ -577,7 +616,7 @@ instance Architecture PPC.PPC32 s where
                      ]
         let PPC32Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
-          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC32Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
 
 instance Eq (Address PPC.PPC32 s) where
@@ -660,7 +699,7 @@ instance Architecture PPC.PPC64 s where
                      ]
         let PPC64Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
-          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC64Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
 
 
@@ -771,7 +810,7 @@ instance Architecture X86.X86_64 s where
                      ]
         let X86Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
-          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
+          Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks X86Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
 
 

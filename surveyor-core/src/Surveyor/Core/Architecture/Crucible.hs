@@ -23,7 +23,8 @@ module Surveyor.Core.Architecture.Crucible (
   NonceCache,
   toRegisterOperand,
   allocateRegister,
-  toExtensionOperand
+  toExtensionOperand,
+  Instruction(..)
   ) where
 
 import           Control.DeepSeq ( NFData(rnf) )
@@ -43,6 +44,7 @@ import qualified Data.Parameterized.SymbolRepr as PS
 import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Parameterized.TH.GADT as PTH
 import           Data.Proxy ( Proxy(..) )
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import           Data.Word ( Word64 )
 import qualified Fmt as Fmt
@@ -84,18 +86,21 @@ class CrucibleExtension arch where
 -- their crucible equivalents.  Note: there are some cases where some blocks
 -- will not have a direct mapping.
 --
--- NOTE: We also currently do not build the base-to-ir instruction address mapping
+-- We have to pass in a function to index blocks, as the metadata to enable it
+-- is specific to each Crucible extension.  If a backend does not support the
+-- mapping (e.g., because it doesn't have enough metadata), passing @const Map.empty@ will work.
 crucibleForMCBlocks :: forall arch s
                      . ( CrucibleConstraints arch s
                        , CrucibleExtension arch
                        , CrucibleExt arch ~ MS.MacawExt arch
                        )
                     => PN.NonceGenerator IO s
+                    -> ([(Block arch s, Block (Crucible arch) s)] -> Map.Map (Address (Crucible arch) s) (Set.Set (Address arch s)))
                     -> R.BlockInfo arch
                     -> R.ConcreteAddress arch
                     -> [(MC.ArchSegmentOff arch, Block arch s)]
                     -> IO (Maybe (BlockMapping arch (Crucible arch) s))
-crucibleForMCBlocks ng binfo faddr blocks = do
+crucibleForMCBlocks ng blockIndexer binfo faddr blocks = do
   case Map.lookup faddr (R.biCFG binfo) of
     Nothing -> return Nothing
     Just symCFGRef -> do
@@ -107,14 +112,24 @@ crucibleForMCBlocks ng binfo faddr blocks = do
                               }
       let blkIdx = Map.fromList [(MC.segoffAddr a, b) | (a, b) <- blocks]
       blks <- FC.traverseFC (toMCCrucibleBlock ng blkIdx fa fh) (C.cfgBlockMap symCFG)
-      return $ Just $ BlockMapping { baseToIRAddrs = Map.empty
-                                   , irToBaseAddrs = Map.empty
+      let irtbMap = blockIndexer (catMaybes (FC.toListFC getConst blks))
+      return $ Just $ BlockMapping { baseToIRAddrs = flipAddressMap irtbMap
+                                   , irToBaseAddrs = irtbMap
                                    , blockMapping = toBlockMap (catMaybes (FC.toListFC getConst blks))
                                    }
   where
     toBlockMap pairs = Map.fromList [ (blockAddress origBlock, (origBlock, cblock))
                                     | (origBlock, cblock) <- pairs
                                     ]
+
+flipAddressMap :: (Ord (Address arch s))
+               => Map.Map (Address (Crucible arch) s) (Set.Set (Address arch s))
+               -> Map.Map (Address arch s) (Set.Set (Address (Crucible arch) s))
+flipAddressMap = foldr doFlip Map.empty . Map.toList
+  where
+    doFlip (macawAddr, mcAddrs) m = F.foldr (addMachineAddrs macawAddr) m mcAddrs
+    addMachineAddrs macawAddr machineAddr = Map.insertWith Set.union machineAddr (Set.singleton macawAddr)
+
 
 -- | Turn a single Crucible block into a block in our representation, pairing it
 -- up with the machine code block that corresponds to it.
