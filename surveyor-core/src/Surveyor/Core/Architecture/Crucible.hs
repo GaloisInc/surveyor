@@ -33,7 +33,6 @@ import           Data.Functor.Const ( Const(Const, getConst) )
 import           Data.Kind ( Type )
 import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Symbolic as MS
-import qualified Data.Macaw.Symbolic.CrucGen as MS
 import qualified Data.Map as Map
 import           Data.Maybe ( catMaybes, isJust )
 import           Data.Parameterized.Classes ( TestEquality(testEquality), OrdF(compareF), toOrdering )

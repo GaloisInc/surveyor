@@ -46,7 +46,7 @@ ppcConfig :: forall sym w arch s fs st binFmt
              , R.Instruction arch ~ RP.Instruction
              , A.Architecture arch s
              , KnownNat w
-             , MS.ArchBits arch
+             , MS.SymArchConstraints arch
              , R.InstructionConstraints arch
              , SA.Architecture arch
              , MC.IPAlignment arch

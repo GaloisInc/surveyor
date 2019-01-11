@@ -43,7 +43,6 @@ import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MM
 import qualified Data.Macaw.Discovery as MD
 import qualified Data.Macaw.Symbolic as MS
-import qualified Data.Macaw.Symbolic.CrucGen as MS
 import qualified Data.Macaw.Types as MT
 import           Data.Macaw.X86.Symbolic ()
 import           Data.Macaw.PPC.Symbolic ()
@@ -130,7 +129,7 @@ prettyMacawExtensionApp e =
     MS.MacawNullPtr {} -> "macaw:nullptr"
 
 data MacawOperand arch s where
-  AddrRepr :: MS.ArchAddrWidthRepr arch -> MacawOperand arch s
+  AddrRepr :: MM.AddrWidthRepr (MM.ArchAddrWidth arch) -> MacawOperand arch s
   MemRepr :: MM.MemRepr tp -> MacawOperand arch s
   MachineAddress :: MM.MemAddr (MM.ArchAddrWidth arch) -> MacawOperand arch s
   MacawTypeRepr :: MT.TypeRepr tp -> MacawOperand arch s
