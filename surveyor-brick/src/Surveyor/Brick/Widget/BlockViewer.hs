@@ -157,6 +157,9 @@ renderListItemWithSelection sel idx addr i =
     C.MultipleSelection selIdx _addr tagged
       | idx == selIdx || idx `S.member` S.map fst tagged -> highlightWidget True (renderInstruction addr i Nothing)
       | otherwise -> renderInstruction addr i Nothing
+    C.TransientSelection selIdx _addr tagged
+      | idx == selIdx || idx `S.member` S.map fst tagged -> highlightWidget True (renderInstruction addr i Nothing)
+      | otherwise -> renderInstruction addr i Nothing
 
 highlightWidget :: Bool -> B.Widget n -> B.Widget n
 highlightWidget isFocused w

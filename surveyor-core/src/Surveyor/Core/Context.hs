@@ -242,6 +242,11 @@ data InstructionSelection ir s = NoSelection
                                -- not be selected in this case.  The primary
                                -- selection is the first Int.  The other selected
                                -- instructions are *tagged*
+                               | TransientSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
+                               -- ^ A transient selection that was created by an
+                               -- automatic action, but that goes away
+                               -- (degenerates to a single selection) as soon as
+                               -- the user moves the cursor
   deriving (Generic)
 
 instance (NFData (CA.Address ir s)) => NFData (InstructionSelection ir s)
@@ -252,6 +257,7 @@ selectedIndex i =
     NoSelection -> Nothing
     SingleSelection ix _ _ -> Just ix
     MultipleSelection ix _ _ -> Just ix
+    TransientSelection ix _ _ -> Just ix
 
 data ContextStack arch s =
   ContextStack { cStack :: !(Seq.Seq (Context arch s))
@@ -341,6 +347,7 @@ modifyOperandSelection xfrm def mbs = do
         SingleSelection n addr Nothing -> SingleSelection n addr (Just (def nOperands))
         SingleSelection n addr (Just opIdx) -> SingleSelection n addr (Just (xfrm nOperands opIdx))
         MultipleSelection {} -> i
+        TransientSelection {} -> i
 
 moveBlockSelection :: (H.PatriciaTree (CA.Block arch s) () -> H.Vertex -> [H.Vertex])
                    -> ContextStack arch s
@@ -405,13 +412,18 @@ syncBaseState updatedIR mBlkStMap (Just bs)
           let addrs = addr : map snd (F.toList tagged)
           let baseAddrs = Set.unions (mapMaybe (\a -> Map.lookup a (CA.irToBaseAddrs bm)) addrs)
           makeNextSelection baseAddrs
+        TransientSelection _ix addr tagged -> do
+          let addrs = addr : map snd (F.toList tagged)
+          let baseAddrs = Set.unions (mapMaybe (\a -> Map.lookup a (CA.irToBaseAddrs bm)) addrs)
+          makeNextSelection baseAddrs
   where
     makeNextSelection baseAddrs =
       case F.foldr (addSelectedAddrs baseAddrs) [] (bsList bs) of
         [] -> return (Just bs)
-        [(singIx, singAddr)] -> return $ Just bs { bsSelection = SingleSelection singIx singAddr Nothing }
+        [(singIx, singAddr)] ->
+          return $ Just bs { bsSelection = TransientSelection singIx singAddr Set.empty }
         (selIx, selAddr) : rest ->
-          return $ Just bs { bsSelection = MultipleSelection selIx selAddr (Set.fromList rest) }
+          return $ Just bs { bsSelection = TransientSelection selIx selAddr (Set.fromList rest) }
 
 addSelectedAddrs :: (Ord (CA.Address ir s))
                  => Set.Set (CA.Address ir s)
@@ -460,13 +472,18 @@ syncOtherStates updatedIR mBlkStMap bs
           let oldIRSels = addr : map snd (F.toList tagged)
           let irAddrs = Set.unions (mapMaybe (\a -> Map.lookup a (CA.baseToIRAddrs bm)) oldIRSels)
           makeNextSelection irAddrs
+        TransientSelection _ix addr tagged -> do
+          let oldIRSels = addr : map snd (F.toList tagged)
+          let irAddrs = Set.unions (mapMaybe (\a -> Map.lookup a (CA.baseToIRAddrs bm)) oldIRSels)
+          makeNextSelection irAddrs
   where
     makeNextSelection irAddrs = withConstraints bs $
       case F.foldr (addSelectedAddrs irAddrs) [] (bsList bs) of
         [] -> return bs
-        [(singIx, singAddr)] -> return bs { bsSelection = SingleSelection singIx singAddr Nothing }
+        [(singIx, singAddr)] ->
+          return bs { bsSelection = TransientSelection singIx singAddr Set.empty }
         (selIx, selAddr) : rest ->
-          return bs { bsSelection = MultipleSelection selIx selAddr (Set.fromList rest) }
+          return bs { bsSelection = TransientSelection selIx selAddr (Set.fromList rest) }
 
 
 -- | Increment the current selection
@@ -488,5 +505,9 @@ modifySelection modSel bs i =
       let newIdx = modSel nInsns n
       (_, addr, _) <- bsList bs V.!? newIdx
       return (MultipleSelection newIdx addr sels)
+    TransientSelection n _ _ -> fromMaybe i $ do
+      let newIdx = modSel nInsns n
+      (_, addr, _) <- bsList bs V.!? newIdx
+      return (SingleSelection newIdx addr Nothing)
   where
     nInsns = F.length (bs ^. blockStateList)
