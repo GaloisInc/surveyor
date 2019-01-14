@@ -5,6 +5,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeInType #-}
 -- | An emacs-style minibuffer as a Brick widget
 module Brick.Widget.Minibuffer (
   Minibuffer,
@@ -17,6 +18,7 @@ module Brick.Widget.Minibuffer (
 import qualified Brick as B
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Functor.Const as C
+import           Data.Kind ( Type )
 import           Data.Maybe ( fromMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
@@ -140,7 +142,7 @@ argumentValue argList =
 --
 --  * Pressing <C-g> while a command is processing arguments or waiting for a
 --    command will deactivate the minibuffer
-handleMinibufferEvent :: forall b n t (r :: C.ArgumentKind b -> *)
+handleMinibufferEvent :: forall b n t (r :: C.ArgumentKind b -> Type)
                       . ( Ord n, Eq t, Monoid t
                         , ZG.GenericTextZipper t
                         , C.CommandLike b

@@ -133,8 +133,8 @@ import qualified Surveyor.Core.TranslationCache as TC
 
 -- | A default keymap with some reasonable keybindings
 defaultKeymap :: forall (s :: *) e u . K.Keymap (AR.SurveyorCommand s (S e u)) (M.SomeUIMode s)
-defaultKeymap = F.foldl' (\km (k, Some cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
+defaultKeymap = F.foldl' (\km (k, CC.SomeCommand cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
-    globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some exitC)
-              , (K.Key (V.KChar 'x') [V.MMeta], Some minibufferC)
+    globals = [ (K.Key (V.KChar 'q') [V.MCtrl], CC.SomeCommand exitC)
+              , (K.Key (V.KChar 'x') [V.MMeta], CC.SomeCommand minibufferC)
               ]

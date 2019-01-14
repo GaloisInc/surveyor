@@ -4,6 +4,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeInType #-}
 module Surveyor.Core.Command (
   Command(..),
   SomeCommand(..),
@@ -11,6 +12,7 @@ module Surveyor.Core.Command (
   ) where
 
 import qualified Data.Functor.Const as C
+import           Data.Kind ( Type )
 import qualified Data.Parameterized.List as PL
 import qualified Data.Text as T
 
@@ -24,7 +26,7 @@ import qualified Surveyor.Core.Chan as C
 data SomeCommand b where
   SomeCommand :: forall b (tps :: [ArgumentKind b]) . Command b tps -> SomeCommand b
 
-data Command (b :: *) (tps :: [ArgumentKind b]) =
+data Command (b :: Type) (tps :: [ArgumentKind b]) =
   Command { cmdName :: T.Text
           -- ^ The name of the command
           , cmdDocstring :: T.Text
@@ -40,6 +42,6 @@ data Command (b :: *) (tps :: [ArgumentKind b]) =
 class CommandLike b where
   type EventType b
   type StateType b
-  type ArgumentType b :: k -> *
-  type ArgumentRepr b :: k -> *
+  type ArgumentType b :: k -> Type
+  type ArgumentRepr b :: k -> Type
   type ArgumentKind b :: k
