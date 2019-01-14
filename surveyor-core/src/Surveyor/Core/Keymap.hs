@@ -1,4 +1,7 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RankNTypes #-}
 module Surveyor.Core.Keymap (
   Key(..),
   Keymap,
@@ -8,7 +11,6 @@ module Surveyor.Core.Keymap (
   ) where
 
 import qualified Data.Map as M
-import           Data.Parameterized.Some ( Some(..) )
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core.Command as C
@@ -16,21 +18,19 @@ import qualified Surveyor.Core.Command as C
 data Key = Key V.Key [V.Modifier]
   deriving (Eq, Ord, Show)
 
-data Keymap e m s a r =
-  Keymap { globalKeys :: !(M.Map Key (Some (C.Command e s a r)))
-         , modeKeys :: !(M.Map m (M.Map Key (Some (C.Command e s a r))))
-         }
+data Keymap b m where
+  Keymap :: !(M.Map Key (C.SomeCommand b)) -- Some (C.Command b)))
+         -> !(M.Map m (M.Map Key (C.SomeCommand b))) --  (C.Command b))))
+         -> Keymap b m
 
 -- | Create a new empty keymap
-emptyKeymap :: Keymap e m s a r
-emptyKeymap = Keymap { globalKeys = M.empty
-                     , modeKeys = M.empty
-                     }
+emptyKeymap :: Keymap b m
+emptyKeymap = Keymap M.empty M.empty
 
 -- | Add a command to the global keymap
-addGlobalKey :: Key -> Some (C.Command e s a r) -> Keymap e m s a r -> Keymap e m s a r
-addGlobalKey k cmd m =
-  m { globalKeys = M.insert k cmd (globalKeys m) }
+addGlobalKey :: forall b m (tps :: [C.ArgumentKind b]) . (C.CommandLike b) => Key -> C.Command b tps -> Keymap b m -> Keymap b m
+addGlobalKey k cmd (Keymap gks mks) =
+  Keymap (M.insert k (C.SomeCommand cmd) gks) mks
 
 -- | Look up the command for the given key, if any
 --
@@ -39,12 +39,12 @@ addGlobalKey k cmd m =
 lookupKeyCommand :: (Ord m)
                  => m
                  -> Key
-                 -> Keymap e m s a r
-                 -> Maybe (Some (C.Command e s a r))
-lookupKeyCommand mode k km =
-  case M.lookup mode (modeKeys km) of
-    Nothing -> M.lookup k (globalKeys km)
+                 -> Keymap b m
+                 -> Maybe (C.SomeCommand b)
+lookupKeyCommand mode k (Keymap gks mks) =
+  case M.lookup mode mks of
+    Nothing -> M.lookup k gks
     Just modeMap ->
       case M.lookup k modeMap of
-        Nothing -> M.lookup k (globalKeys km)
+        Nothing -> M.lookup k gks
         Just cmd -> Just cmd

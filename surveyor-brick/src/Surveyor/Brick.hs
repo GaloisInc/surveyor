@@ -203,10 +203,10 @@ emptyState mfp mloader ng customEventChan = do
              , C.sEmitEvent = C.writeChan customEventChan
              , C.sEventChannel = customEventChan
              , C.sNonceGenerator = ng
-             , C.sKeymap = foldr (uncurry C.addGlobalKey) C.defaultKeymap extraKeys
+             , C.sKeymap = foldr (\(k, C.SomeCommand c) -> C.addGlobalKey k c) C.defaultKeymap extraKeys
              , C.sUIExtension = uiExt
              , C.sArchState = Nothing
              }
   where
-    extraKeys = [(C.Key (V.KChar 'm') [V.MAlt], Some BC.showMacawBlockC)
+    extraKeys = [(C.Key (V.KChar 'm') [V.MAlt], C.SomeCommand BC.showMacawBlockC)
                 ]

@@ -71,7 +71,7 @@ handleVtyEvent :: C.State BrickUIExtension BrickUIState s -> V.Event -> B.EventM
 handleVtyEvent s0@(C.State s) evt
   | V.EvKey k mods <- evt
   , km <- s ^. C.lKeymap
-  , Just (Some cmd) <- C.lookupKeyCommand (C.sUIMode s) (C.Key k mods) km
+  , Just (C.SomeCommand cmd) <- C.lookupKeyCommand (C.sUIMode s) (C.Key k mods) km
   , Just Refl <- testEquality (C.cmdArgTypes cmd) PL.Nil = do
       -- First, we try to consult the keymap.  For now, we can only handle
       -- commands that take no arguments.  Later, once we develop a notion of
@@ -178,7 +178,7 @@ handleCustomEvent s0 evt =
       B.continue $! C.State s1
     C.ShowSummary -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Summary)
     C.ShowDiagnostics -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Diags)
-    C.DescribeCommand (Some cmd) -> do
+    C.DescribeCommand (C.SomeCommand cmd) -> do
       let msg = T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
       liftIO (C.sEmitEvent s0 (C.EchoText msg))
       let newMode =
@@ -409,7 +409,7 @@ data BrickUIState arch s =
 -- architecture.  Objects in this extension state can always be available (e.g.,
 -- the minibuffer).
 data BrickUIExtension s =
-  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
+  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
                    -- ^ The persistent state of the minibuffer
                    }
   deriving (Generic)
@@ -419,10 +419,10 @@ mkExtension addrParser prompt =
   BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList prompt (C.allCommands ++ BC.extraCommands)
                    }
 
-minibufferL :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
+minibufferL :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
 minibufferL = GL.field @"sMinibuffer"
 
-minibufferG :: L.Getter (BrickUIExtension s) (MB.Minibuffer (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) (C.Argument (C.Events s (C.S BrickUIExtension BrickUIState)) (Maybe (C.SomeNonce s)) s) C.TypeRepr T.Text Names)
+minibufferG :: L.Getter (BrickUIExtension s) (MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
 minibufferG = L.to (^. minibufferL)
 
 functionSelectorL :: L.Lens' (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)

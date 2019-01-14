@@ -16,41 +16,36 @@ module Surveyor.Core.Commands (
   loadLLVMC,
   loadJARC,
   loadELFC,
-  allCommands,
-  SomeNonce(..)
+  allCommands
   ) where
 
 import qualified Data.Functor.Const as C
 import qualified Data.Parameterized.List as PL
-import qualified Data.Parameterized.Nonce as NG
-import           Data.Parameterized.Some ( Some(..) )
 
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
 import           Surveyor.Core.Events ( Events(..) )
 
--- | This is a separate wrapper (instead of the Some from parameterized-utils)
--- because we want to constrain it with a kind signature.
-data SomeNonce s where
-  SomeNonce :: forall (arch :: *) s . NG.Nonce s arch -> SomeNonce s
 
-type Argument s st = AR.Argument (Events s st) (Maybe (SomeNonce s)) s
-type Command s st tps = C.Command (Events s st) (Maybe (SomeNonce s)) (Argument s st) AR.TypeRepr tps
-type Callback s st tps = C.Chan (Events s st) -> Maybe (SomeNonce s) -> PL.List (Argument s st) tps -> IO ()
+type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
+type Callback s st tps = C.Chan (Events s st)
+                      -> Maybe (AR.SomeNonce s)
+                      -> PL.List (C.ArgumentType (AR.SurveyorCommand s st)) tps
+                      -> IO ()
 
-allCommands :: [Some (C.Command (Events s st) (Maybe (SomeNonce s)) (Argument s st) AR.TypeRepr)]
+allCommands :: [C.SomeCommand (AR.SurveyorCommand s st)]
 allCommands =
-  [ Some showSummaryC
-  , Some exitC
-  , Some showDiagnosticsC
-  , Some findBlockC
-  , Some listFunctionsC
-  , Some describeCommandC
-  , Some loadFileC
-  , Some loadELFC
-  , Some loadLLVMC
-  , Some loadJARC
+  [ C.SomeCommand showSummaryC
+  , C.SomeCommand exitC
+  , C.SomeCommand showDiagnosticsC
+  , C.SomeCommand findBlockC
+  , C.SomeCommand listFunctionsC
+  , C.SomeCommand describeCommandC
+  , C.SomeCommand loadFileC
+  , C.SomeCommand loadELFC
+  , C.SomeCommand loadLLVMC
+  , C.SomeCommand loadJARC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -86,7 +81,7 @@ listFunctionsC =
     callback = \customEventChan mnonce PL.Nil ->
       case mnonce of
         Nothing -> return ()
-        Just (SomeNonce nonce) ->
+        Just (AR.SomeNonce nonce) ->
           C.writeChan customEventChan (FindFunctionsContaining nonce Nothing)
 
 findBlockC :: forall s st . Command s st '[AR.AddressType]
@@ -100,7 +95,7 @@ findBlockC =
     callback = \customEventChan mnonce (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
       case mnonce of
         Nothing -> return ()
-        Just (SomeNonce _nonce) ->
+        Just (AR.SomeNonce _nonce) ->
             C.writeChan customEventChan (FindBlockContaining anonce addr)
 
 describeCommandC :: forall s st . Command s st '[AR.CommandType]

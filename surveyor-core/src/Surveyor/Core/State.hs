@@ -41,7 +41,6 @@ import qualified Surveyor.Core.Chan as C
 import           Surveyor.Core.Keymap ( Keymap )
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Architecture as A
-import           Surveyor.Core.Commands ( SomeNonce(..) )
 import           Surveyor.Core.Events ( Events(LogDiagnostic), LogLevel )
 import           Surveyor.Core.Loader ( AsyncLoader )
 import           Surveyor.Core.Mode
@@ -87,7 +86,7 @@ data S e u (arch :: *) s =
     -- streamed analysis result is of the same type as the last one.  We use
     -- nonces to track that; their 'TestEquality' instance lets us recover type
     -- equality.
-    , sKeymap :: !(Keymap (Events s (S e u)) (SomeUIMode s) (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+    , sKeymap :: !(Keymap (AR.SurveyorCommand s (S e u)) (SomeUIMode s))
     -- ^ Keybindings mapped to commands
     , sUIExtension :: e s
     -- ^ An extension field for UI frontends for containing data that is
@@ -132,7 +131,7 @@ lNonceGenerator = GL.field @"sNonceGenerator"
 lLoader :: L.Lens' (S e u arch s) (Maybe AsyncLoader)
 lLoader = GL.field @"sLoader"
 
-lKeymap :: L.Lens' (S e u arch s) (Keymap (Events s (S e u)) (SomeUIMode s) (Maybe (SomeNonce s)) (AR.Argument (Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr)
+lKeymap :: L.Lens' (S e u arch s) (Keymap (AR.SurveyorCommand s (S e u)) (SomeUIMode s))
 lKeymap = GL.field @"sKeymap"
 
 lUIExtension :: L.Lens' (S e u arch s) (e s)

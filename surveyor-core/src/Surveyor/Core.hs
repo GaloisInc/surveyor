@@ -1,3 +1,6 @@
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RankNTypes #-}
 module Surveyor.Core (
   -- * Channel abstraction
   CS.Chan,
@@ -38,12 +41,16 @@ module Surveyor.Core (
   M.SomeUIMode(..),
   M.prettyMode,
   -- * Completion system
+  AR.SurveyorCommand,
   CC.Command(..),
+  CC.SomeCommand(..),
+  CC.CommandLike(..),
   AR.Argument(..),
   AR.SomeAddress(..),
   -- ** Commands
   module Surveyor.Core.Commands,
   -- ** Types and type representatives for the completion system
+  AR.SomeNonce(..),
   AR.Type(..),
   AR.TypeRepr(..),
   AR.IntType,
@@ -125,8 +132,8 @@ import           Surveyor.Core.State
 import qualified Surveyor.Core.TranslationCache as TC
 
 -- | A default keymap with some reasonable keybindings
-defaultKeymap :: K.Keymap (CE.Events s (S e u)) (M.SomeUIMode s) (Maybe (SomeNonce s)) (AR.Argument (CE.Events s (S e u)) (Maybe (SomeNonce s)) s) AR.TypeRepr
-defaultKeymap = F.foldl' (\km (k, cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
+defaultKeymap :: forall (s :: *) e u . K.Keymap (AR.SurveyorCommand s (S e u)) (M.SomeUIMode s)
+defaultKeymap = F.foldl' (\km (k, Some cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
     globals = [ (K.Key (V.KChar 'q') [V.MCtrl], Some exitC)
               , (K.Key (V.KChar 'x') [V.MMeta], Some minibufferC)

@@ -8,7 +8,6 @@ import qualified Control.NF as NF
 import qualified Data.ElfEdit as E
 import           Data.Int ( Int64 )
 import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some )
 import qualified Data.Text as T
 
 import qualified Renovate as R
@@ -55,7 +54,7 @@ data Events s st where
   ViewInstructionSemantics :: PN.Nonce s arch -> Events s st
 
   -- Informational messages
-  DescribeCommand :: Some (C.Command (Events s st) cmdState a r) -> Events s st
+  DescribeCommand :: (C.CommandLike cmd) => C.SomeCommand cmd -> Events s st
   EchoText :: !T.Text -> Events s st
   ResetEchoArea :: Events s st
   LogDiagnostic :: Maybe LogLevel -> !T.Text -> Events s st

@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Surveyor.Brick.Command (
   showMacawBlockC,
@@ -11,19 +12,20 @@ module Surveyor.Brick.Command (
   ) where
 
 import qualified Data.Parameterized.List as PL
-import           Data.Parameterized.Some ( Some(..) )
 
 import qualified Surveyor.Core as C
 
-type Argument s st = C.Argument (C.Events s st) (Maybe (C.SomeNonce s)) s
-type Command s st tps = C.Command (C.Events s st) (Maybe (C.SomeNonce s)) (Argument s st) C.TypeRepr tps
-type Callback s st tps = C.Chan (C.Events s st) -> Maybe (C.SomeNonce s) -> PL.List (Argument s st) tps -> IO ()
+type Command s st (tps :: [C.ArgumentKind (C.SurveyorCommand s st)]) = C.Command (C.SurveyorCommand s st) tps
+type Callback s st (tps :: [C.ArgumentKind (C.SurveyorCommand s st)]) = C.Chan (C.Events s st)
+                      -> Maybe (C.SomeNonce s)
+                      -> PL.List (C.ArgumentType (C.SurveyorCommand s st)) tps
+                      -> IO ()
 
-extraCommands :: [Some (C.Command (C.Events s st) (Maybe (C.SomeNonce s)) (Argument s st) C.TypeRepr)]
-extraCommands = [ Some showMacawBlockC
-                , Some showCrucibleBlockC
-                , Some showBaseBlockC
-                , Some showInstructionSemanticsC
+extraCommands :: [C.SomeCommand (C.SurveyorCommand s st)]
+extraCommands = [ C.SomeCommand showMacawBlockC
+                , C.SomeCommand showCrucibleBlockC
+                , C.SomeCommand showBaseBlockC
+                , C.SomeCommand showInstructionSemanticsC
                 ]
 
 showMacawBlockC :: forall s t . Command s t '[]

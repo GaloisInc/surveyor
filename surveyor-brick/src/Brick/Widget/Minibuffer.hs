@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
@@ -18,7 +20,6 @@ import qualified Data.Functor.Const as C
 import           Data.Maybe ( fromMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
-import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as ZG
 import qualified Data.Vector as V
@@ -29,16 +30,17 @@ import qualified Surveyor.Core as C
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
 
-data MinibufferState e s a r where
-  CollectingArguments :: PL.List (C.Const T.Text) tps
-                      -> PL.List r tps
-                      -> PL.List r tps'
-                      -> PL.List a tps'
-                      -> PL.List r tps0
-                      -> (C.Chan e -> s -> PL.List a tps0 -> IO ())
-                      -> MinibufferState e s a r
+data MinibufferState b where
+  CollectingArguments :: forall b (tps :: [C.ArgumentKind b]) (tps' :: [C.ArgumentKind b]) (tps0 :: [C.ArgumentKind b])
+                       . PL.List (C.Const T.Text) tps
+                      -> PL.List (C.ArgumentRepr b) tps
+                      -> PL.List (C.ArgumentRepr b) tps'
+                      -> PL.List (C.ArgumentType b) tps'
+                      -> PL.List (C.ArgumentRepr b) tps0
+                      -> (C.Chan (C.EventType b) -> C.StateType b -> PL.List (C.ArgumentType b) tps0 -> IO ())
+                      -> MinibufferState b
   -- ^ In the process of collecting arguments
-  Editing :: MinibufferState e s a r
+  Editing :: MinibufferState b
   -- ^ The input editor has focus
 
 -- | The abstract state of a minibuffer
@@ -52,27 +54,27 @@ data MinibufferState e s a r where
 --
 -- The @n@ parameter is the type of the names used to identify widgets in your
 -- application.
-data Minibuffer e s a r t n =
+data Minibuffer b t n =
   Minibuffer { prefix :: !T.Text
-             , commandList :: FL.FilterList n t (Some (C.Command e s a r))
+             , commandList :: FL.FilterList n t (C.SomeCommand b)
              , argumentList :: FL.FilterList n t t
-             , allCommands :: !(V.Vector (Some (C.Command e s a r)))
-             , state :: MinibufferState e s a r
-             , parseArgument :: forall tp . t -> r tp -> Maybe (a tp)
-             , completeArgument :: forall tp . t -> r tp -> IO (V.Vector t)
-             , showRepr :: forall tp . r tp -> T.Text
+             , allCommands :: !(V.Vector (C.SomeCommand b))
+             , state :: MinibufferState b
+             , parseArgument :: forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> Maybe (C.ArgumentType b tp)
+             , completeArgument :: forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> IO (V.Vector t)
+             , showRepr :: forall (tp :: C.ArgumentKind b) . C.ArgumentRepr b tp -> T.Text
              }
 
 -- | Create a new 'Minibuffer' state.
 --
 -- The minibuffer supports the given set of commands
 minibuffer :: (ZG.GenericTextZipper t)
-           => (forall tp . t -> r tp -> Maybe (a tp))
+           => (forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> Maybe (C.ArgumentType b tp))
            -- ^ Parse a textual object into an argument
-           -> (forall tp . t -> r tp -> IO (V.Vector t))
+           -> (forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> IO (V.Vector t))
            -- ^ Generate completions for an argument of an expected type; note
            -- that this runs in the UI thread and should be quick.
-           -> (forall tp . r tp -> T.Text)
+           -> (forall (tp :: C.ArgumentKind b) . C.ArgumentRepr b tp -> T.Text)
            -- ^ Convert a type repr into a friendly name
            -> B.AttrName
            -- ^ The attribute used to highlight the current completion target
@@ -82,9 +84,9 @@ minibuffer :: (ZG.GenericTextZipper t)
            -- ^ The name to assign to the completion list
            -> T.Text
            -- ^ The prefix to display before the editor widget
-           -> [Some (C.Command e s a r)]
+           -> [C.SomeCommand b]
            -- ^ The commands supported by the minibuffer
-           -> Minibuffer e s a r t n
+           -> Minibuffer b t n
 minibuffer parseArg compArg showRep attr edName compName pfx cmds =
   Minibuffer { prefix = pfx
              , commandList = FL.filterList commandConfig allCmds
@@ -101,7 +103,7 @@ minibuffer parseArg compArg showRep attr edName compName pfx cmds =
                                         , FL.flListName = compName
                                         , FL.flEditorPosition = FL.Top
                                         , FL.flMaxListHeight = Just 5
-                                        , FL.flToText = \(Some cmd) ->
+                                        , FL.flToText = \(C.SomeCommand cmd) ->
                                             mconcat (map ZG.singleton (T.unpack (C.cmdName cmd)))
                                         , FL.flRenderListItem = renderCommandCompletionItem showRep attr
                                         , FL.flRenderEditorContent = drawContent
@@ -115,8 +117,8 @@ minibuffer parseArg compArg showRep attr edName compName pfx cmds =
                                          , FL.flRenderListItem = renderArgumentCompletionItem attr
                                          }
 
-data MinibufferStatus e s a r t n = Completed (Minibuffer e s a r t n)
-                                  | Canceled (Minibuffer e s a r t n)
+data MinibufferStatus b t n = Completed (Minibuffer b t n)
+                            | Canceled (Minibuffer b t n)
 
 -- | Extract the argument from the argument filter list
 --
@@ -138,12 +140,18 @@ argumentValue argList =
 --
 --  * Pressing <C-g> while a command is processing arguments or waiting for a
 --    command will deactivate the minibuffer
-handleMinibufferEvent :: (Ord n, Eq t, Monoid t, ZG.GenericTextZipper t, TestEquality r)
+handleMinibufferEvent :: forall b n t (r :: C.ArgumentKind b -> *)
+                      . ( Ord n, Eq t, Monoid t
+                        , ZG.GenericTextZipper t
+                        , C.CommandLike b
+                        , r ~ C.ArgumentRepr b
+                        , TestEquality r
+                        )
                       => V.Event
-                      -> C.Chan e
-                      -> s
-                      -> Minibuffer e s a r t n
-                      -> B.EventM n (MinibufferStatus e s a r t n)
+                      -> C.Chan (C.EventType b)
+                      -> C.StateType b
+                      -> Minibuffer b t n
+                      -> B.EventM n (MinibufferStatus b t n)
 handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = parseArg }) =
   case evt of
     V.EvKey V.KEnter [] ->
@@ -154,7 +162,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
           -- the command immediately
           case FL.selectedItem (commandList mb) of
             Nothing -> return (Completed mb)
-            Just (Some (C.Command _ _ argNames argTypes callback)) ->
+            Just (C.SomeCommand (C.Command _ _ argNames argTypes callback)) ->
               case (argNames, argTypes) of
                 (PL.Nil, PL.Nil) -> do
                   liftIO (callback customEventChan s PL.Nil)
@@ -214,12 +222,14 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
             PL.Nil -> error "impossible"
             nextTy PL.:< _ -> do
               let updater fl = do
-                    completions <- completeArgument mb (FL.editorContents fl) nextTy
-                    return (FL.updateList (const completions) fl)
+                    case mb of
+                      Minibuffer { completeArgument = complete } -> do
+                        completions <- complete (FL.editorContents fl) nextTy
+                        return (FL.updateList (const completions) fl)
               argList' <- FL.handleFilterListEvent updater evt (argumentList mb)
               return $ Completed mb { argumentList = argList' }
 
-resetMinibuffer :: (ZG.GenericTextZipper t) => Minibuffer e s a r t n -> Minibuffer e s a r t n
+resetMinibuffer :: (ZG.GenericTextZipper t) => Minibuffer b t n -> Minibuffer b t n
 resetMinibuffer mb = Minibuffer { prefix = prefix mb
                                 , commandList = FL.resetList (commandList mb)
                                 , argumentList = FL.resetList (argumentList mb)
@@ -230,7 +240,11 @@ resetMinibuffer mb = Minibuffer { prefix = prefix mb
                                 , showRepr = showRepr mb
                                 }
 
-withReversedF :: forall a b c tps . PL.List a tps -> PL.List b tps -> (forall tps' . PL.List a tps' -> PL.List b tps' -> c) -> c
+withReversedF :: forall a b c tps
+               . PL.List a tps
+              -> PL.List b tps
+              -> (forall tps' . PL.List a tps' -> PL.List b tps' -> c)
+              -> c
 withReversedF l1 l2 k = go PL.Nil PL.Nil l1 l2
   where
     go :: PL.List a tps0 -> PL.List b tps0 -> PL.List a tps1 -> PL.List b tps1 -> c
@@ -239,12 +253,12 @@ withReversedF l1 l2 k = go PL.Nil PL.Nil l1 l2
         (PL.Nil, PL.Nil) -> k acc1 acc2
         (x1 PL.:< xs1, x2 PL.:< xs2) -> go (x1 PL.:< acc1) (x2 PL.:< acc2) xs1 xs2
 
-commandMatches :: SW.Matcher -> Some (C.Command e s a r) -> Bool
-commandMatches m (Some cmd) = SW.matches m (C.cmdName cmd)
+commandMatches :: SW.Matcher -> C.SomeCommand b -> Bool
+commandMatches m (C.SomeCommand cmd) = SW.matches m (C.cmdName cmd)
 
 renderMinibuffer :: (Ord n, Show n, B.TextWidth t, ZG.GenericTextZipper t)
                  => Bool
-                 -> Minibuffer e s a r t n
+                 -> Minibuffer b t n
                  -> B.Widget n
 renderMinibuffer hasFocus mb =
   case state mb of
@@ -255,16 +269,18 @@ renderMinibuffer hasFocus mb =
       case (expectedArgNames, expectedArgTypes) of
         (PL.Nil, PL.Nil) -> error "impossible"
         (C.Const name PL.:< _, ty PL.:< _) ->
-          let renderPrompt _n = B.str (printf "%s (%s): " name (showRepr mb ty))
-          in FL.renderFilterList renderPrompt hasFocus (argumentList mb)
+          case mb of
+            Minibuffer { showRepr = showR } ->
+              let renderPrompt _n = B.str (printf "%s (%s): " name (showR ty))
+              in FL.renderFilterList renderPrompt hasFocus (argumentList mb)
 
-renderCommandCompletionItem :: forall e s a r n
-                             . (forall tp . r tp -> T.Text)
+renderCommandCompletionItem :: forall b n
+                             . (forall (tp :: C.ArgumentKind b) . C.ArgumentRepr b tp -> T.Text)
                             -> B.AttrName
                             -> Bool
-                            -> Some (C.Command e s a r)
+                            -> C.SomeCommand b
                             -> B.Widget n
-renderCommandCompletionItem showRep focAttr isFocused (Some (C.Command name _ argNames argTypes _)) =
+renderCommandCompletionItem showRep focAttr isFocused (C.SomeCommand (C.Command name _ argNames argTypes _)) =
   let xfrm = if isFocused then B.withAttr focAttr else id
   in xfrm (B.str (printf "%s (%s)" name sig))
   where
@@ -272,7 +288,7 @@ renderCommandCompletionItem showRep focAttr isFocused (Some (C.Command name _ ar
                                | (n, t) <- args
                                ]
     args = collect argNames argTypes
-    collect :: forall tps . PL.List (C.Const T.Text) tps -> PL.List r tps -> [(T.Text, T.Text)]
+    collect :: forall tps . PL.List (C.Const T.Text) tps -> PL.List (C.ArgumentRepr b) tps -> [(T.Text, T.Text)]
     collect names types =
       case (names, types) of
         (PL.Nil, PL.Nil) -> []
