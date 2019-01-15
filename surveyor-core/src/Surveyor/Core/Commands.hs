@@ -11,6 +11,7 @@ module Surveyor.Core.Commands (
   findBlockC,
   listFunctionsC,
   describeCommandC,
+  describeKeysC,
   minibufferC,
   loadFileC,
   loadLLVMC,
@@ -47,6 +48,7 @@ allCommands =
   , C.SomeCommand findBlockC
   , C.SomeCommand listFunctionsC
   , C.SomeCommand describeCommandC
+  , C.SomeCommand describeKeysC
   , C.SomeCommand loadFileC
   , C.SomeCommand loadELFC
   , C.SomeCommand loadLLVMC
@@ -118,6 +120,15 @@ describeCommandC =
     callback :: Callback s st '[AR.CommandType]
     callback = \customEventChan _ (AR.CommandArgument cmd PL.:< PL.Nil) ->
       C.writeChan customEventChan (DescribeCommand cmd)
+
+describeKeysC :: forall s st . Command s st '[]
+describeKeysC =
+  C.Command "describe-keys" doc PL.Nil PL.Nil callback
+  where
+    doc = "Describe the keybindings active in the current mode"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil ->
+      C.writeChan customEventChan DescribeKeys
 
 -- | This isn't part of 'allCommands' because we can never productively launch
 -- it from the minibuffer

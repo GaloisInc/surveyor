@@ -64,6 +64,7 @@ data Events s st where
   EchoText :: !T.Text -> Events s st
   ResetEchoArea :: Events s st
   LogDiagnostic :: Maybe LogLevel -> !T.Text -> Events s st
+  DescribeKeys :: Events s st
 
   -- UI Modes
   ShowSummary :: Events s st

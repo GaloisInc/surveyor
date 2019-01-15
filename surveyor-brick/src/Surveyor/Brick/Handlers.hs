@@ -43,6 +43,7 @@ import qualified Data.Parameterized.Nonce as PN
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
+import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Fmt as Fmt
 import           Fmt ( (+|), (|+), (||+) )
 import qualified Graphics.Vty as V
@@ -352,6 +353,15 @@ handleCustomEvent s0 evt =
             B.continue $! C.State (s0 & C.lDiagnosticLog %~ (Seq.|> (Just logLevel, t)))
           | otherwise -> B.continue $! C.State s0
 
+    C.DescribeKeys -> do
+      withBaseMode (s0 ^. C.lUIMode) $ \normalMode -> do
+        let keys = C.modeKeybindings (s0 ^. C.lKeymap) (C.SomeUIMode normalMode)
+        liftIO $ C.logMessage s0 (Fmt.fmt ("Keybindings for " +| C.prettyMode normalMode |+ ":"))
+        F.forM_ keys $ \(k, C.SomeCommand cmd) -> do
+          liftIO $ C.logMessage s0 (Fmt.fmt ("  " +| PP.pretty k ||+ ": " +| C.cmdName cmd |+ ""))
+      let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.Diags
+      B.continue $! C.State s1
+
     -- We discard async state updates if the type of the state has changed in
     -- the interim (i.e., if another binary has been loaded)
     C.AsyncStateUpdate archNonce nfVal upd
@@ -363,6 +373,13 @@ handleCustomEvent s0 evt =
     C.Exit -> do
       liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
       B.halt (C.State s0)
+
+-- | Get the current mode (looking through the minibuffer if necessary)
+withBaseMode :: C.SomeUIMode s -> (C.UIMode s C.NormalK -> a) -> a
+withBaseMode sm k =
+  case sm of
+    C.SomeUIMode m -> k m
+    C.SomeMiniBuffer (C.MiniBuffer m) -> k m
 
 withBlockViewer :: (C.Architecture arch s)
                 => C.S BrickUIExtension BrickUIState arch s
