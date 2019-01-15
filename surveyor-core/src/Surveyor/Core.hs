@@ -102,6 +102,7 @@ module Surveyor.Core (
   K.Key(..),
   K.emptyKeymap,
   K.addGlobalKey,
+  K.addModeKey,
   K.lookupKeyCommand,
   -- * Logging
   logMessage,

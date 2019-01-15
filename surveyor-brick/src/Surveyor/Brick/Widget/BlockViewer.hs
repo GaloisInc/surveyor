@@ -17,7 +17,6 @@ module Surveyor.Brick.Widget.BlockViewer (
   BlockViewer,
   blockViewer,
   withBlockViewerConstraints,
-  handleBlockViewerEvent,
   renderBlockViewer
   ) where
 
@@ -35,7 +34,6 @@ import qualified Data.Set as S
 import qualified Data.Vector as V
 import qualified Fmt as Fmt
 import           Fmt ( (+|), (|+) )
-import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
 import qualified Surveyor.Core as C
@@ -67,18 +65,6 @@ withBlockViewerConstraints (BlockViewer _ _) a = a
 -- context stack matches the state.
 blockViewer :: (C.Architecture arch s, C.IR ir s) => Names -> C.IRRepr arch ir -> BlockViewer arch s ir
 blockViewer names repr = BlockViewer names repr
-
-handleBlockViewerEvent :: V.Event -> BlockViewer arch s ir -> C.ContextStack arch s -> B.EventM Names (C.ContextStack arch s)
-handleBlockViewerEvent evt (BlockViewer _ repr) cstk =
-  case evt of
-    V.EvKey V.KEsc [] -> return (C.resetBlockSelection cstk)
-    V.EvKey V.KDown [] -> return (C.selectNextInstruction repr cstk)
-    V.EvKey (V.KChar 'n') [V.MCtrl] -> return (C.selectNextInstruction repr cstk)
-    V.EvKey V.KUp [] -> return (C.selectPreviousInstruction repr cstk)
-    V.EvKey (V.KChar 'p') [V.MCtrl] -> return (C.selectPreviousInstruction repr cstk)
-    V.EvKey V.KRight [] -> return (C.selectNextOperand repr cstk)
-    V.EvKey V.KLeft [] -> return (C.selectPreviousOperand repr cstk)
-    _ -> return cstk
 
 renderBlockViewer :: forall arch s ir
                    . (C.Architecture arch s)

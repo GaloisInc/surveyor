@@ -54,6 +54,10 @@ data Events s st where
   ViewBlock :: PN.Nonce s arch -> IR.IRRepr arch ir -> Events s st
   ViewInstructionSemantics :: PN.Nonce s arch -> Events s st
   SelectNextInstruction :: PN.Nonce s (arch :: Type) -> Events s st
+  SelectPreviousInstruction :: PN.Nonce s (arch :: Type) -> Events s st
+  SelectNextOperand :: PN.Nonce s (arch :: Type) -> Events s st
+  SelectPreviousOperand :: PN.Nonce s (arch :: Type) -> Events s st
+  ResetInstructionSelection :: PN.Nonce s (arch :: Type) -> Events s st
 
   -- Informational messages
   DescribeCommand :: (C.CommandLike cmd) => C.SomeCommand cmd -> Events s st

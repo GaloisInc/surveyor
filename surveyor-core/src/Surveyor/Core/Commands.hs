@@ -17,6 +17,10 @@ module Surveyor.Core.Commands (
   loadJARC,
   loadELFC,
   selectNextInstructionC,
+  selectPreviousInstructionC,
+  selectNextOperandC,
+  selectPreviousOperandC,
+  resetInstructionSelectionC,
   allCommands
   ) where
 
@@ -48,6 +52,10 @@ allCommands =
   , C.SomeCommand loadLLVMC
   , C.SomeCommand loadJARC
   , C.SomeCommand selectNextInstructionC
+  , C.SomeCommand selectPreviousInstructionC
+  , C.SomeCommand selectNextOperandC
+  , C.SomeCommand selectPreviousOperandC
+  , C.SomeCommand resetInstructionSelectionC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -132,6 +140,54 @@ selectNextInstructionC =
         Nothing -> return ()
         Just (AR.SomeNonce archNonce) ->
           C.writeChan customEventChan (SelectNextInstruction archNonce)
+
+selectPreviousInstructionC :: forall s st . Command s st '[]
+selectPreviousInstructionC =
+  C.Command "select-previous-instruction" doc PL.Nil PL.Nil callback
+  where
+    doc = "Select the previous instruction in the current block viewer"
+    callback :: Callback s st '[]
+    callback = \customEventChan mnonce PL.Nil ->
+      case mnonce of
+        Nothing -> return ()
+        Just (AR.SomeNonce archNonce) ->
+          C.writeChan customEventChan (SelectPreviousInstruction archNonce)
+
+selectNextOperandC :: forall s st . Command s st '[]
+selectNextOperandC =
+  C.Command "select-next-operand" doc PL.Nil PL.Nil callback
+  where
+    doc = "Select the next operand of the current instruction in the current block viewer"
+    callback :: Callback s st '[]
+    callback = \customEventChan mnonce PL.Nil ->
+      case mnonce of
+        Nothing -> return ()
+        Just (AR.SomeNonce archNonce) ->
+          C.writeChan customEventChan (SelectNextOperand archNonce)
+
+selectPreviousOperandC :: forall s st . Command s st '[]
+selectPreviousOperandC =
+  C.Command "select-previous-operand" doc PL.Nil PL.Nil callback
+  where
+    doc = "Select the previous operand of the current instruction in the current block viewer"
+    callback :: Callback s st '[]
+    callback = \customEventChan mnonce PL.Nil ->
+      case mnonce of
+        Nothing -> return ()
+        Just (AR.SomeNonce archNonce) ->
+          C.writeChan customEventChan (SelectPreviousOperand archNonce)
+
+resetInstructionSelectionC :: forall s st . Command s st '[]
+resetInstructionSelectionC =
+  C.Command "reset-instruction-selection" doc PL.Nil PL.Nil callback
+  where
+    doc = "Clear the selection in the current block viewer"
+    callback :: Callback s st '[]
+    callback = \customEventChan mnonce PL.Nil ->
+      case mnonce of
+        Nothing -> return ()
+        Just (AR.SomeNonce archNonce) ->
+          C.writeChan customEventChan (ResetInstructionSelection archNonce)
 
 loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =

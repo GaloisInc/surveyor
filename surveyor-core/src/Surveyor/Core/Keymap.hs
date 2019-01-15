@@ -8,6 +8,7 @@ module Surveyor.Core.Keymap (
   Keymap,
   emptyKeymap,
   addGlobalKey,
+  addModeKey,
   lookupKeyCommand
   ) where
 
@@ -29,9 +30,27 @@ emptyKeymap :: Keymap b m
 emptyKeymap = Keymap M.empty M.empty
 
 -- | Add a command to the global keymap
-addGlobalKey :: forall b m (tps :: [C.ArgumentKind b]) . (C.CommandLike b) => Key -> C.Command b tps -> Keymap b m -> Keymap b m
+addGlobalKey :: forall b m (tps :: [C.ArgumentKind b])
+              . (C.CommandLike b)
+             => Key
+             -> C.Command b tps
+             -> Keymap b m
+             -> Keymap b m
 addGlobalKey k cmd (Keymap gks mks) =
   Keymap (M.insert k (C.SomeCommand cmd) gks) mks
+
+addModeKey :: forall b m (tps :: [C.ArgumentKind b])
+            . (C.CommandLike b, Ord m)
+           => m
+           -> Key
+           -> C.Command b tps
+           -> Keymap b m
+           -> Keymap b m
+addModeKey mode k cmd (Keymap gks mks) =
+  Keymap gks (M.alter addKey mode mks)
+  where
+    addKey Nothing = Just (M.singleton k (C.SomeCommand cmd))
+    addKey (Just mm) = Just (M.insert k (C.SomeCommand cmd) mm)
 
 -- | Look up the command for the given key, if any
 --

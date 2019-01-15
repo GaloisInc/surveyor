@@ -102,14 +102,7 @@ handleVtyEvent s0@(C.State s) evt
           let s' = s & C.lArchState . _Just . blockSelectorL .~ bsel'
           B.continue $! C.State s'
       | otherwise -> B.continue s0
-    C.SomeUIMode (C.BlockViewer archNonce rep)
-      | Just archState <- s ^. C.lArchState
-      , Just Refl <- testEquality (archState ^. C.lNonce) archNonce
-      , Just bview <- MapF.lookup rep (archState ^. blockViewersL) -> do
-          cstk' <- BV.handleBlockViewerEvent evt bview (archState ^. contextL)
-          let s' = s & C.lArchState . _Just . contextL .~ cstk'
-          B.continue $! (C.State s')
-      | otherwise -> B.continue s0
+    C.SomeUIMode (C.BlockViewer _archNonce _rep) -> B.continue s0
     C.SomeUIMode C.FunctionSelector
       | Just fsel <- s ^? C.lArchState . _Just . functionSelectorL -> do
           fsel' <- FS.handleFunctionSelectorEvent evt fsel
@@ -224,6 +217,58 @@ handleCustomEvent s0 evt =
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectNextInstruction repr cstk
+                             & C.lUIMode .~ nextMode
+                 B.continue $! C.State s1
+           | otherwise -> B.continue $! C.State s0
+    C.SelectPreviousInstruction archNonce ->
+      withBlockViewer s0 $ \vnonce repr nextMode ->
+        if | Just archState <- s0 ^. C.lArchState
+           , cstk <- archState ^. contextG
+           , Just Refl <- testEquality archNonce vnonce
+           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+             case archState ^. blockViewerG repr of
+               Nothing -> error "Inconsistent block viewers"
+               Just bv -> BV.withBlockViewerConstraints bv $ do
+                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectPreviousInstruction repr cstk
+                             & C.lUIMode .~ nextMode
+                 B.continue $! C.State s1
+           | otherwise -> B.continue $! C.State s0
+    C.SelectNextOperand archNonce ->
+      withBlockViewer s0 $ \vnonce repr nextMode ->
+        if | Just archState <- s0 ^. C.lArchState
+           , cstk <- archState ^. contextG
+           , Just Refl <- testEquality archNonce vnonce
+           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+             case archState ^. blockViewerG repr of
+               Nothing -> error "Inconsistent block viewers"
+               Just bv -> BV.withBlockViewerConstraints bv $ do
+                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectNextOperand repr cstk
+                             & C.lUIMode .~ nextMode
+                 B.continue $! C.State s1
+           | otherwise -> B.continue $! C.State s0
+    C.SelectPreviousOperand archNonce ->
+      withBlockViewer s0 $ \vnonce repr nextMode ->
+        if | Just archState <- s0 ^. C.lArchState
+           , cstk <- archState ^. contextG
+           , Just Refl <- testEquality archNonce vnonce
+           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+             case archState ^. blockViewerG repr of
+               Nothing -> error "Inconsistent block viewers"
+               Just bv -> BV.withBlockViewerConstraints bv $ do
+                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectPreviousOperand repr cstk
+                             & C.lUIMode .~ nextMode
+                 B.continue $! C.State s1
+           | otherwise -> B.continue $! C.State s0
+    C.ResetInstructionSelection archNonce ->
+      withBlockViewer s0 $ \vnonce repr nextMode ->
+        if | Just archState <- s0 ^. C.lArchState
+           , cstk <- archState ^. contextG
+           , Just Refl <- testEquality archNonce vnonce
+           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+             case archState ^. blockViewerG repr of
+               Nothing -> error "Inconsistent block viewers"
+               Just bv -> BV.withBlockViewerConstraints bv $ do
+                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.resetBlockSelection cstk
                              & C.lUIMode .~ nextMode
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
@@ -372,7 +417,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              , C.sEchoArea = C.sEchoArea s0
              , C.sInputFile = C.sInputFile s0
              , C.sLoader = C.sLoader s0
-             , C.sKeymap = C.defaultKeymap
+             , C.sKeymap = keymap
              , C.sUIExtension = uiExt
              , C.sArchState =
                case () of
@@ -404,6 +449,27 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
     uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands ++ BC.extraCommands)
                              }
 
+    modeKeys = [ blockViewerKeys (C.archNonce ares) C.BaseRepr
+               , blockViewerKeys (C.archNonce ares) C.MacawRepr
+               , blockViewerKeys (C.archNonce ares) C.CrucibleRepr
+               ]
+    addModeKeys (mode, keys) modeKeymap =
+      foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
+    keymap = foldr addModeKeys C.defaultKeymap modeKeys
+
+blockViewerKeys :: PN.Nonce s arch
+                -> C.IRRepr arch ir
+                -> (C.SomeUIMode s, [(C.Key, C.SomeCommand (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)))])
+blockViewerKeys nonce rep = ( C.SomeUIMode (C.BlockViewer nonce rep)
+                            , [ (C.Key V.KDown [], C.SomeCommand C.selectNextInstructionC)
+                              , (C.Key (V.KChar 'n') [V.MCtrl], C.SomeCommand C.selectNextInstructionC)
+                              , (C.Key V.KUp [], C.SomeCommand C.selectPreviousInstructionC)
+                              , (C.Key (V.KChar 'p') [V.MCtrl], C.SomeCommand C.selectPreviousInstructionC)
+                              , (C.Key V.KEsc [], C.SomeCommand C.resetInstructionSelectionC)
+                              , (C.Key V.KRight [], C.SomeCommand C.selectNextOperandC)
+                              , (C.Key V.KLeft [], C.SomeCommand C.selectPreviousOperandC)
+                              ]
+                            )
 -- | State specific to the Brick UI
 --
 -- This is mostly storage for widgets
