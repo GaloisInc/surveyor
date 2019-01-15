@@ -20,8 +20,8 @@ data Key = Key V.Key [V.Modifier]
   deriving (Eq, Ord, Show)
 
 data Keymap b m where
-  Keymap :: !(M.Map Key (C.SomeCommand b)) -- Some (C.Command b)))
-         -> !(M.Map m (M.Map Key (C.SomeCommand b))) --  (C.Command b))))
+  Keymap :: !(M.Map Key (C.SomeCommand b))
+         -> !(M.Map m (M.Map Key (C.SomeCommand b)))
          -> Keymap b m
 
 -- | Create a new empty keymap
