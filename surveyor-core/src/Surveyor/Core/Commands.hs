@@ -16,6 +16,7 @@ module Surveyor.Core.Commands (
   loadLLVMC,
   loadJARC,
   loadELFC,
+  selectNextInstructionC,
   allCommands
   ) where
 
@@ -46,6 +47,7 @@ allCommands =
   , C.SomeCommand loadELFC
   , C.SomeCommand loadLLVMC
   , C.SomeCommand loadJARC
+  , C.SomeCommand selectNextInstructionC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -118,6 +120,18 @@ minibufferC =
     doc = "Open the minibuffer"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan OpenMinibuffer
+
+selectNextInstructionC :: forall s st . Command s st '[]
+selectNextInstructionC =
+  C.Command "select-next-instruction" doc PL.Nil PL.Nil callback
+  where
+    doc = "Select the next instruction in the current block viewer"
+    callback :: Callback s st '[]
+    callback = \customEventChan mnonce PL.Nil ->
+      case mnonce of
+        Nothing -> return ()
+        Just (AR.SomeNonce archNonce) ->
+          C.writeChan customEventChan (SelectNextInstruction archNonce)
 
 loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =

@@ -18,7 +18,6 @@ import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Traversable as T
@@ -132,7 +131,7 @@ drawUIMode binFileName archState s uim =
     C.Summary -> drawAppShell s (drawSummary binFileName binfo)
     C.FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. BH.functionSelectorG))
     C.BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. BH.blockSelectorG))
-    C.BlockViewer archNonce (Some repr)
+    C.BlockViewer archNonce repr
       | Just Refl <- testEquality archNonce (archState ^. C.lNonce)
       , Just bview <- archState ^. BH.blockViewerG repr ->
           drawAppShell s (BV.renderBlockViewer binfo (archState ^. BH.contextG) bview)

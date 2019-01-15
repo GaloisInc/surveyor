@@ -7,6 +7,7 @@ import qualified Control.Exception as X
 import qualified Control.NF as NF
 import qualified Data.ElfEdit as E
 import           Data.Int ( Int64 )
+import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
 
@@ -52,6 +53,7 @@ data Events s st where
   ListBlocks :: PN.Nonce s arch -> [A.Block arch s] -> Events s st
   ViewBlock :: PN.Nonce s arch -> IR.IRRepr arch ir -> Events s st
   ViewInstructionSemantics :: PN.Nonce s arch -> Events s st
+  SelectNextInstruction :: PN.Nonce s (arch :: Type) -> Events s st
 
   -- Informational messages
   DescribeCommand :: (C.CommandLike cmd) => C.SomeCommand cmd -> Events s st

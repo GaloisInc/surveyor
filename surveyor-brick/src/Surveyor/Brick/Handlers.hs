@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -38,7 +39,7 @@ import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Map as MapF
-import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -101,7 +102,7 @@ handleVtyEvent s0@(C.State s) evt
           let s' = s & C.lArchState . _Just . blockSelectorL .~ bsel'
           B.continue $! C.State s'
       | otherwise -> B.continue s0
-    C.SomeUIMode (C.BlockViewer archNonce (Some rep))
+    C.SomeUIMode (C.BlockViewer archNonce rep)
       | Just archState <- s ^. C.lArchState
       , Just Refl <- testEquality (archState ^. C.lNonce) archNonce
       , Just bview <- MapF.lookup rep (archState ^. blockViewersL) -> do
@@ -204,7 +205,7 @@ handleCustomEvent s0 evt =
           --
           -- Note that this doesn't manipulate the context at all
           liftIO (C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Viewing a block for repr " +| rep ||+ ""))))
-          let s1 = s0 & C.lUIMode .~ C.SomeUIMode (C.BlockViewer archNonce (Some rep))
+          let s1 = s0 & C.lUIMode .~ C.SomeUIMode (C.BlockViewer archNonce rep)
           B.continue $! C.State s1
       | otherwise -> B.continue (C.State s0)
     C.ViewFunction _archNonce -> do
@@ -213,6 +214,20 @@ handleCustomEvent s0 evt =
     C.ViewInstructionSemantics _archNonce -> do
       let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SemanticsViewer
       B.continue $! C.State s1
+    C.SelectNextInstruction archNonce ->
+      withBlockViewer s0 $ \vnonce repr nextMode ->
+        if | Just archState <- s0 ^. C.lArchState
+           , cstk <- archState ^. contextG
+           , Just Refl <- testEquality archNonce vnonce
+           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+             case archState ^. blockViewerG repr of
+               Nothing -> error "Inconsistent block viewers"
+               Just bv -> BV.withBlockViewerConstraints bv $ do
+                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectNextInstruction repr cstk
+                             & C.lUIMode .~ nextMode
+                 B.continue $! C.State s1
+           | otherwise -> B.continue $! C.State s0
+
     C.FindBlockContaining archNonce addr
       | Just archState <- s0 ^. C.lArchState
       , ares <- archState ^. C.lAnalysisResult
@@ -303,6 +318,19 @@ handleCustomEvent s0 evt =
     C.Exit -> do
       liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
       B.halt (C.State s0)
+
+withBlockViewer :: (C.Architecture arch s)
+                => C.S BrickUIExtension BrickUIState arch s
+                -> (forall arch1 ir1 . PN.Nonce s arch1 -> C.IRRepr arch1 ir1 -> C.SomeUIMode s -> B.EventM n (B.Next (C.State BrickUIExtension BrickUIState s)))
+                -> B.EventM n (B.Next (C.State BrickUIExtension BrickUIState s))
+withBlockViewer s0 k =
+  case s0 ^. C.lUIMode of
+    C.SomeUIMode (C.BlockViewer vnonce repr) -> k vnonce repr (s0 ^. C.lUIMode)
+    C.SomeMiniBuffer (C.MiniBuffer m) ->
+      case m of
+        C.BlockViewer vnonce repr -> k vnonce repr (C.SomeUIMode m)
+        _ -> B.continue $! C.State s0
+    _ -> B.continue $! C.State s0
 
 stateFromAnalysisResult :: forall arch0 arch s
                          . (C.Architecture arch s)

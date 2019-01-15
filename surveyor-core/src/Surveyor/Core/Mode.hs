@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -16,7 +17,6 @@ module Surveyor.Core.Mode (
 import           Data.Maybe ( isJust )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TH.GADT as PT
 import qualified Data.Text as T
 import qualified Fmt as Fmt
@@ -41,7 +41,7 @@ data UIMode s k where
   BlockSelector :: UIMode s NormalK
   -- ^ A selector list for blocks that are the result of a search (based on the
   -- sBlockList in the State)
-  BlockViewer :: PN.Nonce s arch -> Some (IRRepr arch) -> UIMode s NormalK
+  BlockViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
   -- ^ View a block
   FunctionViewer :: UIMode s NormalK
   -- ^ View a function
@@ -72,12 +72,14 @@ instance TestEquality (UIMode s) where
   testEquality = $(PT.structuralTypeEquality [t| UIMode |]
                    [ (PT.TypeApp (PT.TypeApp (PT.ConType [t|PN.Nonce |]) PT.AnyType) PT.AnyType, [|testEquality|])
                    , (PT.TypeApp (PT.TypeApp (PT.ConType [t| UIMode |]) PT.AnyType) PT.AnyType, [|testEquality|])
+                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| IRRepr |]) PT.AnyType) PT.AnyType, [|testEquality|])
                    ])
 
 instance OrdF (UIMode s) where
   compareF = $(PT.structuralTypeOrd [t| UIMode |]
                    [ (PT.TypeApp (PT.TypeApp (PT.ConType [t|PN.Nonce |]) PT.AnyType) PT.AnyType, [|compareF|])
                    , (PT.TypeApp (PT.TypeApp (PT.ConType [t| UIMode |]) PT.AnyType) PT.AnyType, [|compareF|])
+                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| IRRepr |]) PT.AnyType) PT.AnyType, [|compareF|])
                    ])
 
 deriving instance Eq (SomeUIMode s)

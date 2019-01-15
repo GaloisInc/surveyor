@@ -2,6 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 -- | A widget to view individual basic blocks with fine granularity
@@ -15,6 +16,7 @@
 module Surveyor.Brick.Widget.BlockViewer (
   BlockViewer,
   blockViewer,
+  withBlockViewerConstraints,
   handleBlockViewerEvent,
   renderBlockViewer
   ) where
@@ -45,6 +47,11 @@ data BlockViewer arch s ir where
 
 instance NFData (BlockViewer arch s ir) where
   rnf (BlockViewer !_names !_repr) = ()
+
+withBlockViewerConstraints :: BlockViewer arch s ir
+                           -> ((C.Architecture arch s, C.IR ir s) => a)
+                           -> a
+withBlockViewerConstraints (BlockViewer _ _) a = a
 
 -- | We want to put as much of the state as we can in the shared Context, then
 -- lazily update the per-block viewers as they actually need it (i.e., during
