@@ -20,6 +20,7 @@ import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
+import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Traversable as T
 import           Data.Void ( Void )
 import qualified Graphics.Vty as V
@@ -82,6 +83,7 @@ drawStatusBar s =
 drawAppShell :: C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w =
   [ B.vBox [ B.borderWithLabel (title (C.sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
+           , drawKeyBindings s
            , drawStatusBar s
            , bottomLine
            ]
@@ -97,6 +99,12 @@ drawAppShell s w =
           | mb <- s ^. C.lUIExtension . BH.minibufferG ->
             MB.renderMinibuffer True mb
         _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (C.sEchoArea s))
+
+drawKeyBindings :: C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names
+drawKeyBindings s = B.hBox (map toKeyHint keys)
+  where
+    keys = C.modeKeybindings (s ^. C.lKeymap) (s ^. C.lUIMode)
+    toKeyHint (k, C.SomeCommand cmd) = B.hBox [B.str (show (PP.pretty k) ++ ": "), B.txt (C.cmdName cmd), B.str "  "]
 
 appDraw :: C.State BH.BrickUIExtension BH.BrickUIState s -> [B.Widget Names]
 appDraw (C.State s) =
