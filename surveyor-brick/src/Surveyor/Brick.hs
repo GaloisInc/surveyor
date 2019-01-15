@@ -15,7 +15,7 @@ import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.Lens ( (^.) )
 import qualified Data.Foldable as F
-import           Data.Maybe ( fromMaybe )
+import           Data.Maybe ( fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Sequence as Seq
@@ -101,10 +101,18 @@ drawAppShell s w =
         _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (C.sEchoArea s))
 
 drawKeyBindings :: C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names
-drawKeyBindings s = B.hBox (map toKeyHint keys)
+drawKeyBindings s = B.hBox (mapMaybe toKeyHint keys)
   where
     keys = C.modeKeybindings (s ^. C.lKeymap) (s ^. C.lUIMode)
-    toKeyHint (k, C.SomeCommand cmd) = B.hBox [B.str (show (PP.pretty k) ++ ": "), B.txt (C.cmdName cmd), B.str "  "]
+    toKeyHint (k, C.SomeCommand cmd)
+      | isPlainKey k = Just (B.hBox [B.str (show (PP.pretty k) ++ ": "), B.txt (C.cmdName cmd), B.str "  "])
+      | otherwise = Nothing
+
+isPlainKey :: C.Key -> Bool
+isPlainKey (C.Key k ms) =
+  case k of
+    V.KChar _ -> null ms
+    _ -> False
 
 appDraw :: C.State BH.BrickUIExtension BH.BrickUIState s -> [B.Widget Names]
 appDraw (C.State s) =
