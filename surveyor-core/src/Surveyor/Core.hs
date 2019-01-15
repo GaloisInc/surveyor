@@ -112,7 +112,6 @@ module Surveyor.Core (
   ) where
 
 import qualified Data.Foldable as F
-import           Data.Parameterized.Some ( Some(..) )
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core.Architecture as CA
