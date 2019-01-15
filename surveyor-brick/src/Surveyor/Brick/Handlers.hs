@@ -468,6 +468,9 @@ blockViewerKeys nonce rep = ( C.SomeUIMode (C.BlockViewer nonce rep)
                               , (C.Key V.KEsc [], C.SomeCommand C.resetInstructionSelectionC)
                               , (C.Key V.KRight [], C.SomeCommand C.selectNextOperandC)
                               , (C.Key V.KLeft [], C.SomeCommand C.selectPreviousOperandC)
+                              , (C.Key (V.KChar 'm') [], C.SomeCommand BC.showMacawBlockC)
+                              , (C.Key (V.KChar 'c') [], C.SomeCommand BC.showCrucibleBlockC)
+                              , (C.Key (V.KChar 'b') [], C.SomeCommand BC.showBaseBlockC)
                               ]
                             )
 -- | State specific to the Brick UI
