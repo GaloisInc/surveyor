@@ -26,7 +26,6 @@ import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core as C
 import           Surveyor.Brick.Attributes
-import qualified Surveyor.Brick.Command as BC
 import qualified Surveyor.Brick.Handlers as BH
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
@@ -202,10 +201,7 @@ emptyState mfp mloader ng customEventChan = do
              , C.sEmitEvent = C.writeChan customEventChan
              , C.sEventChannel = customEventChan
              , C.sNonceGenerator = ng
-             , C.sKeymap = foldr (\(k, C.SomeCommand c) -> C.addGlobalKey k c) C.defaultKeymap extraKeys
+             , C.sKeymap = C.defaultKeymap
              , C.sUIExtension = uiExt
              , C.sArchState = Nothing
              }
-  where
-    extraKeys = [(C.Key (V.KChar 'm') [V.MAlt], C.SomeCommand BC.showMacawBlockC)
-                ]
