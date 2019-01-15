@@ -96,6 +96,10 @@ handleVtyEvent s0@(C.State s) evt
             MB.Completed mb' -> do
               let s' = s & C.lUIExtension . minibufferL .~ mb'
               B.continue $! C.State s'
+            MB.Executed mb' -> do
+              let s' = s & C.lUIMode .~ C.SomeUIMode oldMode
+                         & C.lUIExtension . minibufferL .~ mb'
+              B.continue $! C.State s'
       | otherwise -> B.continue s0
     C.SomeUIMode C.BlockSelector
       | Just bsel <- s ^? C.lArchState . _Just . blockSelectorL -> do
@@ -176,12 +180,7 @@ handleCustomEvent s0 evt =
     C.DescribeCommand (C.SomeCommand cmd) -> do
       let msg = T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
       liftIO (C.sEmitEvent s0 (C.EchoText msg))
-      let newMode =
-            case C.sUIMode s0 of
-              C.SomeMiniBuffer (C.MiniBuffer oldMode) -> oldMode
-              C.SomeUIMode mode -> mode
       let s1 = s0 & C.lDiagnosticLog %~ (Seq.|> (Nothing, msg))
-                  & C.lUIMode .~ C.SomeUIMode newMode
       B.continue $! C.State s1
     C.EchoText txt -> do
       ea' <- liftIO (C.setEchoAreaText (C.sEchoArea s0) txt)
@@ -209,7 +208,7 @@ handleCustomEvent s0 evt =
       let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SemanticsViewer
       B.continue $! C.State s1
     C.SelectNextInstruction archNonce ->
-      withBlockViewer s0 $ \vnonce repr nextMode ->
+      withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
@@ -218,11 +217,10 @@ handleCustomEvent s0 evt =
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectNextInstruction repr cstk
-                             & C.lUIMode .~ nextMode
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.SelectPreviousInstruction archNonce ->
-      withBlockViewer s0 $ \vnonce repr nextMode ->
+      withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
@@ -231,11 +229,10 @@ handleCustomEvent s0 evt =
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectPreviousInstruction repr cstk
-                             & C.lUIMode .~ nextMode
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.SelectNextOperand archNonce ->
-      withBlockViewer s0 $ \vnonce repr nextMode ->
+      withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
@@ -244,11 +241,10 @@ handleCustomEvent s0 evt =
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectNextOperand repr cstk
-                             & C.lUIMode .~ nextMode
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.SelectPreviousOperand archNonce ->
-      withBlockViewer s0 $ \vnonce repr nextMode ->
+      withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
@@ -257,11 +253,10 @@ handleCustomEvent s0 evt =
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectPreviousOperand repr cstk
-                             & C.lUIMode .~ nextMode
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.ResetInstructionSelection archNonce ->
-      withBlockViewer s0 $ \vnonce repr nextMode ->
+      withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
@@ -270,7 +265,6 @@ handleCustomEvent s0 evt =
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . contextL .~ C.resetBlockSelection cstk
-                             & C.lUIMode .~ nextMode
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
 
@@ -383,14 +377,14 @@ withBaseMode sm k =
 
 withBlockViewer :: (C.Architecture arch s)
                 => C.S BrickUIExtension BrickUIState arch s
-                -> (forall arch1 ir1 . PN.Nonce s arch1 -> C.IRRepr arch1 ir1 -> C.SomeUIMode s -> B.EventM n (B.Next (C.State BrickUIExtension BrickUIState s)))
+                -> (forall arch1 ir1 . PN.Nonce s arch1 -> C.IRRepr arch1 ir1 -> B.EventM n (B.Next (C.State BrickUIExtension BrickUIState s)))
                 -> B.EventM n (B.Next (C.State BrickUIExtension BrickUIState s))
 withBlockViewer s0 k =
   case s0 ^. C.lUIMode of
-    C.SomeUIMode (C.BlockViewer vnonce repr) -> k vnonce repr (s0 ^. C.lUIMode)
+    C.SomeUIMode (C.BlockViewer vnonce repr) -> k vnonce repr
     C.SomeMiniBuffer (C.MiniBuffer m) ->
       case m of
-        C.BlockViewer vnonce repr -> k vnonce repr (C.SomeUIMode m)
+        C.BlockViewer vnonce repr -> k vnonce repr
         _ -> B.continue $! C.State s0
     _ -> B.continue $! C.State s0
 

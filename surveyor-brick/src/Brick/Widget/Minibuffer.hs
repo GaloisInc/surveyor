@@ -120,6 +120,7 @@ minibuffer parseArg compArg showRep attr edName compName pfx cmds =
                                          }
 
 data MinibufferStatus b t n = Completed (Minibuffer b t n)
+                            | Executed (Minibuffer b t n)
                             | Canceled (Minibuffer b t n)
 
 -- | Extract the argument from the argument filter list
@@ -168,7 +169,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
               case (argNames, argTypes) of
                 (PL.Nil, PL.Nil) -> do
                   liftIO (callback customEventChan s PL.Nil)
-                  return (Completed (resetMinibuffer mb))
+                  return (Executed (resetMinibuffer mb))
                 _ ->
                   return $ Completed mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
                                         , commandList = FL.resetList (commandList mb)
@@ -181,7 +182,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
                 case () of
                   _ | Just Refl <- testEquality callbackType collectedArgTypes' -> do
                         liftIO (callback customEventChan s collectedArgValues')
-                        return (Completed (resetMinibuffer mb))
+                        return (Executed (resetMinibuffer mb))
                     | otherwise -> error "impossible"
             (C.Const _expectedArgName PL.:< restArgs, expectedArgType PL.:< restTypes) -> do
               let completedArg = argumentValue (argumentList mb)
@@ -194,7 +195,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
                         case () of
                           _ | Just Refl <- testEquality callbackType collectedArgTypes' -> do
                                 liftIO (callback customEventChan s collectedArgValues')
-                                return (Completed (resetMinibuffer mb))
+                                return (Executed (resetMinibuffer mb))
                             | otherwise -> error "impossible"
                     (_, _) ->
                       return $ Completed mb { state = CollectingArguments restArgs
