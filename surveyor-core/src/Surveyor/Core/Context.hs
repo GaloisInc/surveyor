@@ -23,6 +23,8 @@ module Surveyor.Core.Context (
   selectNextBlock,
   selectPreviousBlock,
   pushContext,
+  contextForward,
+  contextBack,
   -- *  Lenses
   currentContext,
   contextFocusedBlock,
@@ -40,6 +42,7 @@ import           GHC.Generics ( Generic )
 import           Control.DeepSeq ( NFData(rnf), deepseq )
 import qualified Control.Lens as L
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?) )
+import           Control.Monad ( guard )
 import qualified Data.Foldable as F
 import qualified Data.Generics.Product as GL
 import qualified Data.Graph.Haggle as H
@@ -268,6 +271,23 @@ emptyContextStack :: ContextStack arch s
 emptyContextStack = ContextStack { cStack = Seq.empty
                                  , cStackIndex = Nothing
                                  }
+
+contextBack :: ContextStack arch s -> ContextStack arch s
+contextBack cs = cs { cStackIndex = nextIndex }
+  where
+    nextIndex = fromMaybe (cStackIndex cs) $ do
+      let ix = maybe 1 (+1) (cStackIndex cs)
+      guard (ix < Seq.length (cStack cs))
+      return (Just ix)
+
+contextForward :: ContextStack arch s -> ContextStack arch s
+contextForward cs = cs { cStackIndex = nextIndex }
+  where
+    nextIndex = do
+      curIdx <- cStackIndex cs
+      let next = curIdx - 1
+      guard (next > 0)
+      return next
 
 -- | Push a new context onto the front of the context stack
 --

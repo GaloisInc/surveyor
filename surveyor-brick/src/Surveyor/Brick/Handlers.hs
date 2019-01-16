@@ -338,6 +338,12 @@ handleCustomEvent s0 evt =
             | otherwise ->
               liftIO $ C.logDiagnostic s0 C.LogDebug "PushContext: Nonce mismatch"
         B.continue (C.State s0)
+    C.ContextBack -> do
+      let s1 = s0 & C.lArchState . _Just . contextL %~ C.contextBack
+      B.continue $! C.State s1
+    C.ContextForward -> do
+      let s1 = s0 & C.lArchState . _Just . contextL %~ C.contextForward
+      B.continue $! C.State s1
 
     C.LogDiagnostic mLogLevel t ->
       case mLogLevel of

@@ -22,6 +22,8 @@ module Surveyor.Core.Commands (
   selectNextOperandC,
   selectPreviousOperandC,
   resetInstructionSelectionC,
+  contextBackC,
+  contextForwardC,
   allCommands
   ) where
 
@@ -58,6 +60,8 @@ allCommands =
   , C.SomeCommand selectNextOperandC
   , C.SomeCommand selectPreviousOperandC
   , C.SomeCommand resetInstructionSelectionC
+  , C.SomeCommand contextBackC
+  , C.SomeCommand contextForwardC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -199,6 +203,24 @@ resetInstructionSelectionC =
         Nothing -> return ()
         Just (AR.SomeNonce archNonce) ->
           C.writeChan customEventChan (ResetInstructionSelection archNonce)
+
+contextBackC :: forall s st . Command s st '[]
+contextBackC =
+  C.Command "context-back" doc PL.Nil PL.Nil callback
+  where
+    doc = "Go backward (down) in the context stack"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil ->
+      C.writeChan customEventChan ContextBack
+
+contextForwardC :: forall s st . Command s st '[]
+contextForwardC =
+  C.Command "context-forward" doc PL.Nil PL.Nil callback
+  where
+    doc = "Go forward (up) in the context stack"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil ->
+      C.writeChan customEventChan ContextForward
 
 loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =

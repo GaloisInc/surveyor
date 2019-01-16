@@ -41,6 +41,8 @@ data Events s st where
 
   -- Context manipulation
   PushContext :: PN.Nonce s arch -> A.Block arch s -> Events s st
+  ContextBack :: Events s st
+  ContextForward :: Events s st
 
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st

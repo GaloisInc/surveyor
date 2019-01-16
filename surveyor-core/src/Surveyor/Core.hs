@@ -78,6 +78,8 @@ module Surveyor.Core (
   CCX.selectNextBlock,
   CCX.selectPreviousBlock,
   CCX.pushContext,
+  CCX.contextBack,
+  CCX.contextForward,
   -- ** Lenses
   CCX.currentContext,
   CCX.contextFocusedBlock,
