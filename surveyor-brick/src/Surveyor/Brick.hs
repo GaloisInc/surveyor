@@ -206,7 +206,10 @@ emptyState :: Maybe FilePath
            -> IO (C.S BH.BrickUIExtension BH.BrickUIState Void s)
 emptyState mfp mloader ng customEventChan = do
   let addrParser _s = Nothing
-  let uiExt = BH.mkExtension addrParser "M-x"
+  -- We need a nonce for the minibuffer, but we don't have one here yet.  Just
+  -- make one (that won't match anything else)
+  n0 <- PN.freshNonce ng
+  let uiExt = BH.mkExtension (C.writeChan customEventChan) n0 addrParser "M-x"
   return C.S { C.sInputFile = mfp
              , C.sLoader = mloader
              , C.sDiagnosticLog = Seq.empty
@@ -220,4 +223,5 @@ emptyState mfp mloader ng customEventChan = do
              , C.sKeymap = C.defaultKeymap
              , C.sUIExtension = uiExt
              , C.sArchState = Nothing
+             , C.sArchNonce = n0
              }

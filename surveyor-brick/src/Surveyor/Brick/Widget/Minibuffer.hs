@@ -40,6 +40,7 @@ completeArgument cmds =
 
 minibuffer :: (Z.GenericTextZipper t)
            => (String -> Maybe (C.SomeAddress s))
+           -> (t -> V.Vector t -> IO ())
            -> n
            -- ^ The name of the editor widget
            -> n
@@ -47,5 +48,8 @@ minibuffer :: (Z.GenericTextZipper t)
            -> T.Text
            -> [C.SomeCommand (C.SurveyorCommand s st)]
            -> MB.Minibuffer (C.SurveyorCommand s st) t n
-minibuffer parseAddr edName compName pfx cmds =
-  MB.minibuffer (C.parseArgument parseAddr cmds) (completeArgument cmds) C.showRepr focusedListAttr edName compName pfx cmds
+minibuffer parseAddr updateMatches edName compName pfx cmds =
+  MB.minibuffer (C.parseArgument parseAddr cmds) ct C.showRepr focusedListAttr edName compName pfx cmds
+  where
+    comp = MB.Completer (completeArgument cmds)
+    ct = MB.Asynchronous comp updateMatches

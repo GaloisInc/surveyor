@@ -5,17 +5,23 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeInType #-}
 -- | An emacs-style minibuffer as a Brick widget
 module Brick.Widget.Minibuffer (
+  Completer(..),
+  CompletionType(..),
   Minibuffer,
   minibuffer,
+  activeCompletionTarget,
+  setCompletions,
   MinibufferStatus(..),
   handleMinibufferEvent,
   renderMinibuffer
   ) where
 
 import qualified Brick as B
+import qualified Control.Concurrent.Async as A
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Functor.Const as C
 import           Data.Kind ( Type )
@@ -63,9 +69,17 @@ data Minibuffer b t n =
              , allCommands :: !(V.Vector (C.SomeCommand b))
              , state :: MinibufferState b
              , parseArgument :: forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> Maybe (C.ArgumentType b tp)
-             , completeArgument :: forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> IO (V.Vector t)
+             , completeArgument :: CompletionType b t
+             , outstandingCompletion :: Maybe (t, A.Async ())
              , showRepr :: forall (tp :: C.ArgumentKind b) . C.ArgumentRepr b tp -> T.Text
              }
+
+data Completer b t = Completer (forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> IO (V.Vector t))
+data CompletionType b t = Synchronous (Completer b t)
+                        | Asynchronous (Completer b t) (t -> V.Vector t -> IO ())
+
+activeCompletionTarget :: Minibuffer b t n -> Maybe t
+activeCompletionTarget = fmap fst . outstandingCompletion
 
 -- | Create a new 'Minibuffer' state.
 --
@@ -73,7 +87,7 @@ data Minibuffer b t n =
 minibuffer :: (ZG.GenericTextZipper t)
            => (forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> Maybe (C.ArgumentType b tp))
            -- ^ Parse a textual object into an argument
-           -> (forall (tp :: C.ArgumentKind b) . t -> C.ArgumentRepr b tp -> IO (V.Vector t))
+           -> CompletionType b t
            -- ^ Generate completions for an argument of an expected type; note
            -- that this runs in the UI thread and should be quick.
            -> (forall (tp :: C.ArgumentKind b) . C.ArgumentRepr b tp -> T.Text)
@@ -98,6 +112,7 @@ minibuffer parseArg compArg showRep attr edName compName pfx cmds =
              , parseArgument = parseArg
              , completeArgument = compArg
              , showRepr = showRep
+             , outstandingCompletion = Nothing
              }
   where
     allCmds = V.fromList cmds
@@ -214,23 +229,33 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
       -- All other keys go to the editor widget
       case state mb of
         Editing -> do
-          let updater fl =
-                case SW.matcher (ZG.toList (FL.editorContents fl)) of
-                  Nothing -> return fl
-                  Just matcher -> return (FL.updateList (V.filter (commandMatches matcher)) fl)
-          cmdList' <- FL.handleFilterListEvent updater evt (commandList mb)
-          return $ Completed mb { commandList = cmdList' }
+          cmdList' <- FL.handleFilterListEvent evt (commandList mb)
+          cmdList'' <- case SW.matcher (ZG.toList (FL.editorContents cmdList')) of
+            Nothing -> return cmdList'
+            Just matcher -> return (FL.updateList (V.filter (commandMatches matcher)) cmdList')
+          return $ Completed mb { commandList = cmdList'' }
         CollectingArguments _expectedArgNames expectedArgTypes _ _ _ _ -> do
           case expectedArgTypes of
             PL.Nil -> error "impossible"
             nextTy PL.:< _ -> do
-              let updater fl = do
-                    case mb of
-                      Minibuffer { completeArgument = complete } -> do
-                        completions <- complete (FL.editorContents fl) nextTy
-                        return (FL.updateList (const completions) fl)
-              argList' <- FL.handleFilterListEvent updater evt (argumentList mb)
-              return $ Completed mb { argumentList = argList' }
+              argList' <- FL.handleFilterListEvent evt (argumentList mb)
+              let completionTarget = FL.editorContents argList'
+              case completeArgument mb of
+                Synchronous (Completer comp) -> do
+                  completions <- liftIO $ comp completionTarget nextTy
+                  return $ Completed mb { argumentList = FL.updateList (const completions) argList' }
+                Asynchronous (Completer comp) updateCallback -> do
+                  ac <- liftIO $ A.async $ do
+                    completions <- comp completionTarget nextTy
+                    updateCallback completionTarget completions
+                  return $ Completed mb { argumentList = argList'
+                                        , outstandingCompletion = Just (completionTarget, ac)
+                                        }
+
+setCompletions :: V.Vector t -> Minibuffer b t n -> Minibuffer b t n
+setCompletions comps mb =
+  mb { argumentList = FL.updateList (const comps) (argumentList mb) }
+
 
 resetMinibuffer :: (ZG.GenericTextZipper t) => Minibuffer b t n -> Minibuffer b t n
 resetMinibuffer mb = Minibuffer { prefix = prefix mb
@@ -241,6 +266,7 @@ resetMinibuffer mb = Minibuffer { prefix = prefix mb
                                 , parseArgument = parseArgument mb
                                 , completeArgument = completeArgument mb
                                 , showRepr = showRepr mb
+                                , outstandingCompletion = Nothing
                                 }
 
 withReversedF :: forall a b c tps

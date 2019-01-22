@@ -69,7 +69,7 @@ handleBlockSelectorEvent evt bsel =
               liftIO (callback b)
               return bsel
         _ -> do
-          fl' <- FL.handleFilterListEvent return evt fl
+          fl' <- FL.handleFilterListEvent evt fl
           return (BlockSelector callback fl')
 
 renderBlockSelector :: (C.Architecture arch s) => BlockSelector arch s -> B.Widget Names

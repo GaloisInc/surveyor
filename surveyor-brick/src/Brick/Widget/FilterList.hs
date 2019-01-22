@@ -19,7 +19,6 @@ import qualified Brick.Widgets.Edit as B
 import qualified Brick.Widgets.List as B
 import qualified Control.Lens as L
 import           Control.Monad ( guard )
-import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Text.Zipper as Z
 import qualified Data.Text.Zipper.Generic as ZG
 import qualified Data.Vector as V
@@ -96,13 +95,10 @@ renderFilterList renderPrompt hasFocus fl =
       else B.renderList (renderListItem fl) False (matchingItems fl)
 
 handleFilterListEvent :: (Ord n, Monoid t, ZG.GenericTextZipper t, Eq t)
-                      => (FilterList n t e -> IO (FilterList n t e))
-                      -- ^ A function to call after an edit is applied (via user
-                      -- input or tab completion) to fix up the list of matches
-                      -> V.Event
+                      => V.Event
                       -> FilterList n t e
                       -> B.EventM n (FilterList n t e)
-handleFilterListEvent listUpdater evt fl =
+handleFilterListEvent evt fl =
   case evt of
     V.EvKey (V.KChar '\t') [] ->
       -- Tab completion
@@ -111,8 +107,7 @@ handleFilterListEvent listUpdater evt fl =
         True -> do
           let cmpTxt = toText fl ((matchingItems fl L.^. B.listElementsL) V.! 0)
           let newZipper = Z.gotoEOL (ZG.textZipper [cmpTxt] Nothing)
-          let fl' = fl { editor = B.applyEdit (const newZipper) (editor fl) }
-          liftIO (listUpdater fl')
+          return fl { editor = B.applyEdit (const newZipper) (editor fl) }
     V.EvKey (V.KChar 'n') [V.MCtrl] ->
       return fl { matchingItems = B.listMoveDown (matchingItems fl) }
     V.EvKey V.KDown [] ->
@@ -123,8 +118,7 @@ handleFilterListEvent listUpdater evt fl =
       return fl { matchingItems = B.listMoveUp (matchingItems fl) }
     _ -> do
       editor' <- B.handleEditorEvent evt (editor fl)
-      let fl' = fl { editor = editor' }
-      liftIO (listUpdater fl')
+      return fl { editor = editor' }
 
 -- | Return the selected list item (if any)
 selectedItem :: FilterList n t e -> Maybe e

@@ -95,6 +95,7 @@ data S e u (arch :: *) s =
     , sArchState :: Maybe (ArchState u arch s)
     -- ^ Architecture-specific state, including UI extensions (via the @u@
     -- parameter)
+    , sArchNonce :: NG.Nonce s arch
     }
   deriving (Generic)
 
