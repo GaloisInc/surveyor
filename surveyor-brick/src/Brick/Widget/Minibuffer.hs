@@ -24,6 +24,7 @@ module Brick.Widget.Minibuffer (
 import qualified Brick as B
 import qualified Control.Concurrent.Async as A
 import           Control.Monad.IO.Class ( liftIO )
+import qualified Data.Foldable as F
 import qualified Data.Functor.Const as C
 import           Data.Kind ( Type )
 import           Data.Maybe ( fromMaybe )
@@ -249,6 +250,8 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
                        completions <- liftIO $ comp completionTarget nextTy
                        return $ Completed mb { argumentList = FL.updateList (const completions) argList' }
                      Asynchronous (Completer comp) updateCallback -> do
+                       F.forM_ (outstandingCompletion mb) $ \(_, oldCompleter) -> do
+                         liftIO $ A.cancel oldCompleter
                        ac <- liftIO $ A.async $ do
                          completions <- comp completionTarget nextTy
                          updateCallback completionTarget completions
