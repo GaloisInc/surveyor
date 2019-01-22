@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
@@ -238,19 +239,22 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
           case expectedArgTypes of
             PL.Nil -> error "impossible"
             nextTy PL.:< _ -> do
+              let edContents0 = FL.editorContents (argumentList mb)
               argList' <- FL.handleFilterListEvent evt (argumentList mb)
               let completionTarget = FL.editorContents argList'
-              case completeArgument mb of
-                Synchronous (Completer comp) -> do
-                  completions <- liftIO $ comp completionTarget nextTy
-                  return $ Completed mb { argumentList = FL.updateList (const completions) argList' }
-                Asynchronous (Completer comp) updateCallback -> do
-                  ac <- liftIO $ A.async $ do
-                    completions <- comp completionTarget nextTy
-                    updateCallback completionTarget completions
-                  return $ Completed mb { argumentList = argList'
-                                        , outstandingCompletion = Just (completionTarget, ac)
-                                        }
+              if | edContents0 == completionTarget -> return $ Completed mb { argumentList = argList' }
+                 | otherwise ->
+                   case completeArgument mb of
+                     Synchronous (Completer comp) -> do
+                       completions <- liftIO $ comp completionTarget nextTy
+                       return $ Completed mb { argumentList = FL.updateList (const completions) argList' }
+                     Asynchronous (Completer comp) updateCallback -> do
+                       ac <- liftIO $ A.async $ do
+                         completions <- comp completionTarget nextTy
+                         updateCallback completionTarget completions
+                       return $ Completed mb { argumentList = argList'
+                                             , outstandingCompletion = Just (completionTarget, ac)
+                                             }
 
 setCompletions :: V.Vector t -> Minibuffer b t n -> Minibuffer b t n
 setCompletions comps mb =
