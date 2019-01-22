@@ -31,25 +31,25 @@ type MiniBufferK = 'MiniBufferK
 type NormalK = 'NormalK
 
 data UIMode s k where
+  -- | A window containing the history of diagnostic information
   Diags :: UIMode s NormalK
-  -- ^ A window containing the history of diagnostic information
+  -- | Summary information returned by the binary analysis
   Summary :: UIMode s NormalK
-  -- ^ Summary information returned by the binary analysis
-  FunctionSelector :: UIMode s NormalK
-  -- ^ A list of all of the discovered functions (which allows for
+  -- | A list of all of the discovered functions (which allows for
   -- drilling down and displaying blocks)
-  BlockSelector :: UIMode s NormalK
-  -- ^ A selector list for blocks that are the result of a search (based on the
+  FunctionSelector :: UIMode s NormalK
+  -- | A selector list for blocks that are the result of a search (based on the
   -- sBlockList in the State)
+  BlockSelector :: UIMode s NormalK
+  -- | View a block
   BlockViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
-  -- ^ View a block
+  -- | View a function
   FunctionViewer :: UIMode s NormalK
-  -- ^ View a function
+  -- | View the semantics for an individual selected base IR instruction
   SemanticsViewer :: UIMode s NormalK
-  -- ^ View the semantics for an individual selected base IR instruction
-  MiniBuffer :: UIMode s NormalK -> UIMode s MiniBufferK
-  -- ^ An interactive widget that takes focus and accepts all
+  -- | An interactive widget that takes focus and accepts all
   -- keystrokes except for C-g
+  MiniBuffer :: UIMode s NormalK -> UIMode s MiniBufferK
 
 prettyMode :: UIMode s NormalK -> T.Text
 prettyMode m =
