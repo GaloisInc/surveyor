@@ -63,12 +63,11 @@ handleFunctionSelectorEvent evt fsel =
           liftIO (callback fsel f)
           return fsel
     _ -> do
-      let updater fl =
-            case SW.matcher (ZG.toList (FL.editorContents fl)) of
-              Nothing -> return fl
-              Just matcher -> return (FL.updateList (V.filter (matchesFunction matcher)) fl)
-      fl' <- FL.handleFilterListEvent updater evt (selector fsel)
-      return fsel { selector = fl' }
+      fl' <- FL.handleFilterListEvent evt (selector fsel)
+      fl'' <- case SW.matcher (ZG.toList (FL.editorContents fl')) of
+                Nothing -> return fl'
+                Just matcher -> return (FL.updateList (V.filter (matchesFunction matcher)) fl')
+      return fsel { selector = fl'' }
 
 renderFunctionSelector :: (C.Architecture arch s) => FunctionSelector arch s -> B.Widget Names
 renderFunctionSelector fsel =

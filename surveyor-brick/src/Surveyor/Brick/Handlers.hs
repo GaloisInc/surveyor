@@ -44,6 +44,7 @@ import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
+import qualified Data.Vector as V
 import qualified Fmt as Fmt
 import           Fmt ( (+|), (|+), (||+) )
 import qualified Graphics.Vty as V
@@ -51,6 +52,7 @@ import           Text.Printf ( printf )
 
 import           Prelude
 
+import qualified Brick.Widget.Minibuffer as MBW
 import qualified Surveyor.Core as C
 import           Surveyor.Brick.Attributes ( focusedListAttr )
 import qualified Surveyor.Brick.Command as BC
@@ -365,7 +367,7 @@ handleCustomEvent s0 evt =
     -- We discard async state updates if the type of the state has changed in
     -- the interim (i.e., if another binary has been loaded)
     C.AsyncStateUpdate archNonce nfVal upd
-      | Just oldNonce <- s0 ^? C.lArchState ._Just . C.lNonce
+      | oldNonce <- C.sArchNonce s0
       , Just Refl <- testEquality oldNonce archNonce ->
           B.continue (C.State (upd (NF.getNF nfVal) s0))
       | otherwise -> B.continue (C.State s0)
@@ -436,6 +438,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              , C.sLoader = C.sLoader s0
              , C.sKeymap = keymap
              , C.sUIExtension = uiExt
+             , C.sArchNonce = C.archNonce ares
              , C.sArchState =
                case () of
                  () | Just oldArchState <- C.sArchState s0
@@ -463,7 +466,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              }
   where
     addrParser s = C.SomeAddress (C.archNonce ares) <$> C.parseAddress s
-    uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands ++ BC.extraCommands)
+    uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser (updateMinibufferCompletions (C.sEmitEvent s0) (C.archNonce ares)) MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands ++ BC.extraCommands)
                              }
 
     modeKeys = [ blockViewerKeys (C.archNonce ares) C.BaseRepr
@@ -473,6 +476,17 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
     addModeKeys (mode, keys) modeKeymap =
       foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
     keymap = foldr addModeKeys C.defaultKeymap modeKeys
+
+updateMinibufferCompletions :: (C.Events s (C.S BrickUIExtension BrickUIState) -> IO ())
+                            -> PN.Nonce s arch
+                            -> (T.Text -> V.Vector T.Text -> IO ())
+updateMinibufferCompletions emitEvent archNonce = \t matches -> do
+  let stateTransformer matches' state
+        | mb <- state ^. C.lUIExtension . minibufferL
+        , MBW.activeCompletionTarget mb == Just t =
+          state & C.lUIExtension . minibufferL %~ MBW.setCompletions matches'
+        | otherwise = state
+  emitEvent (C.AsyncStateUpdate archNonce (NF.nf matches) stateTransformer)
 
 blockViewerKeys :: PN.Nonce s arch
                 -> C.IRRepr arch ir
@@ -528,10 +542,14 @@ data BrickUIExtension s =
                    }
   deriving (Generic)
 
-mkExtension :: (String -> Maybe (C.SomeAddress s)) -> T.Text -> BrickUIExtension s
-mkExtension addrParser prompt =
-  BrickUIExtension { sMinibuffer = MB.minibuffer addrParser MinibufferEditor MinibufferCompletionList prompt (C.allCommands ++ BC.extraCommands)
+mkExtension :: (C.Events s (C.S BrickUIExtension BrickUIState) -> IO ())
+            -> PN.Nonce s arch
+            -> (String -> Maybe (C.SomeAddress s)) -> T.Text -> BrickUIExtension s
+mkExtension emitEvent archNonce addrParser prompt =
+  BrickUIExtension { sMinibuffer = MB.minibuffer addrParser updater MinibufferEditor MinibufferCompletionList prompt (C.allCommands ++ BC.extraCommands)
                    }
+  where
+    updater = updateMinibufferCompletions emitEvent archNonce
 
 minibufferL :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
 minibufferL = GL.field @"sMinibuffer"
