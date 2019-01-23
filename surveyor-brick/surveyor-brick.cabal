@@ -37,6 +37,7 @@ library
                        text,
                        vector,
                        filepath,
+                       Glob >= 0.10 && < 0.11,
                        prettyprinter,
                        pretty,
                        fmt,

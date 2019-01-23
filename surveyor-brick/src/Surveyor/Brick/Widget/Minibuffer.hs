@@ -8,9 +8,11 @@ module Surveyor.Brick.Widget.Minibuffer (
   MB.renderMinibuffer,
   ) where
 
+import qualified Data.List as L
 import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import qualified Data.Vector as V
+import qualified System.FilePath.Glob as G
 
 import           Surveyor.Brick.Attributes
 import qualified Surveyor.Core as C
@@ -28,8 +30,10 @@ completeArgument cmds =
       C.AddressTypeRepr -> return V.empty
       C.IntTypeRepr -> return V.empty
       C.WordTypeRepr -> return V.empty
-      -- FIXME: We can actually do file path completion
-      C.FilePathTypeRepr -> return V.empty
+      C.FilePathTypeRepr -> do
+        let toGeneric str = mconcat (map Z.singleton str)
+        paths <- completeFilename t
+        return (V.fromList (map toGeneric paths))
       C.CommandTypeRepr ->
         case SW.matcher (Z.toList t) of
           Nothing -> return V.empty
@@ -37,6 +41,10 @@ completeArgument cmds =
             let matches = V.filter (SW.matches matcher) cmdNames
             let toGeneric txt = mconcat (map Z.singleton (T.unpack txt))
             return (fmap toGeneric matches)
+
+completeFilename :: (Z.GenericTextZipper a) => a -> IO [FilePath]
+completeFilename t =
+  G.glob (L.intercalate "*" (words (Z.toList t)))
 
 minibuffer :: (Z.GenericTextZipper t)
            => (String -> Maybe (C.SomeAddress s))
