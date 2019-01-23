@@ -231,11 +231,15 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
       -- All other keys go to the editor widget
       case state mb of
         Editing -> do
+          let edContents0 = FL.editorContents (commandList mb)
           cmdList' <- FL.handleFilterListEvent evt (commandList mb)
-          cmdList'' <- case SW.matcher (ZG.toList (FL.editorContents cmdList')) of
-            Nothing -> return cmdList'
-            Just matcher -> return (FL.updateList (V.filter (commandMatches matcher)) cmdList')
-          return $ Completed mb { commandList = cmdList'' }
+          let completionTarget = FL.editorContents cmdList'
+          if | edContents0 == completionTarget -> return $ Completed mb { commandList = cmdList' }
+             | otherwise -> do
+               cmdList'' <- case SW.matcher (ZG.toList (FL.editorContents cmdList')) of
+                 Nothing -> return cmdList'
+                 Just matcher -> return (FL.updateList (V.filter (commandMatches matcher)) cmdList')
+               return $ Completed mb { commandList = cmdList'' }
         CollectingArguments _expectedArgNames expectedArgTypes _ _ _ _ -> do
           case expectedArgTypes of
             PL.Nil -> error "impossible"
