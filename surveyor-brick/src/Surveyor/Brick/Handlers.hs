@@ -193,8 +193,7 @@ handleCustomEvent s0 evt =
         C.SomeUIMode mode -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer mode))
 
     C.ViewBlock archNonce rep
-      | oldNonce <- s0 ^. C.lNonce
-      , Just Refl <- testEquality archNonce oldNonce -> do
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
           -- Set the current view to the block viewer (of the appropriate IR)
           --
           -- Note that this doesn't manipulate the context at all
@@ -284,8 +283,7 @@ handleCustomEvent s0 evt =
               B.continue (C.State s0)
       | otherwise -> B.continue (C.State s0)
     C.ListBlocks archNonce blocks
-      | oldNonce <- s0 ^. C.lNonce
-      , Just Refl <- testEquality oldNonce archNonce -> do
+      | Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
           let callback b = do
                 C.sEmitEvent s0 (C.PushContext archNonce b)
                 C.logDiagnostic s0 C.LogDebug (Fmt.fmt ("Pushing a block to view: " +| C.blockAddress b ||+""))
@@ -297,8 +295,7 @@ handleCustomEvent s0 evt =
 
     C.FindFunctionsContaining archNonce maddr
       | Just oldArchState <- s0 ^. C.lArchState
-      , oldNonce <- s0 ^. C.lNonce
-      , Just Refl <- testEquality oldNonce archNonce ->
+      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce ->
         let ares = oldArchState ^. C.lAnalysisResult
         in case maddr of
             Nothing -> do
