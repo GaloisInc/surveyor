@@ -38,7 +38,7 @@ import           Surveyor.Core.Events ( Events(..) )
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
 type Callback s st tps = C.Chan (Events s st)
-                      -> Maybe (AR.SomeNonce s)
+                      -> AR.SomeNonce s
                       -> PL.List (C.ArgumentType (AR.SurveyorCommand s st)) tps
                       -> IO ()
 
@@ -94,11 +94,8 @@ listFunctionsC =
   where
     doc = "List all of the discovered functions"
     callback :: Callback s st '[]
-    callback = \customEventChan mnonce PL.Nil ->
-      case mnonce of
-        Nothing -> return ()
-        Just (AR.SomeNonce nonce) ->
-          C.writeChan customEventChan (FindFunctionsContaining nonce Nothing)
+    callback = \customEventChan (AR.SomeNonce nonce) PL.Nil ->
+      C.writeChan customEventChan (FindFunctionsContaining nonce Nothing)
 
 findBlockC :: forall s st . Command s st '[AR.AddressType]
 findBlockC =
@@ -108,11 +105,8 @@ findBlockC =
     names = C.Const "address" PL.:< PL.Nil
     rep = AR.AddressTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.AddressType]
-    callback = \customEventChan mnonce (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
-      case mnonce of
-        Nothing -> return ()
-        Just (AR.SomeNonce _nonce) ->
-            C.writeChan customEventChan (FindBlockContaining anonce addr)
+    callback = \customEventChan (AR.SomeNonce _nonce) (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
+      C.writeChan customEventChan (FindBlockContaining anonce addr)
 
 describeCommandC :: forall s st . Command s st '[AR.CommandType]
 describeCommandC =
@@ -150,11 +144,8 @@ selectNextInstructionC =
   where
     doc = "Select the next instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan mnonce PL.Nil ->
-      case mnonce of
-        Nothing -> return ()
-        Just (AR.SomeNonce archNonce) ->
-          C.writeChan customEventChan (SelectNextInstruction archNonce)
+    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+      C.writeChan customEventChan (SelectNextInstruction archNonce)
 
 selectPreviousInstructionC :: forall s st . Command s st '[]
 selectPreviousInstructionC =
@@ -162,11 +153,8 @@ selectPreviousInstructionC =
   where
     doc = "Select the previous instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan mnonce PL.Nil ->
-      case mnonce of
-        Nothing -> return ()
-        Just (AR.SomeNonce archNonce) ->
-          C.writeChan customEventChan (SelectPreviousInstruction archNonce)
+    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+      C.writeChan customEventChan (SelectPreviousInstruction archNonce)
 
 selectNextOperandC :: forall s st . Command s st '[]
 selectNextOperandC =
@@ -174,11 +162,8 @@ selectNextOperandC =
   where
     doc = "Select the next operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan mnonce PL.Nil ->
-      case mnonce of
-        Nothing -> return ()
-        Just (AR.SomeNonce archNonce) ->
-          C.writeChan customEventChan (SelectNextOperand archNonce)
+    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+      C.writeChan customEventChan (SelectNextOperand archNonce)
 
 selectPreviousOperandC :: forall s st . Command s st '[]
 selectPreviousOperandC =
@@ -186,11 +171,8 @@ selectPreviousOperandC =
   where
     doc = "Select the previous operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan mnonce PL.Nil ->
-      case mnonce of
-        Nothing -> return ()
-        Just (AR.SomeNonce archNonce) ->
-          C.writeChan customEventChan (SelectPreviousOperand archNonce)
+    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+      C.writeChan customEventChan (SelectPreviousOperand archNonce)
 
 resetInstructionSelectionC :: forall s st . Command s st '[]
 resetInstructionSelectionC =
@@ -198,11 +180,8 @@ resetInstructionSelectionC =
   where
     doc = "Clear the selection in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan mnonce PL.Nil ->
-      case mnonce of
-        Nothing -> return ()
-        Just (AR.SomeNonce archNonce) ->
-          C.writeChan customEventChan (ResetInstructionSelection archNonce)
+    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+      C.writeChan customEventChan (ResetInstructionSelection archNonce)
 
 contextBackC :: forall s st . Command s st '[]
 contextBackC =

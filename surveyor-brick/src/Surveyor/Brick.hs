@@ -147,7 +147,7 @@ drawUIMode binFileName archState s uim =
     C.FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. BH.functionSelectorG))
     C.BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. BH.blockSelectorG))
     C.BlockViewer archNonce repr
-      | Just Refl <- testEquality archNonce (archState ^. C.lNonce)
+      | Just Refl <- testEquality archNonce (s ^. C.lNonce)
       , Just bview <- archState ^. BH.blockViewerG repr ->
           drawAppShell s (BV.renderBlockViewer binfo (archState ^. BH.contextG) bview)
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing block viewer for IR: " ++ show repr)))

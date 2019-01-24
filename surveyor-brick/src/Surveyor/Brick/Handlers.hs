@@ -81,14 +81,13 @@ handleVtyEvent s0@(C.State s) evt
       -- commands that take no arguments.  Later, once we develop a notion of
       -- "current context", we can use that to call commands that take an
       -- argument.
-      let sn = (C.SomeNonce . C.sNonce) <$> C.sArchState s
-      liftIO (C.cmdFunc cmd (C.sEventChannel s) sn PL.Nil)
+      liftIO (C.cmdFunc cmd (C.sEventChannel s) (C.SomeNonce (s ^. C.lNonce)) PL.Nil)
       B.continue (C.State s)
   | otherwise =
   case C.sUIMode s of
     C.SomeMiniBuffer (C.MiniBuffer oldMode)
       | mb <- s ^. C.lUIExtension . minibufferL -> do
-          let sn = (C.SomeNonce . C.sNonce) <$> C.sArchState s
+          let sn = C.SomeNonce (s ^. C.lNonce)
           mbs <- MB.handleMinibufferEvent evt (C.sEventChannel s) sn mb
           case mbs of
             MB.Canceled mb' -> do
@@ -194,7 +193,7 @@ handleCustomEvent s0 evt =
         C.SomeUIMode mode -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer mode))
 
     C.ViewBlock archNonce rep
-      | Just oldNonce <- s0 ^? C.lArchState . _Just . C.lNonce
+      | oldNonce <- s0 ^. C.lNonce
       , Just Refl <- testEquality archNonce oldNonce -> do
           -- Set the current view to the block viewer (of the appropriate IR)
           --
@@ -214,7 +213,7 @@ handleCustomEvent s0 evt =
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
@@ -226,7 +225,7 @@ handleCustomEvent s0 evt =
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
@@ -238,7 +237,7 @@ handleCustomEvent s0 evt =
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
@@ -250,7 +249,7 @@ handleCustomEvent s0 evt =
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
@@ -262,7 +261,7 @@ handleCustomEvent s0 evt =
         if | Just archState <- s0 ^. C.lArchState
            , cstk <- archState ^. contextG
            , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (archState ^. C.lNonce) ->
+           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
@@ -273,7 +272,7 @@ handleCustomEvent s0 evt =
     C.FindBlockContaining archNonce addr
       | Just archState <- s0 ^. C.lArchState
       , ares <- archState ^. C.lAnalysisResult
-      , Just Refl <- testEquality (archState ^. C.lNonce) archNonce -> do
+      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
           liftIO (C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Finding block at address " +| C.prettyAddress addr |+ ""))))
           case C.containingBlocks ares addr of
             [b] -> do
@@ -285,7 +284,7 @@ handleCustomEvent s0 evt =
               B.continue (C.State s0)
       | otherwise -> B.continue (C.State s0)
     C.ListBlocks archNonce blocks
-      | Just oldNonce <- s0 ^? C.lArchState . _Just . C.lNonce
+      | oldNonce <- s0 ^. C.lNonce
       , Just Refl <- testEquality oldNonce archNonce -> do
           let callback b = do
                 C.sEmitEvent s0 (C.PushContext archNonce b)
@@ -298,7 +297,7 @@ handleCustomEvent s0 evt =
 
     C.FindFunctionsContaining archNonce maddr
       | Just oldArchState <- s0 ^. C.lArchState
-      , oldNonce <- oldArchState ^. C.lNonce
+      , oldNonce <- s0 ^. C.lNonce
       , Just Refl <- testEquality oldNonce archNonce ->
         let ares = oldArchState ^. C.lAnalysisResult
         in case maddr of
@@ -309,7 +308,7 @@ handleCustomEvent s0 evt =
 
     C.ListFunctions archNonce funcs
       | Just archState <- s0 ^. C.lArchState
-      , Just Refl <- testEquality (archState ^. C.lNonce) archNonce -> do
+      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
           let callback f = do
                 case C.functionBlocks (archState ^. C.lAnalysisResult) f of
                   [] ->
@@ -325,7 +324,7 @@ handleCustomEvent s0 evt =
 
     C.PushContext archNonce b
       | Just archState <- s0 ^. C.lArchState
-      , Just Refl <- testEquality (archState ^. C.lNonce) archNonce -> do
+      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
           ctx <- liftIO $ C.makeContext (archState ^. irCacheL) (archState ^. C.lAnalysisResult) b
           let s1 = s0 & C.lArchState . _Just . contextL %~ C.pushContext ctx
           liftIO $ C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Selecting block: " +| C.blockAddress b ||+ "")))
@@ -334,8 +333,8 @@ handleCustomEvent s0 evt =
       | otherwise -> do
         case s0 ^. C.lArchState of
           Nothing -> liftIO $ C.logDiagnostic s0 C.LogDebug "PushContext: no arch state"
-          Just archState
-            | Just Refl <- testEquality (archState ^. C.lNonce) archNonce ->
+          Just _archState
+            | Just Refl <- testEquality (s0 ^. C.lNonce) archNonce ->
               return ()
             | otherwise ->
               liftIO $ C.logDiagnostic s0 C.LogDebug "PushContext: Nonce mismatch"
@@ -407,8 +406,7 @@ stateFromAnalysisResult :: forall arch0 arch s
 stateFromAnalysisResult s0 ares newDiags state uiMode = do
   tcache <- C.newTranslationCache
   case () of
-    () | Just oldArchState <- C.sArchState s0
-       , Just Refl <- testEquality (C.sNonce oldArchState) (C.archNonce ares) -> return ()
+    () | Just Refl <- testEquality (s0 ^. C.lNonce) (C.archNonce ares) -> return ()
        | otherwise -> do
            -- When we get a new binary (and have a fresh state), queue up a
            -- default function to view (the first function we found).
@@ -442,7 +440,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              , C.sArchState =
                case () of
                  () | Just oldArchState <- C.sArchState s0
-                    , Just Refl <- testEquality (C.sNonce oldArchState) (C.archNonce ares) ->
+                    , Just Refl <- testEquality (s0 ^. C.lNonce) (C.archNonce ares) ->
                       Just (oldArchState { C.sAnalysisResult = ares })
                     | otherwise -> do
                         let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
@@ -460,7 +458,6 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                                    , sIRCache = tcache
                                                    }
                         return C.ArchState { C.sAnalysisResult = ares
-                                           , C.sNonce = C.archNonce ares
                                            , C.sUIState = uiState
                                            }
              }

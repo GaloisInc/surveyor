@@ -41,7 +41,7 @@ data SurveyorCommand (s :: *) (st :: k -> * -> *)
 
 instance C.CommandLike (SurveyorCommand s st) where
   type EventType (SurveyorCommand s st) = E.Events s st
-  type StateType (SurveyorCommand s st) = Maybe (SomeNonce s)
+  type StateType (SurveyorCommand s st) = SomeNonce s
   type ArgumentType (SurveyorCommand s st) = Argument s
   type ArgumentRepr (SurveyorCommand s st) = TypeRepr
   type ArgumentKind (SurveyorCommand s st) = Type

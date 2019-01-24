@@ -99,6 +99,9 @@ data S e u (arch :: *) s =
     }
   deriving (Generic)
 
+lNonce :: L.Lens' (S e u arch s) (NG.Nonce s arch)
+lNonce = GL.field @"sArchNonce"
+
 logMessage :: S e u arch s -> T.Text -> IO ()
 logMessage s t = sEmitEvent s (LogDiagnostic Nothing t)
 
@@ -147,9 +150,7 @@ lArchState = GL.field @"sArchState"
 -- and replace them all at once with only one dynamic test during incremental
 -- updates.
 data ArchState u arch s =
-  ArchState { sNonce :: !(NG.Nonce s arch)
-            -- ^ A nonce used to check to see if the arch type has changed between runs
-            , sAnalysisResult :: !(A.AnalysisResult arch s)
+  ArchState { sAnalysisResult :: !(A.AnalysisResult arch s)
             -- ^ Information returned by the binary analysis
             --
             -- We keep it around so that it doesn't have to re-index the commands
@@ -159,9 +160,6 @@ data ArchState u arch s =
 
 lUIState :: L.Lens' (ArchState u arch s) (u arch s)
 lUIState = GL.field @"sUIState"
-
-lNonce :: L.Lens' (ArchState u arch s) (NG.Nonce s arch)
-lNonce = GL.field @"sNonce"
 
 lAnalysisResult :: L.Lens' (ArchState u arch s) (A.AnalysisResult arch s)
 lAnalysisResult = GL.field @"sAnalysisResult"
