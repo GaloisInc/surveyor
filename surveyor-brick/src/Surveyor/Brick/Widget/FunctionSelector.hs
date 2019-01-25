@@ -1,3 +1,4 @@
+{-# LANGUAGE MultiWayIf #-}
 module Surveyor.Brick.Widget.FunctionSelector (
   FunctionSelector,
   functionSelector,
@@ -63,11 +64,14 @@ handleFunctionSelectorEvent evt fsel =
           liftIO (callback fsel f)
           return fsel
     _ -> do
+      let edContents0 = FL.editorContents (selector fsel)
       fl' <- FL.handleFilterListEvent evt (selector fsel)
-      fl'' <- case SW.matcher (ZG.toList (FL.editorContents fl')) of
-                Nothing -> return fl'
-                Just matcher -> return (FL.updateList (V.filter (matchesFunction matcher)) fl')
-      return fsel { selector = fl'' }
+      if | edContents0 == FL.editorContents fl' -> return fsel { selector = fl' }
+         | otherwise -> do
+             fl'' <- case SW.matcher (ZG.toList (FL.editorContents fl')) of
+                       Nothing -> return fl'
+                       Just matcher -> return (FL.updateList (V.filter (matchesFunction matcher)) fl')
+             return fsel { selector = fl'' }
 
 renderFunctionSelector :: (C.Architecture arch s) => FunctionSelector arch s -> B.Widget Names
 renderFunctionSelector fsel =
