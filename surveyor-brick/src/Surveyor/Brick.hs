@@ -149,12 +149,12 @@ drawUIMode binFileName archState s uim =
     C.BlockViewer archNonce repr
       | Just Refl <- testEquality archNonce (s ^. C.lNonce)
       , Just bview <- archState ^. BH.blockViewerG repr ->
-          drawAppShell s (BV.renderBlockViewer binfo (archState ^. BH.contextG) bview)
+          drawAppShell s (BV.renderBlockViewer binfo (archState ^. C.contextG) bview)
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing block viewer for IR: " ++ show repr)))
     C.FunctionViewer ->
-      drawAppShell s (FV.renderFunctionViewer binfo (archState ^. BH.contextG) (archState ^. BH.functionViewerG ))
+      drawAppShell s (FV.renderFunctionViewer binfo (archState ^. C.contextG) (archState ^. BH.functionViewerG ))
     C.SemanticsViewer ->
-      drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. BH.contextG) ISV.instructionSemanticsViewer)
+      drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. C.contextG) ISV.instructionSemanticsViewer)
   where
     binfo = C.sAnalysisResult archState
 

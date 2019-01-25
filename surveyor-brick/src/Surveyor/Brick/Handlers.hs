@@ -20,7 +20,6 @@ module Surveyor.Brick.Handlers (
   -- * Lenses ('L.Getter's only)
   blockSelectorG,
   blockViewerG,
-  contextG,
   functionSelectorG,
   functionViewerG,
   minibufferG
@@ -117,9 +116,9 @@ handleVtyEvent s0@(C.State s) evt
       | otherwise -> B.continue s0
     C.SomeUIMode C.FunctionViewer
       | Just fview <- s ^? C.lArchState . _Just . functionViewerL
-      , Just cstk <- s ^? C.lArchState . _Just . contextL -> do
+      , Just cstk <- s ^? C.lArchState . _Just . C.contextL -> do
           cstk' <- FV.handleFunctionViewerEvent evt fview cstk
-          let s' = s & C.lArchState . _Just . contextL .~ cstk'
+          let s' = s & C.lArchState . _Just . C.contextL .~ cstk'
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
@@ -210,61 +209,61 @@ handleCustomEvent s0 evt =
     C.SelectNextInstruction archNonce ->
       withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. contextG
+           , cstk <- archState ^. C.contextG
            , Just Refl <- testEquality archNonce vnonce
            , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectNextInstruction repr cstk
+                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectNextInstruction repr cstk
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.SelectPreviousInstruction archNonce ->
       withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. contextG
+           , cstk <- archState ^. C.contextG
            , Just Refl <- testEquality archNonce vnonce
            , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectPreviousInstruction repr cstk
+                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectPreviousInstruction repr cstk
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.SelectNextOperand archNonce ->
       withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. contextG
+           , cstk <- archState ^. C.contextG
            , Just Refl <- testEquality archNonce vnonce
            , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectNextOperand repr cstk
+                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectNextOperand repr cstk
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.SelectPreviousOperand archNonce ->
       withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. contextG
+           , cstk <- archState ^. C.contextG
            , Just Refl <- testEquality archNonce vnonce
            , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.selectPreviousOperand repr cstk
+                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectPreviousOperand repr cstk
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
     C.ResetInstructionSelection archNonce ->
       withBlockViewer s0 $ \vnonce repr ->
         if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. contextG
+           , cstk <- archState ^. C.contextG
            , Just Refl <- testEquality archNonce vnonce
            , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. blockViewerG repr of
                Nothing -> error "Inconsistent block viewers"
                Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . contextL .~ C.resetBlockSelection cstk
+                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.resetBlockSelection cstk
                  B.continue $! C.State s1
            | otherwise -> B.continue $! C.State s0
 
@@ -322,8 +321,8 @@ handleCustomEvent s0 evt =
     C.PushContext archNonce b
       | Just archState <- s0 ^. C.lArchState
       , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          ctx <- liftIO $ C.makeContext (archState ^. irCacheL) (archState ^. C.lAnalysisResult) b
-          let s1 = s0 & C.lArchState . _Just . contextL %~ C.pushContext ctx
+          ctx <- liftIO $ C.makeContext (archState ^. C.irCacheL) (archState ^. C.lAnalysisResult) b
+          let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.pushContext ctx
           liftIO $ C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Selecting block: " +| C.blockAddress b ||+ "")))
           liftIO $ C.logDiagnostic s0 C.LogDebug (Fmt.fmt ("from function " +| C.blockFunction b ||+ ""))
           B.continue (C.State s1)
@@ -337,10 +336,10 @@ handleCustomEvent s0 evt =
               liftIO $ C.logDiagnostic s0 C.LogDebug "PushContext: Nonce mismatch"
         B.continue (C.State s0)
     C.ContextBack -> do
-      let s1 = s0 & C.lArchState . _Just . contextL %~ C.contextBack
+      let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.contextBack
       B.continue $! C.State s1
     C.ContextForward -> do
-      let s1 = s0 & C.lArchState . _Just . contextL %~ C.contextForward
+      let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.contextForward
       B.continue $! C.State s1
 
     C.LogDiagnostic mLogLevel t ->
@@ -416,7 +415,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
            case C.functions ares of
              [] -> return ()
              defFunc : _ -> do
-               let pushContext newVal oldState = oldState & C.lArchState . _Just . contextL %~ C.pushContext newVal
+               let pushContext newVal oldState = oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newVal
                C.asynchronously (C.archNonce ares) (C.sEmitEvent s0) pushContext $ do
                  case C.functionBlocks ares defFunc of
                    b0 : _ -> C.makeContext tcache ares b0
@@ -451,11 +450,11 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                                    , sBlockViewers = MapF.fromList blockViewers
                                                    , sFunctionViewer = FV.functionViewer funcViewerCallback FunctionCFGViewer
                                                    , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                                   , sContext = C.emptyContextStack
-                                                   , sIRCache = tcache
                                                    }
                         return C.ArchState { C.sAnalysisResult = ares
                                            , C.sUIState = uiState
+                                           , C.sContext = C.emptyContextStack
+                                           , C.sIRCache = tcache
                                            }
              }
   where
@@ -507,20 +506,6 @@ data BrickUIState arch s =
                , sBlockSelector :: !(BS.BlockSelector arch s)
                , sBlockViewers :: !(MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
                , sFunctionViewer :: !(FV.FunctionViewer arch s)
-               , sContext :: !(C.ContextStack arch s)
-               -- ^ A stack of the contexts that have been focused by the user.
-               --
-               -- For now, we are just looking at the most recent context (i.e.,
-               -- each viewer will consult the most recent context to draw).
-               -- Later, there will be context-manipulation commands to allow
-               -- the user to explicitly manage the stack by popping things.
-               --
-               -- FIXME: Move this to the core state.
-               , sIRCache :: C.TranslationCache arch s
-               -- ^ A cache of blocks translated from the base architecture to
-               -- alternative architectures.  We need a cache, as the
-               -- translation can be expensive (and we don't want to have to
-               -- re-do it for each block we need to access)
                }
   deriving (Generic)
 
@@ -575,11 +560,3 @@ functionViewerL = C.lUIState . GL.field @"sFunctionViewer"
 functionViewerG :: L.Getter (C.ArchState BrickUIState arch s) (FV.FunctionViewer arch s)
 functionViewerG = L.to (^. functionViewerL)
 
-contextL :: L.Lens' (C.ArchState BrickUIState arch s) (C.ContextStack arch s)
-contextL = C.lUIState . GL.field @"sContext"
-
-contextG :: L.Getter (C.ArchState BrickUIState arch s) (C.ContextStack arch s)
-contextG = L.to (^. contextL)
-
-irCacheL :: L.Lens' (C.ArchState BrickUIState arch s) (C.TranslationCache arch s)
-irCacheL = C.lUIState . GL.field @"sIRCache"

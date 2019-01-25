@@ -26,7 +26,10 @@ module Surveyor.Core.State (
   lNonce,
   lAnalysisResult,
   lKeymap,
-  lUIState
+  lUIState,
+  contextL,
+  contextG,
+  irCacheL
   ) where
 
 import           GHC.Generics ( Generic )
@@ -38,6 +41,7 @@ import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
 import qualified Surveyor.Core.Chan as C
+import qualified Surveyor.Core.Context as CC
 import           Surveyor.Core.Keymap ( Keymap )
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Architecture as A
@@ -45,6 +49,7 @@ import           Surveyor.Core.Events ( Events(LogDiagnostic), LogLevel )
 import           Surveyor.Core.Loader ( AsyncLoader )
 import           Surveyor.Core.Mode
 import qualified Surveyor.Core.EchoArea as EA
+import qualified Surveyor.Core.TranslationCache as TC
 
 -- | This is a wrapper around the state type suitable for the UI core.  It hides
 -- the architecture so that the architecture can change during run-time (i.e.,
@@ -154,7 +159,20 @@ data ArchState u arch s =
             -- ^ Information returned by the binary analysis
             --
             -- We keep it around so that it doesn't have to re-index the commands
+            , sContext :: !(CC.ContextStack arch s)
+            -- ^ A stack of the contexts that have been focused by the user.
+            --
+            -- For now, we are just looking at the most recent context (i.e.,
+            -- each viewer will consult the most recent context to draw).
+            -- Later, there will be context-manipulation commands to allow
+            -- the user to explicitly manage the stack by popping things.
+            , sIRCache :: !(TC.TranslationCache arch s)
+            -- ^ A cache of blocks translated from the base architecture to
+            -- alternative architectures.  We need a cache, as the
+            -- translation can be expensive (and we don't want to have to
+            -- re-do it for each block we need to access)
             , sUIState :: !(u arch s)
+            -- ^ The state required for the UI extension
             }
   deriving (Generic)
 
@@ -163,6 +181,15 @@ lUIState = GL.field @"sUIState"
 
 lAnalysisResult :: L.Lens' (ArchState u arch s) (A.AnalysisResult arch s)
 lAnalysisResult = GL.field @"sAnalysisResult"
+
+contextL :: L.Lens' (ArchState u arch s) (CC.ContextStack arch s)
+contextL = GL.field @"sContext"
+
+contextG :: L.Getter (ArchState u arch s) (CC.ContextStack arch s)
+contextG = L.to (L.^. contextL)
+
+irCacheL :: L.Lens' (ArchState u arch s) (TC.TranslationCache arch s)
+irCacheL = GL.field @"sIRCache"
 
 data AppState = Loading
               | Ready
