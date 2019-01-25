@@ -80,14 +80,13 @@ handleVtyEvent s0@(C.State s) evt
       -- commands that take no arguments.  Later, once we develop a notion of
       -- "current context", we can use that to call commands that take an
       -- argument.
-      liftIO (C.cmdFunc cmd (C.sEventChannel s) (C.SomeNonce (s ^. C.lNonce)) PL.Nil)
+      liftIO (C.cmdFunc cmd (C.sEventChannel s) (C.SomeState s) PL.Nil)
       B.continue (C.State s)
   | otherwise =
   case C.sUIMode s of
     C.SomeMiniBuffer (C.MiniBuffer oldMode)
       | mb <- s ^. C.lUIExtension . minibufferL -> do
-          let sn = C.SomeNonce (s ^. C.lNonce)
-          mbs <- MB.handleMinibufferEvent evt (C.sEventChannel s) sn mb
+          mbs <- MB.handleMinibufferEvent evt (C.sEventChannel s) (C.SomeState s) mb
           case mbs of
             MB.Canceled mb' -> do
               let s' = s & C.lUIMode .~ C.SomeUIMode oldMode

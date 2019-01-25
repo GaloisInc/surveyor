@@ -47,9 +47,11 @@ module Surveyor.Core (
   CC.CommandLike(..),
   AR.Argument(..),
   AR.SomeAddress(..),
+  AR.SomeState(..),
   -- ** Commands
   module Surveyor.Core.Commands,
   -- ** Types and type representatives for the completion system
+  AR.HasNonce(..),
   AR.SomeNonce(..),
   AR.Type(..),
   AR.TypeRepr(..),

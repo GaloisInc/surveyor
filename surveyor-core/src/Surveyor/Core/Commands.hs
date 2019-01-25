@@ -4,6 +4,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
 module Surveyor.Core.Commands (
   exitC,
   showSummaryC,
@@ -38,11 +39,11 @@ import           Surveyor.Core.Events ( Events(..) )
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
 type Callback s st tps = C.Chan (Events s st)
-                      -> AR.SomeNonce s
+                      -> AR.SomeState st s
                       -> PL.List (C.ArgumentType (AR.SurveyorCommand s st)) tps
                       -> IO ()
 
-allCommands :: [C.SomeCommand (AR.SurveyorCommand s st)]
+allCommands :: (AR.HasNonce st) => [C.SomeCommand (AR.SurveyorCommand s st)]
 allCommands =
   [ C.SomeCommand showSummaryC
   , C.SomeCommand exitC
@@ -88,16 +89,16 @@ showDiagnosticsC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan ShowDiagnostics
 
-listFunctionsC :: forall s st . Command s st '[]
+listFunctionsC :: forall s st . (AR.HasNonce st) => Command s st '[]
 listFunctionsC =
   C.Command "list-functions" doc PL.Nil PL.Nil callback
   where
     doc = "List all of the discovered functions"
     callback :: Callback s st '[]
-    callback = \customEventChan (AR.SomeNonce nonce) PL.Nil ->
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce nonce) PL.Nil ->
       C.writeChan customEventChan (FindFunctionsContaining nonce Nothing)
 
-findBlockC :: forall s st . Command s st '[AR.AddressType]
+findBlockC :: forall s st . (AR.HasNonce st) => Command s st '[AR.AddressType]
 findBlockC =
   C.Command "find-block" doc names rep callback
   where
@@ -105,7 +106,7 @@ findBlockC =
     names = C.Const "address" PL.:< PL.Nil
     rep = AR.AddressTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.AddressType]
-    callback = \customEventChan (AR.SomeNonce _nonce) (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
+    callback = \customEventChan _ (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
       C.writeChan customEventChan (FindBlockContaining anonce addr)
 
 describeCommandC :: forall s st . Command s st '[AR.CommandType]
@@ -138,49 +139,49 @@ minibufferC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan OpenMinibuffer
 
-selectNextInstructionC :: forall s st . Command s st '[]
+selectNextInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextInstructionC =
   C.Command "select-next-instruction" doc PL.Nil PL.Nil callback
   where
     doc = "Select the next instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       C.writeChan customEventChan (SelectNextInstruction archNonce)
 
-selectPreviousInstructionC :: forall s st . Command s st '[]
+selectPreviousInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousInstructionC =
   C.Command "select-previous-instruction" doc PL.Nil PL.Nil callback
   where
     doc = "Select the previous instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       C.writeChan customEventChan (SelectPreviousInstruction archNonce)
 
-selectNextOperandC :: forall s st . Command s st '[]
+selectNextOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextOperandC =
   C.Command "select-next-operand" doc PL.Nil PL.Nil callback
   where
     doc = "Select the next operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       C.writeChan customEventChan (SelectNextOperand archNonce)
 
-selectPreviousOperandC :: forall s st . Command s st '[]
+selectPreviousOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousOperandC =
   C.Command "select-previous-operand" doc PL.Nil PL.Nil callback
   where
     doc = "Select the previous operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       C.writeChan customEventChan (SelectPreviousOperand archNonce)
 
-resetInstructionSelectionC :: forall s st . Command s st '[]
+resetInstructionSelectionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 resetInstructionSelectionC =
   C.Command "reset-instruction-selection" doc PL.Nil PL.Nil callback
   where
     doc = "Clear the selection in the current block viewer"
     callback :: Callback s st '[]
-    callback = \customEventChan (AR.SomeNonce archNonce) PL.Nil ->
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       C.writeChan customEventChan (ResetInstructionSelection archNonce)
 
 contextBackC :: forall s st . Command s st '[]

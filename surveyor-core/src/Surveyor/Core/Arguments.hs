@@ -20,6 +20,8 @@ module Surveyor.Core.Arguments (
   FilePathType,
   showRepr,
   parseArgument,
+  HasNonce(..),
+  SomeState(..),
   SomeNonce(..),
   SurveyorCommand
   ) where
@@ -39,9 +41,15 @@ import qualified Surveyor.Core.Command as C
 
 data SurveyorCommand (s :: *) (st :: k -> * -> *)
 
+class HasNonce st where
+  getNonce :: SomeState st s -> SomeNonce s
+
+data SomeState st s where
+  SomeState :: st arch s -> SomeState st s
+
 instance C.CommandLike (SurveyorCommand s st) where
   type EventType (SurveyorCommand s st) = E.Events s st
-  type StateType (SurveyorCommand s st) = SomeNonce s
+  type StateType (SurveyorCommand s st) = SomeState st s
   type ArgumentType (SurveyorCommand s st) = Argument s
   type ArgumentRepr (SurveyorCommand s st) = TypeRepr
   type ArgumentKind (SurveyorCommand s st) = Type

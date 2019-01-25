@@ -57,6 +57,9 @@ import qualified Surveyor.Core.TranslationCache as TC
 data State e u s where
   State :: (A.Architecture arch s) => !(S e u arch s) -> State e u s
 
+instance AR.HasNonce (S e u) where
+  getNonce (AR.SomeState s) = AR.SomeNonce (sArchNonce s)
+
 -- | This is the core application state
 --
 -- * @e@ is the UI extension type not parameterized by the architecture.  This
@@ -94,9 +97,8 @@ data S e u (arch :: *) s =
     , sKeymap :: !(Keymap (AR.SurveyorCommand s (S e u)) (SomeUIMode s))
     -- ^ Keybindings mapped to commands
     , sUIExtension :: e s
-    -- ^ An extension field for UI frontends for containing data that is
-    -- architecture-independent.  This is mostly useful for tracking the state
-    -- of UI elements that have to exist even when no binary is loaded.
+    -- ^ An extension field for UI frontends for containing data that must exist
+    -- even when there is no active architecture (i.e., when @arch ~ Void@).
     , sArchState :: Maybe (ArchState u arch s)
     -- ^ Architecture-specific state, including UI extensions (via the @u@
     -- parameter)
