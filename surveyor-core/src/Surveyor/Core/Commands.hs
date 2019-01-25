@@ -67,7 +67,7 @@ allCommands =
 
 exitC :: forall s st . Command s st '[]
 exitC =
-  C.Command "exit" doc PL.Nil PL.Nil callback
+  C.Command "exit" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Exit the application"
     callback :: Callback s st '[]
@@ -75,7 +75,7 @@ exitC =
 
 showSummaryC :: forall s st . Command s st '[]
 showSummaryC =
-  C.Command "summary" doc PL.Nil PL.Nil callback
+  C.Command "summary" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show a summary of the information discovered about the binary"
     callback :: Callback s st '[]
@@ -83,7 +83,7 @@ showSummaryC =
 
 showDiagnosticsC :: forall s st . Command s st '[]
 showDiagnosticsC =
-  C.Command "log" doc PL.Nil PL.Nil callback
+  C.Command "log" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show a log of the diagnostics produced by the analysis and UI"
     callback :: Callback s st '[]
@@ -91,7 +91,7 @@ showDiagnosticsC =
 
 listFunctionsC :: forall s st . (AR.HasNonce st) => Command s st '[]
 listFunctionsC =
-  C.Command "list-functions" doc PL.Nil PL.Nil callback
+  C.Command "list-functions" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "List all of the discovered functions"
     callback :: Callback s st '[]
@@ -100,7 +100,7 @@ listFunctionsC =
 
 findBlockC :: forall s st . (AR.HasNonce st) => Command s st '[AR.AddressType]
 findBlockC =
-  C.Command "find-block" doc names rep callback
+  C.Command "find-block" doc names rep callback (const True)
   where
     doc = "Find the block(s) containing the given address and list them"
     names = C.Const "address" PL.:< PL.Nil
@@ -111,7 +111,7 @@ findBlockC =
 
 describeCommandC :: forall s st . Command s st '[AR.CommandType]
 describeCommandC =
-  C.Command "describe-command" doc names rep callback
+  C.Command "describe-command" doc names rep callback (const True)
   where
     doc = "Display the docstring of the named command"
     names = C.Const "command-name" PL.:< PL.Nil
@@ -122,7 +122,7 @@ describeCommandC =
 
 describeKeysC :: forall s st . Command s st '[]
 describeKeysC =
-  C.Command "describe-keys" doc PL.Nil PL.Nil callback
+  C.Command "describe-keys" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Describe the keybindings active in the current mode"
     callback :: Callback s st '[]
@@ -133,7 +133,7 @@ describeKeysC =
 -- it from the minibuffer
 minibufferC :: forall s st . Command s st '[]
 minibufferC =
-  C.Command "show-minibuffer" doc PL.Nil PL.Nil callback
+  C.Command "show-minibuffer" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Open the minibuffer"
     callback :: Callback s st '[]
@@ -141,7 +141,7 @@ minibufferC =
 
 selectNextInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextInstructionC =
-  C.Command "select-next-instruction" doc PL.Nil PL.Nil callback
+  C.Command "select-next-instruction" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Select the next instruction in the current block viewer"
     callback :: Callback s st '[]
@@ -150,7 +150,7 @@ selectNextInstructionC =
 
 selectPreviousInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousInstructionC =
-  C.Command "select-previous-instruction" doc PL.Nil PL.Nil callback
+  C.Command "select-previous-instruction" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Select the previous instruction in the current block viewer"
     callback :: Callback s st '[]
@@ -159,7 +159,7 @@ selectPreviousInstructionC =
 
 selectNextOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextOperandC =
-  C.Command "select-next-operand" doc PL.Nil PL.Nil callback
+  C.Command "select-next-operand" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Select the next operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
@@ -168,7 +168,7 @@ selectNextOperandC =
 
 selectPreviousOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousOperandC =
-  C.Command "select-previous-operand" doc PL.Nil PL.Nil callback
+  C.Command "select-previous-operand" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Select the previous operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
@@ -177,7 +177,7 @@ selectPreviousOperandC =
 
 resetInstructionSelectionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 resetInstructionSelectionC =
-  C.Command "reset-instruction-selection" doc PL.Nil PL.Nil callback
+  C.Command "reset-instruction-selection" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Clear the selection in the current block viewer"
     callback :: Callback s st '[]
@@ -186,7 +186,7 @@ resetInstructionSelectionC =
 
 contextBackC :: forall s st . Command s st '[]
 contextBackC =
-  C.Command "context-back" doc PL.Nil PL.Nil callback
+  C.Command "context-back" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Go backward (down) in the context stack"
     callback :: Callback s st '[]
@@ -195,7 +195,7 @@ contextBackC =
 
 contextForwardC :: forall s st . Command s st '[]
 contextForwardC =
-  C.Command "context-forward" doc PL.Nil PL.Nil callback
+  C.Command "context-forward" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Go forward (up) in the context stack"
     callback :: Callback s st '[]
@@ -204,7 +204,7 @@ contextForwardC =
 
 loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =
-  C.Command "load-file" doc names rep callback
+  C.Command "load-file" doc names rep callback (const True)
   where
     doc = "Load a file, attempting to determine its type automatically"
     names = C.Const "file-name" PL.:< PL.Nil
@@ -215,7 +215,7 @@ loadFileC =
 
 loadELFC :: forall s st . Command s st '[AR.FilePathType]
 loadELFC =
-  C.Command "load-elf" doc names rep callback
+  C.Command "load-elf" doc names rep callback (const True)
   where
     doc = "Load an ELF file"
     names = C.Const "file-name" PL.:< PL.Nil
@@ -226,7 +226,7 @@ loadELFC =
 
 loadLLVMC :: forall s st . Command s st '[AR.FilePathType]
 loadLLVMC =
-  C.Command "load-llvm" doc names rep callback
+  C.Command "load-llvm" doc names rep callback (const True)
   where
     doc = "Load an LLVM bitcode file"
     names = C.Const "file-name" PL.:< PL.Nil
@@ -237,7 +237,7 @@ loadLLVMC =
 
 loadJARC :: forall s st . Command s st '[AR.FilePathType]
 loadJARC =
-  C.Command "load-jar" doc names rep callback
+  C.Command "load-jar" doc names rep callback (const True)
   where
     doc = "Load a JAR file"
     names = C.Const "file-name" PL.:< PL.Nil

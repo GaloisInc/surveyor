@@ -182,7 +182,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
           -- the command immediately
           case FL.selectedItem (commandList mb) of
             Nothing -> return (Completed mb)
-            Just (C.SomeCommand (C.Command _ _ argNames argTypes callback)) ->
+            Just (C.SomeCommand (C.Command _ _ argNames argTypes callback _)) ->
               case (argNames, argTypes) of
                 (PL.Nil, PL.Nil) -> do
                   liftIO (callback customEventChan s PL.Nil)
@@ -320,7 +320,7 @@ renderCommandCompletionItem :: forall b n
                             -> Bool
                             -> C.SomeCommand b
                             -> B.Widget n
-renderCommandCompletionItem showRep focAttr isFocused (C.SomeCommand (C.Command name _ argNames argTypes _)) =
+renderCommandCompletionItem showRep focAttr isFocused (C.SomeCommand (C.Command name _ argNames argTypes _ _)) =
   let xfrm = if isFocused then B.withAttr focAttr else id
   in xfrm (B.str (printf "%s (%s)" name sig))
   where

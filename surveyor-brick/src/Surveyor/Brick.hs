@@ -105,7 +105,8 @@ drawKeyBindings s = B.hBox (mapMaybe toKeyHint keys)
   where
     keys = C.modeKeybindings (s ^. C.lKeymap) (s ^. C.lUIMode)
     toKeyHint (k, C.SomeCommand cmd)
-      | isPlainKey k = Just (B.hBox [B.str (show (PP.pretty k) ++ ": "), B.txt (C.cmdName cmd), B.str "  "])
+      | isPlainKey k && C.cmdApplicable cmd (C.SomeState s) =
+        Just (B.hBox [B.str (show (PP.pretty k) ++ ": "), B.txt (C.cmdName cmd), B.str "  "])
       | otherwise = Nothing
 
 isPlainKey :: C.Key -> Bool

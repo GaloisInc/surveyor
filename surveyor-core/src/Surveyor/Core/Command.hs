@@ -37,6 +37,9 @@ data Command (b :: Type) (tps :: [ArgumentKind b]) =
           -- ^ Argument types
           , cmdFunc :: C.Chan (EventType b) -> StateType b -> PL.List (ArgumentType b) tps -> IO ()
           -- ^ A function to call on the argument list
+          , cmdApplicable :: StateType b -> Bool
+          -- ^ A predicate to test if the command can be run given the current
+          -- context (@const True@ is a reasonable default value)
           }
 
 class CommandLike b where

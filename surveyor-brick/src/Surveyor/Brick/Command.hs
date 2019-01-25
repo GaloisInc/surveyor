@@ -32,7 +32,7 @@ extraCommands = [ C.SomeCommand showMacawBlockC
 
 showMacawBlockC :: forall s st . (C.HasNonce st) => Command s st '[]
 showMacawBlockC =
-  C.Command "show-macaw-block" doc PL.Nil PL.Nil callback
+  C.Command "show-macaw-block" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show the macaw IR of the currently-selected block"
     callback :: Callback s st '[]
@@ -42,7 +42,7 @@ showMacawBlockC =
 
 showCrucibleBlockC :: forall s st . (C.HasNonce st) => Command s st '[]
 showCrucibleBlockC =
-  C.Command "show-crucible-block" doc PL.Nil PL.Nil callback
+  C.Command "show-crucible-block" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show the crucible IR of the currently-selected block"
     callback :: Callback s st '[]
@@ -52,7 +52,7 @@ showCrucibleBlockC =
 
 showBaseBlockC :: forall s st . (C.HasNonce st) => Command s st '[]
 showBaseBlockC =
-  C.Command "show-base-block" doc PL.Nil PL.Nil callback
+  C.Command "show-base-block" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show the base representation of the currently-selected block"
     callback :: Callback s st '[]
@@ -61,7 +61,7 @@ showBaseBlockC =
 
 showInstructionSemanticsC :: forall s st . (C.HasNonce st) => Command s st '[]
 showInstructionSemanticsC =
-  C.Command "show-instruction-semantics" doc PL.Nil PL.Nil callback
+  C.Command "show-instruction-semantics" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show the semantics for the currently-selected base IR instruction"
     callback :: Callback s st '[]
