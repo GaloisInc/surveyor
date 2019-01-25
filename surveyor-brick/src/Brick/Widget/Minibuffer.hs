@@ -41,6 +41,7 @@ import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
 
 data MinibufferState b where
+  -- | In the process of collecting arguments
   CollectingArguments :: forall b (tps :: [C.ArgumentKind b]) (tps' :: [C.ArgumentKind b]) (tps0 :: [C.ArgumentKind b])
                        . PL.List (C.Const T.Text) tps
                       -> PL.List (C.ArgumentRepr b) tps
@@ -49,9 +50,8 @@ data MinibufferState b where
                       -> PL.List (C.ArgumentRepr b) tps0
                       -> (C.Chan (C.EventType b) -> C.StateType b -> PL.List (C.ArgumentType b) tps0 -> IO ())
                       -> MinibufferState b
-  -- ^ In the process of collecting arguments
+  -- | The input editor has focus
   Editing :: MinibufferState b
-  -- ^ The input editor has focus
 
 -- | The abstract state of a minibuffer
 --
