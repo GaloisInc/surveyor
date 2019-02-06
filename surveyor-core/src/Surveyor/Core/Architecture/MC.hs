@@ -521,7 +521,7 @@ instance IR PPC.PPC32 s where
       DPPC.Instruction opc _ -> PPC32Opcode opc
   operands (PPC32Instruction i) =
     case R.toGenericInstruction @PPC.PPC32 i of
-      DPPC.Instruction _ ops -> FC.toListFC PPC32Operand ops
+      DPPC.Instruction _ ops -> fromList (FC.toListFC PPC32Operand ops)
   boundValue _ = Nothing
   prettyOperand (PPC32Address addr) (PPC32Operand op) =
     ppcPrettyOperand addr op
@@ -634,6 +634,9 @@ instance NFData (Address PPC.PPC32 s) where
 instance NFData (Instruction PPC.PPC32 s) where
   rnf (PPC32Instruction i) = i `seq` ()
 
+instance NFData (Operand PPC.PPC32 s) where
+  rnf (PPC32Operand _) = ()
+
 instance IR PPC.PPC64 s where
   data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction ())
   data Operand PPC.PPC64 s = forall x . PPC64Operand !(DPPC.Operand x)
@@ -646,7 +649,7 @@ instance IR PPC.PPC64 s where
       DPPC.Instruction opc _ -> PPC64Opcode opc
   operands (PPC64Instruction i) =
     case R.toGenericInstruction @PPC.PPC64 i of
-      DPPC.Instruction _ ops -> FC.toListFC PPC64Operand ops
+      DPPC.Instruction _ ops -> fromList (FC.toListFC PPC64Operand ops)
   boundValue _ = Nothing
   prettyOperand (PPC64Address addr) (PPC64Operand op) =
     ppcPrettyOperand addr op
@@ -718,6 +721,9 @@ instance NFData (Address PPC.PPC64 s) where
 instance NFData (Instruction PPC.PPC64 s) where
   rnf (PPC64Instruction i) = i `seq` ()
 
+instance NFData (Operand PPC.PPC64 s) where
+  rnf (PPC64Operand _) = ()
+
 instance IR X86.X86_64 s where
   data Instruction X86.X86_64 s = X86Instruction (X86.Instruction ())
   data Operand X86.X86_64 s = X86Operand FD.Value FD.OperandType
@@ -725,7 +731,7 @@ instance IR X86.X86_64 s where
   data Address X86.X86_64 s = X86Address (MM.MemAddr 64)
   prettyAddress (X86Address addr) = mcPrettyAddress addr
   opcode (X86Instruction i) = X86Opcode (X86.instrOpcode i)
-  operands (X86Instruction i) = map (uncurry X86Operand) (X86.instrOperands i)
+  operands (X86Instruction i) = fromList (map (uncurry X86Operand) (X86.instrOperands i))
   boundValue _ = Nothing
   prettyOpcode (X86Opcode s) = T.pack s
   prettyOperand (X86Address addr) (X86Operand v _) =
@@ -829,6 +835,9 @@ instance NFData (Address X86.X86_64 s) where
 
 instance NFData (Instruction X86.X86_64 s) where
   rnf (X86Instruction i) = i `seq` ()
+
+instance NFData (Operand X86.X86_64 s) where
+  rnf (X86Operand _ _) = ()
 
 -- This whole bit is unfortunate - we can probably export ppValue from flexdis
 ppShowReg :: Show r => r -> HPJ.Doc

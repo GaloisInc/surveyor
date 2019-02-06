@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -238,7 +239,7 @@ blockStateSelection :: L.Lens' (BlockState arch s ir) (InstructionSelection ir s
 blockStateSelection f bs = fmap (\sel' -> bs { bsSelection = sel' }) (f (bsSelection bs))
 
 data InstructionSelection ir s = NoSelection
-                               | SingleSelection Int (CA.Address ir s) (Maybe Int)
+                               | SingleSelection Int (CA.Address ir s) (Maybe (CA.Zipper (Int, CA.Operand ir s)))
                                -- ^ A single instruction is selected and it may have an operand selected
                                | MultipleSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
                                -- ^ Multiple instructions are selected; operands may
@@ -252,7 +253,7 @@ data InstructionSelection ir s = NoSelection
                                -- the user moves the cursor
   deriving (Generic)
 
-instance (NFData (CA.Address ir s)) => NFData (InstructionSelection ir s)
+instance (NFData (CA.Address ir s), NFData (CA.Operand ir s)) => NFData (InstructionSelection ir s)
 
 selectedIndex :: InstructionSelection ir s -> Maybe Int
 selectedIndex i =
@@ -337,37 +338,48 @@ selectPreviousInstruction = moveInstructionSelection (\_nInsns n -> max 0 (n - 1
 -- | If possible, move the operand selection to the right by one
 selectNextOperand :: (CA.IR ir s) => IR.IRRepr arch ir -> ContextStack arch s -> ContextStack arch s
 selectNextOperand repr cs =
-  cs & currentContext . contextBlockStates . atF repr %~ modifyOperandSelection xfrm (const 0)
-  where
-    xfrm nOperands n = min (nOperands - 1) (n + 1)
+  cs & currentContext . contextBlockStates . atF repr %~ modifyOperandSelection CA.zipperNext
 
 selectPreviousOperand :: (CA.IR ir s) => IR.IRRepr arch ir -> ContextStack arch s -> ContextStack arch s
 selectPreviousOperand repr cs =
-  cs & currentContext . contextBlockStates . atF repr %~ modifyOperandSelection xfrm (subtract 1)
-  where
-    xfrm _nOperands n = max 0 (n - 1)
+  cs & currentContext . contextBlockStates . atF repr %~ modifyOperandSelection CA.zipperPrev
 
 modifyOperandSelection :: (CA.IR ir s)
-                       => (Int -> Int -> Int)
-                       -> (Int -> Int)
+                       => (forall a . CA.Zipper a -> Maybe (CA.Zipper a))
                        -> Maybe (BlockState arch s ir)
                        -> Maybe (BlockState arch s ir)
-modifyOperandSelection xfrm def mbs = do
+modifyOperandSelection modz mbs = do
   bs <- mbs
   selIdx <- selectedIndex (bs ^. blockStateSelection)
   case (bs ^. blockStateList) V.!? selIdx of
     Nothing -> error ("Index out of bounds in modifyOperandSelection: " ++ show selIdx)
-    Just (_, _, insn) -> do
-      let nSelectableOperands = length (filter CA.operandSelectable (CA.operands insn))
-      return (bs & blockStateSelection %~ modifyOperand nSelectableOperands)
+    Just (_, _, insn) -> return (bs & blockStateSelection %~ modifyOperand insn)
   where
-    modifyOperand nOperands i =
+    modifyOperand insn i =
       case i of
         NoSelection -> NoSelection
-        SingleSelection n addr Nothing -> SingleSelection n addr (Just (def nOperands))
-        SingleSelection n addr (Just opIdx) -> SingleSelection n addr (Just (xfrm nOperands opIdx))
+        SingleSelection n addr Nothing ->
+          let mz0 = CA.zipper (CA.indexOperandList (CA.operands insn))
+          in case mz0 of
+            Just z0
+              | CA.operandSelectable (snd (CA.zipperFocused z0)) -> SingleSelection n addr (Just z0)
+              | otherwise -> SingleSelection n addr (applyUntil (CA.operandSelectable . snd) modz z0)
+            Nothing -> SingleSelection n addr Nothing
+        SingleSelection n addr (Just z0) ->
+          SingleSelection n addr (applyUntil (CA.operandSelectable . snd) modz z0)
         MultipleSelection {} -> i
         TransientSelection {} -> i
+
+applyUntil :: (a -> Bool)
+           -> (CA.Zipper a -> Maybe (CA.Zipper a))
+           -> CA.Zipper a
+           -> Maybe (CA.Zipper a)
+applyUntil p op z = fromMaybe (Just z) $ do
+  nz <- op z
+  let elt = CA.zipperFocused nz
+  if | p elt -> return (Just nz)
+     | otherwise -> return (applyUntil p op nz)
+
 
 moveBlockSelection :: (H.PatriciaTree (CA.Block arch s) () -> H.Vertex -> [H.Vertex])
                    -> ContextStack arch s

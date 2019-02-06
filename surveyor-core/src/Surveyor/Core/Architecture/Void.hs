@@ -56,3 +56,6 @@ instance NFData (Address Void s) where
 
 instance NFData (Instruction Void s) where
   rnf (VoidInstruction v) = absurd v
+
+instance NFData (Operand Void s) where
+  rnf (VoidOperand v) = absurd v

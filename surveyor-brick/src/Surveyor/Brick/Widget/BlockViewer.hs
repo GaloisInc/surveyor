@@ -26,8 +26,8 @@ import qualified Brick.Widgets.List as B
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Lens ( (^.), (^?), (&), (.~) )
 import qualified Data.ByteString as BS
+import qualified Data.Foldable as F
 import qualified Data.List as L
-import           Data.Maybe ( isJust )
 import           Data.Parameterized.Classes
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as S
@@ -163,7 +163,7 @@ highlightWidget isFocused w
 renderInstruction :: (C.IR arch s)
                   => C.Address arch s
                   -> C.Instruction arch s
-                  -> Maybe Int
+                  -> Maybe (C.Zipper (Int, C.Operand arch s))
                   -> B.Widget Names
 renderInstruction addr i mSelOperand =
   case C.boundValue i of
@@ -172,11 +172,40 @@ renderInstruction addr i mSelOperand =
   where
     opc = B.txt (C.prettyOpcode (C.opcode i))
     rhs = B.padRight (B.Pad 1) opc : L.intersperse (B.txt ",") operandWidgets
-    tagOperand ctr op
-      | C.operandSelectable op = (ctr + 1, (op, Just ctr))
-      | otherwise = (ctr, (op, Nothing))
-    (_, taggedOperands) = L.mapAccumL tagOperand 0 (C.operands i)
-    operandWidgets = map renderOperand taggedOperands
-    renderOperand (op, mIdx)
-      | isJust mIdx && mSelOperand == mIdx = highlightWidget True (B.txt (C.prettyOperand addr op))
-      | otherwise = B.txt (C.prettyOperand addr op)
+    operandWidgets = renderOperandList addr mSelOperand (C.indexOperandList (C.operands i))
+
+renderOperand :: (C.IR arch s)
+              => C.Address arch s
+              -> Maybe (C.Zipper (Int, C.Operand arch s))
+              -> (Int, C.Operand arch s)
+              -> B.Widget Names
+renderOperand addr mSelOperand (idx, op)
+  | Just z <- mSelOperand, fst (C.zipperFocused z) == idx =
+      highlightWidget True (B.txt (C.prettyOperand addr op))
+  | otherwise = B.txt (C.prettyOperand addr op)
+
+renderOperandList :: (C.IR arch s)
+                  => C.Address arch s
+                  -> Maybe (C.Zipper (Int, C.Operand arch s))
+                  -> C.OperandList (Int, C.Operand arch s)
+                  -> [B.Widget Names]
+renderOperandList addr mSelOperand (C.OperandList ol) =
+  concatMap renderOperandListItem (F.toList ol)
+  where
+    renderOperandListItem oli =
+      case oli of
+        C.Item (idx, e) -> [renderOperand addr mSelOperand (idx, e)]
+        C.Delimited del ol' ->
+          let (open, close) = renderDelimiter del
+          in concat [ [open]
+                    , renderOperandList addr mSelOperand ol'
+                    , [close]
+                    ]
+
+renderDelimiter :: C.Delimiter -> (B.Widget Names, B.Widget Names)
+renderDelimiter d =
+  case d of
+    C.Parens -> (B.txt "(", B.txt ")")
+    C.Brackets -> (B.txt "[", B.txt "]")
+    C.Braces -> (B.txt "{", B.txt "}")
+    C.Angles -> (B.txt "<", B.txt ">")
