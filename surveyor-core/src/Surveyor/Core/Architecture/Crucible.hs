@@ -93,6 +93,7 @@ crucibleForMCBlocks :: forall arch s
                      . ( CrucibleConstraints arch s
                        , CrucibleExtension arch
                        , CrucibleExt arch ~ MS.MacawExt arch
+                       , MC.MemWidth (MC.ArchAddrWidth arch)
                        )
                     => PN.NonceGenerator IO s
                     -> ([(Block arch s, Block (Crucible arch) s)] -> Map.Map (Address (Crucible arch) s) (Set.Set (Address arch s)))
@@ -205,7 +206,6 @@ takeMinAddr _ (Just a1) a2
 type CrucibleConstraints arch s = ( Ord (Address (Crucible arch) s)
                                   , Show (Address (Crucible arch) s)
                                   , Ord (Address arch s)
-                                  , MC.MemWidth (MC.ArchAddrWidth arch)
                                   , C.PrettyExt (CrucibleExt arch)
                                   )
 
