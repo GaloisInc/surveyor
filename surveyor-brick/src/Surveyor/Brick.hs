@@ -196,7 +196,9 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
   s0 <- emptyState mExePath mloader ng chan
   let initialState = C.State s0
-  _finalState <- B.customMain (V.mkVty V.defaultConfig) (Just customEventChan) app initialState
+  let mkVty = V.mkVty V.defaultConfig
+  initialVty <- mkVty
+  _finalState <- B.customMain initialVty mkVty (Just customEventChan) app initialState
   return ()
 
 

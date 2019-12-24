@@ -57,7 +57,9 @@ import qualified Renovate as R
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
 import           Text.Printf ( printf )
 import qualified What4.FunctionName as WF
+import qualified What4.InterpretedFloatingPoint as WIF
 import qualified What4.Symbol as WS
+import qualified What4.Utils.StringLiteral as WSL
 
 import           Surveyor.Core.Architecture.Class
 import           Surveyor.Core.IRRepr ( Crucible )
@@ -261,6 +263,7 @@ instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible ar
       StringLiteral {} -> False
       FloatLit {} -> False
       DoubleLit {} -> False
+      X86_80Lit {} -> False
 
       Reg {} -> True
       GlobalVar {} -> True
@@ -276,6 +279,7 @@ instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible ar
       NatRepr {} -> False
       SymbolRepr {} -> False
       CtxRepr {} -> False
+      StringInfoRepr {} -> False
 
       ExtensionOperand ext -> extensionOperandSelectable (Proxy @arch) ext
 
@@ -287,9 +291,10 @@ data CrucibleOperand arch s where
   NatLit :: Natural -> CrucibleOperand arch s
   IntegerLit :: Integer -> CrucibleOperand arch s
   RationalLit :: Rational -> CrucibleOperand arch s
-  StringLiteral :: T.Text -> CrucibleOperand arch s
+  StringLiteral :: WSL.StringLiteral si -> CrucibleOperand arch s
   FloatLit :: Float -> CrucibleOperand arch s
   DoubleLit :: Double -> CrucibleOperand arch s
+  X86_80Lit :: WIF.X86_80Val -> CrucibleOperand arch s
 
   Reg :: C.Reg ctx tp -> CrucibleOperand arch s
   GlobalVar :: C.GlobalVar tp -> CrucibleOperand arch s
@@ -302,6 +307,7 @@ data CrucibleOperand arch s where
   BaseTypeRepr :: C.BaseTypeRepr btp -> CrucibleOperand arch s
   TypeRepr :: C.TypeRepr tp -> CrucibleOperand arch s
   FloatInfoRepr :: C.FloatInfoRepr fi -> CrucibleOperand arch s
+  StringInfoRepr :: C.StringInfoRepr si -> CrucibleOperand arch s
   NatRepr :: NR.NatRepr n -> CrucibleOperand arch s
   SymbolRepr :: PS.SymbolRepr nm -> CrucibleOperand arch s
   CtxRepr :: C.CtxRepr args -> CrucibleOperand arch s
@@ -322,6 +328,7 @@ data CrucibleOpcode arch s where
   ReadGlobal :: CrucibleOpcode arch s
   WriteGlobal :: CrucibleOpcode arch s
   FreshConstant :: CrucibleOpcode arch s
+  FreshFloat :: CrucibleOpcode arch s
   NewRefCell :: CrucibleOpcode arch s
   NewEmptyRefCell :: CrucibleOpcode arch s
   ReadRefCell :: CrucibleOpcode arch s
@@ -348,6 +355,7 @@ crucibleStmtOpcode s =
     C.ReadGlobal {} -> CrucibleOpcode ReadGlobal
     C.WriteGlobal {} -> CrucibleOpcode WriteGlobal
     C.FreshConstant {} -> CrucibleOpcode FreshConstant
+    C.FreshFloat {} -> CrucibleOpcode FreshFloat
     C.NewRefCell {} -> CrucibleOpcode NewRefCell
     C.NewEmptyRefCell {} -> CrucibleOpcode NewEmptyRefCell
     C.ReadRefCell {} -> CrucibleOpcode ReadRefCell
@@ -378,6 +386,7 @@ cruciblePrettyOperand o =
     StringLiteral s -> T.pack (show s)
     FloatLit f -> T.pack (show f)
     DoubleLit d -> T.pack (show d)
+    X86_80Lit l -> T.pack (show l)
 
     Reg r -> T.pack (show r)
     GlobalVar g -> T.pack (show g)
@@ -390,6 +399,7 @@ cruciblePrettyOperand o =
     BaseTypeRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
     TypeRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
     FloatInfoRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
+    StringInfoRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
     NatRepr rep -> Fmt.fmt ("[NatRepr " +| rep ||+ "]")
     SymbolRepr rep -> Fmt.fmt ("[SymbolRepr " +| rep ||+ "]")
     CtxRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
@@ -405,7 +415,8 @@ cruciblePrettyOpcode o =
     Print -> "print"
     ReadGlobal -> "read-global"
     WriteGlobal -> "write-global"
-    FreshConstant -> "fresh"
+    FreshConstant -> "fresh-constant"
+    FreshFloat -> "fresh-float"
     NewRefCell -> "new-ref"
     NewEmptyRefCell -> "new-empty-ref"
     ReadRefCell -> "read-ref"
@@ -469,6 +480,7 @@ cruciblePrettyOpcode o =
 
         C.FloatLit {} -> "float-lit"
         C.DoubleLit {} -> "double-lit"
+        C.X86_80Lit {} -> "x86_80-lit"
         C.FloatNaN {} -> "float-nan"
         C.FloatPInf {} -> "float-pinf"
         C.FloatNInf {} -> "float-ninf"
@@ -514,8 +526,6 @@ cruciblePrettyOpcode o =
         C.JustValue {} -> "just"
         C.NothingValue {} -> "nothing"
         C.FromJustValue {} -> "from-just"
-
-        C.AddSideCondition {} -> "add-side-condition"
 
         C.RollRecursive {} -> "roll"
         C.UnrollRecursive {} -> "unroll"
@@ -577,6 +587,10 @@ cruciblePrettyOpcode o =
         C.SbvToInteger {} -> "sbv-to-integer"
         C.BvToNat {} -> "bv-to-nat"
         C.BVNonzero {} -> "bv-nonzero"
+        C.BVUMin {} -> "bv-umin"
+        C.BVUMax {} -> "bv-umax"
+        C.BVSMin {} -> "bv-smin"
+        C.BVSMax {} -> "bv-smax"
 
         C.EmptyWordMap {} -> "empty-wordmap"
         C.InsertWordMap {} -> "insert-wordmap"
@@ -594,15 +608,25 @@ cruciblePrettyOpcode o =
         C.LookupStringMapEntry {} -> "lookup-stringmap"
         C.InsertStringMapEntry {} -> "insert-stringmap"
 
-        C.TextLit {} -> "text-lit"
-        C.ShowValue {} -> "show"
-        C.AppendString {} -> "append"
+        C.StringLit {} -> "string-lit"
+        C.StringEmpty {} -> "string-empty"
+        C.StringConcat {} -> "string-concat"
+        C.StringLength {} -> "string-length"
+        C.StringContains {} -> "string-contains"
+        C.StringIsPrefixOf {} -> "string-is-prefix-of"
+        C.StringIsSuffixOf {} -> "string-is-suffix-of"
+        C.StringIndexOf {} -> "string-index-of"
+        C.StringSubstring {} -> "string-substring"
+        C.ShowValue {} -> "show-value"
+        C.ShowFloat {} -> "show-float"
 
         C.SymArrayLookup {} -> "symarray-lookup"
         C.SymArrayUpdate {} -> "symarray-update"
 
         C.IsConcrete {} -> "is-concrete"
         C.ReferenceEq {} -> "reference-eq"
+
+        C.WithAssertion {} -> "with-assertion"
 
 data NonceCache s ctx where
   NonceCache :: forall s ctx (k :: C.CrucibleType -> Type) . (k ~ PN.Nonce s) => Ctx.Assignment k ctx -> NonceCache s ctx
@@ -700,8 +724,17 @@ crucibleStmtOperands cache ng stmt =
       case msym of
         Nothing -> return (nc', Just binder, fromList [CrucibleOperand n2 (BaseTypeRepr tp)])
         Just sym -> return (nc', Just binder, fromList [ CrucibleOperand n2 (BaseTypeRepr tp)
-                                              , CrucibleOperand n3 (StringLiteral (WS.solverSymbolAsText sym))
+                                              , CrucibleOperand n3 (StringLiteral (WSL.UnicodeLiteral (WS.solverSymbolAsText sym)))
                                               ])
+    C.FreshFloat fi msym -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      (nc', binder) <- allocateRegister cache ng Nothing
+      case msym of
+        Nothing -> return (nc', Just binder, fromList [CrucibleOperand n1 (FloatInfoRepr fi)])
+        Just sym -> return (nc', Just binder, fromList [ CrucibleOperand n1 (FloatInfoRepr fi)
+                                                       , CrucibleOperand n2 (StringLiteral (WSL.UnicodeLiteral (WS.solverSymbolAsText sym)))
+                                                       ])
     C.NewRefCell tp r -> do
       n1 <- PN.freshNonce ng
       (nc', binder) <- allocateRegister cache ng Nothing
@@ -825,6 +858,9 @@ crucibleAppOperands cache ng app =
     C.DoubleLit d -> do
       n1 <- PN.freshNonce ng
       return $ fromList [ CrucibleOperand n1 (DoubleLit d) ]
+    C.X86_80Lit l -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (X86_80Lit l) ]
     C.FloatNaN frep -> do
       n1 <- PN.freshNonce ng
       return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
@@ -1007,14 +1043,6 @@ crucibleAppOperands cache ng app =
              , toRegisterOperand cache r2
              ]
 
-    C.AddSideCondition trep r1 s r2 -> do
-      n1 <- PN.freshNonce ng
-      n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BaseTypeRepr trep)
-             , toRegisterOperand cache r1
-             , CrucibleOperand n2 (StringLiteral (T.pack s))
-             , toRegisterOperand cache r2
-             ]
     C.RollRecursive sr cr r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
@@ -1297,6 +1325,30 @@ crucibleAppOperands cache ng app =
       return $ fromList [ CrucibleOperand n1 (NatRepr nr)
              , toRegisterOperand cache r
              ]
+    C.BVUMin nr r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+                        , toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
+    C.BVUMax nr r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+                        , toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
+    C.BVSMin nr r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+                        , toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
+    C.BVSMax nr r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+                        , toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
 
     C.EmptyWordMap nr btr -> do
       n1 <- PN.freshNonce ng
@@ -1380,15 +1432,55 @@ crucibleAppOperands cache ng app =
              , toRegisterOperand cache r3
              ]
 
-    C.TextLit t -> do
+    C.StringLit sl -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (StringLiteral t) ]
+      return $ fromList [ CrucibleOperand n1 (StringLiteral sl) ]
+    C.StringEmpty srep -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (StringInfoRepr srep) ]
+    C.StringConcat srep r1 r2 -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (StringInfoRepr srep)
+                        , toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
+    C.StringLength r1 -> do
+      return $ fromList [ toRegisterOperand cache r1 ]
+    C.StringContains r1 r2 -> do
+      return $ fromList [ toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
+    C.StringIsPrefixOf r1 r2 -> do
+      return $ fromList [ toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
+    C.StringIsSuffixOf r1 r2 -> do
+      return $ fromList [ toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        ]
+    C.StringIndexOf r1 r2 r3 -> do
+      return $ fromList [ toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        , toRegisterOperand cache r3
+                        ]
+    C.StringSubstring srep r1 r2 r3 -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (StringInfoRepr srep)
+                        , toRegisterOperand cache r1
+                        , toRegisterOperand cache r2
+                        , toRegisterOperand cache r3
+                        ]
     C.ShowValue btrep r -> do
       n1 <- PN.freshNonce ng
       return $ fromList [ CrucibleOperand n1 (BaseTypeRepr btrep)
              , toRegisterOperand cache r
              ]
-    C.AppendString r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.ShowFloat frep r1 -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+                        , toRegisterOperand cache r1
+                        ]
+
 
     C.SymArrayLookup btr r bts -> do
       n1 <- PN.freshNonce ng
@@ -1420,6 +1512,11 @@ crucibleAppOperands cache ng app =
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
+
+    C.WithAssertion trep pexpr -> do
+      n1 <- PN.freshNonce ng
+      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+                        ]
 
     C.ExtensionApp exprExt -> fromList <$> extensionExprOperands cache ng exprExt
 

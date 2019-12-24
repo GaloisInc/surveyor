@@ -94,7 +94,10 @@ renderFilterList renderPrompt hasFocus fl =
       then B.emptyWidget
       else B.renderList (renderListItem fl) False (matchingItems fl)
 
-handleFilterListEvent :: (Ord n, Monoid t, ZG.GenericTextZipper t, Eq t)
+handleFilterListEvent :: ( Ord n, Monoid t, Eq t
+                         , ZG.GenericTextZipper t
+                         , B.DecodeUtf8 t
+                         )
                       => V.Event
                       -> FilterList n t e
                       -> B.EventM n (FilterList n t e)

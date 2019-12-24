@@ -40,6 +40,3 @@
 [submodule "deps/macaw-loader"]
 	path = deps/macaw-loader
 	url = git@github.com:GaloisInc/macaw-loader.git
-[submodule "deps/haggle"]
-	path = deps/haggle
-	url = git@github.com:travitch/haggle.git

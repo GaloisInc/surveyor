@@ -66,8 +66,9 @@ ppcConfig :: forall sym w arch s fs st binFmt
 ppcConfig sym binRep customEventChan ng library semantics mkCfg0 mkRes = do
   logCfg <- mkLogCfg customEventChan
   let ?logCfg = logCfg
-  lib <- SF.loadLibrary (Proxy @arch) sym library
-  formulas <- SF.loadFormulas sym lib semantics
+  fenv <- SF.formulaEnv (Proxy @arch) sym
+  lib <- SF.loadLibrary (Proxy @arch) sym fenv library
+  formulas <- SF.loadFormulas sym fenv lib semantics
   nonceA <- NG.freshNonce ng
   let ao = R.AnalyzeOnly (RA.analysis sym RP.isa mkRes ng nonceA (Just formulas))
   let cfg0 = mkCfg0 ao

@@ -112,6 +112,7 @@ prettyMacawExtensionStmt s =
     MS.MacawReadMem {} -> "macaw:read-mem"
     MS.MacawCondReadMem {} -> "macaw:cond-read-mem"
     MS.MacawWriteMem {} -> "macaw:write-mem"
+    MS.MacawCondWriteMem {} -> "macaw:cond-write-mem"
     MS.MacawGlobalPtr {} -> "macaw:global-ptr"
     MS.MacawFreshSymbolic {} -> "macaw:fresh-symbolic"
     MS.MacawLookupFunctionHandle {} -> "macaw:lookup-function-handle"
@@ -133,6 +134,7 @@ prettyMacawExtensionApp e =
     MS.PtrToBits {} -> "macaw:ptr-to-bits"
     MS.BitsToPtr {} -> "macaw:bits-to-ptr"
     MS.MacawNullPtr {} -> "macaw:nullptr"
+    MS.MacawBitcast {} -> "macaw:bitcast"
 
 data MacawOperand arch s where
   AddrRepr :: MM.AddrWidthRepr (MM.ArchAddrWidth arch) -> MacawOperand arch s
@@ -189,6 +191,8 @@ macawExtensionExprOperands cache ng ext =
              , AC.toRegisterOperand cache r2
              , AC.toRegisterOperand cache r3
              ]
+    MS.MacawBitcast r _proof -> do
+      return [ AC.toRegisterOperand cache r ]
 
 macawExtensionStmtOperands :: ( AC.CrucibleExtensionOperand arch ~ MacawOperand arch
                               , MM.MemWidth (MM.ArchAddrWidth arch)
@@ -222,6 +226,15 @@ macawExtensionStmtOperands cache ng ext =
              , AC.toExtensionOperand n2 (MemRepr mrep)
              , AC.toRegisterOperand cache r1
              , AC.toRegisterOperand cache r2
+             ]
+    MS.MacawCondWriteMem arep mrep r1 r2 r3 -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.toExtensionOperand n1 (AddrRepr arep)
+             , AC.toExtensionOperand n2 (MemRepr mrep)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             , AC.toRegisterOperand cache r3
              ]
     MS.MacawGlobalPtr arep addr -> do
       n1 <- NG.freshNonce ng
@@ -873,7 +886,9 @@ ppValue base v =
     FD.DWordImm     (FD.Imm32Concrete imm)  -> ppImm imm
     FD.DWordImm     (FD.Imm32SymbolOffset sym off _signed) ->
       HPJ.text (show sym) <> HPJ.text "+" <> ppImm off
-    FD.QWordImm     imm  -> ppImm imm
+    FD.QWordImm     (FD.UImm64Concrete imm)  -> ppImm imm
+    FD.QWordImm     (FD.UImm64SymbolOffset symIdent off) ->
+      HPJ.text (show symIdent) <> HPJ.text"@" <> ppImm off
     FD.ByteSignedImm i8 -> ppImm i8
     FD.WordSignedImm i16 -> ppImm i16
     FD.DWordSignedImm i32 -> ppImm i32

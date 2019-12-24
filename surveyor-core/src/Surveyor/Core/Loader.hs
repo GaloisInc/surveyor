@@ -38,6 +38,7 @@ import qualified Language.JVM.JarReader as J
 import qualified Renovate as R
 import qualified Renovate.Arch.X86_64 as X86
 import qualified Renovate.Arch.PPC as PPC
+import qualified What4.Expr.Builder as WEB
 
 import qualified Surveyor.Core.Architecture as A
 import           Surveyor.Core.BinaryAnalysisResult
@@ -156,7 +157,8 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 -- appropriate value of w.
 loadElf :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> E.SomeElf E.Elf -> IO ()
 loadElf ng customEventChan someElf = do
-  sym <- SB.newSimpleBackend @_ @(SB.Flags SB.FloatReal) ng
+  -- FIXME: Make the float mode configurable
+  sym <- SB.newSimpleBackend WEB.FloatRealRepr ng
   nonceAx86 <- NG.freshNonce ng
   let x86cfg0 = X86.config (R.AnalyzeOnly (RA.analysis sym X86.isa A.mkX86Result ng nonceAx86 Nothing))
   let x86callback loadedBinary _addr bi = do

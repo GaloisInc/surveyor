@@ -117,11 +117,11 @@ toMacawBlock nonceGen dfi fh (baddr, b) = do
   case M.lookup baddr (dfi ^. MC.parsedBlocks) of
     Nothing -> X.throwIO (NoMacawBlockFor (Proxy @arch) baddr)
     Just pb -> do
-      let stmts = MC.blockStatementList pb
+      -- let stmts = MC.blockStatementList pb
       nc <- IOR.newIORef MapF.empty
       let cache = NonceCache nc
-      insns <- buildInsnList cache 0 (MC.stmtsNonterm stmts) (MC.stmtsTerm stmts)
-      let mb = Block { blockAddress = BlockNumber (MC.stmtsIdent stmts)
+      insns <- buildInsnList cache 0 (MC.pblockStmts pb) (MC.pblockTermStmt pb)
+      let mb = Block { blockAddress = BlockNumber (MC.pblockAddr pb)
                      , blockInstructions = insns
                      , blockFunction = fh
                      }
@@ -211,7 +211,7 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
                                   | forall ids . MacawInstructionStart (MC.ArchSegmentOff arch) (MC.ArchAddrWord arch) (MC.Stmt arch ids) (OperandList (Operand (Macaw arch) s))
                                   | forall ids . MacawTermStmt (MC.ParsedTermStmt arch ids) (OperandList (Operand (Macaw arch) s))
   data Address (Macaw arch) s = MacawAddress (MC.ArchAddrWord arch)
-                              | BlockNumber Word64
+                              | BlockNumber (MC.ArchSegmentOff arch)
                               | InstructionNumber Int
   data Operand (Macaw arch) s = forall tp . MacawOperand (PN.Nonce s tp) (MacawOperand arch s)
   data Opcode (Macaw arch) s = MacawOpcode (MacawOpcode arch s)
@@ -312,6 +312,7 @@ macawStmtOpcode stmt =
         MC.CondReadMem {} -> MacawOpcode CondReadMem
         MC.EvalArchFn fn _tp -> MacawOpcode (EvalArchFn fn)
     MC.WriteMem {} -> MacawOpcode WriteMem
+    MC.CondWriteMem {} -> MacawOpcode CondWriteMem
     MC.InstructionStart {} -> MacawOpcode Comment
 
 macawTermStmtOpcode :: MC.ParsedTermStmt arch ids -> Opcode (Macaw arch) s
@@ -320,9 +321,9 @@ macawTermStmtOpcode stmt =
     MC.ParsedCall _ Nothing -> MacawOpcode TailCall
     MC.ParsedCall _ (Just _) -> MacawOpcode Call
     MC.ParsedJump {} -> MacawOpcode Jump
+    MC.ParsedBranch {} -> MacawOpcode Branch
     MC.ParsedLookupTable {} -> MacawOpcode IndirectJumpTable
     MC.ParsedReturn {} -> MacawOpcode Return
-    MC.ParsedIte {} -> MacawOpcode ITE
     MC.ParsedTranslateError t -> MacawOpcode (TranslateError t)
     MC.ClassifyFailure {} -> MacawOpcode ClassifyFailure
     MC.ParsedArchTermStmt t _regs _next -> MacawOpcode (ArchTermStmt t)
@@ -356,6 +357,16 @@ macawTermStmtOperands cache ng stmt =
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
       return $ fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
+    MC.ParsedBranch regs cond addr1 addr2 -> do
+      n1 <- PN.freshNonce ng
+      n2 <- PN.freshNonce ng
+      n3 <- PN.freshNonce ng
+      cond' <- toValueCached cache ng cond
+      return $ fromList [ MacawOperand n1 (RegState regs)
+                        , cond'
+                        , MacawOperand n2 (SegmentOffset addr1)
+                        , MacawOperand n3 (SegmentOffset addr2)
+                        ]
     MC.ParsedLookupTable regs idx tbl -> do
       n1 <- PN.freshNonce ng
       idx' <- toValueCached cache ng idx
@@ -367,14 +378,6 @@ macawTermStmtOperands cache ng stmt =
     MC.ParsedReturn regs -> do
       n1 <- PN.freshNonce ng
       return $ fromList [MacawOperand n1 (RegState regs)]
-    MC.ParsedIte c tb eb -> do
-      c' <- toValueCached cache ng c
-      n2 <- PN.freshNonce ng
-      n3 <- PN.freshNonce ng
-      return $ fromList [ c'
-             , MacawOperand n2 (BlockId (MC.stmtsIdent tb))
-             , MacawOperand n3 (BlockId (MC.stmtsIdent eb))
-             ]
     MC.ParsedArchTermStmt _ regs Nothing -> do
       n1 <- PN.freshNonce ng
       return $ fromList [MacawOperand n1 (RegState regs)]
@@ -383,7 +386,7 @@ macawTermStmtOperands cache ng stmt =
       n2 <- PN.freshNonce ng
       return $ fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
     MC.ParsedTranslateError {} -> return $ fromList []
-    MC.ClassifyFailure regs -> do
+    MC.ClassifyFailure regs _ -> do
       n1 <- PN.freshNonce ng
       return $ fromList [MacawOperand n1 (RegState regs)]
 
@@ -403,6 +406,16 @@ macawStmtOperands cache ng stmt =
       v' <- toValueCached cache ng v
       return $ fromList [ addr'
                         , MacawOperand n2 (MemRepr memRep)
+                        , v'
+                        ]
+    MC.CondWriteMem cond addr memRep v -> do
+      n1 <- PN.freshNonce ng
+      cond' <- toValueCached cache ng cond
+      addr' <- toValueCached cache ng addr
+      v' <- toValueCached cache ng v
+      return $ fromList [ cond'
+                        , addr'
+                        , MacawOperand n1 (MemRepr memRep)
                         , v'
                         ]
     MC.ArchState addr upd -> do
@@ -605,22 +618,26 @@ macawStmtOperands cache ng stmt =
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
               return $ fromList [MacawOperand n1 (NatRepr tp), v']
+            MC.Bitcast v proof -> do
+              v' <- toValueCached cache ng v
+              return $ fromList [ v' ]
 
 macawPrettyOpcode :: (MacawConstraints arch s) => MacawOpcode arch s -> T.Text
 macawPrettyOpcode opc =
   case opc of
     Comment -> T.pack "#"
-    WriteMem -> T.pack "write_mem"
+    WriteMem -> T.pack "write-mem"
     Undefined -> T.pack "undefined"
-    ReadMem -> T.pack "read_mem"
-    CondReadMem -> T.pack "cond_read_mem"
+    ReadMem -> T.pack "read-mem"
+    CondReadMem -> T.pack "cond-read-mem"
+    CondWriteMem -> T.pack "cond-write-mem"
     ArchState -> T.pack "arch_state"
     Call -> T.pack "call"
     TailCall -> T.pack "tailcall"
     Jump -> T.pack "jump"
+    Branch -> T.pack "branch"
     IndirectJumpTable -> T.pack "indirect-jump"
     ClassifyFailure -> T.pack "classify-failure"
-    ITE -> T.pack "ite"
     Return -> T.pack "return"
     TranslateError t -> T.pack (printf "translate-error %s" t)
     -- FIXME: This isn't very good - we need an arch-specific backend to print
@@ -667,6 +684,7 @@ macawPrettyOpcode opc =
         MC.ReverseBytes {} -> T.pack "reverse_bytes"
         MC.Bsf {} -> T.pack "bsf"
         MC.Bsr {} -> T.pack "bsr"
+        MC.Bitcast {} -> T.pack "bitcast"
 
 
 macawPrettyOperand :: (MacawConstraints arch s) => MacawOperand arch s -> T.Text
@@ -686,7 +704,7 @@ macawPrettyOperand opr =
     JumpTable tbl -> T.pack (show tbl)
     BlockId w -> T.pack (show w)
     StateUpdate m -> prettyStateUpdate m
-    RegState (MC.RegState m) -> prettyStateUpdate m
+    RegState rs -> prettyStateUpdate (MC.regStateMap rs)
     Relocation relo -> T.pack (show relo)
 
 prettyStateUpdate :: (ShowF (MC.ArchReg arch), MC.RegisterInfo (MC.ArchReg arch))
@@ -704,6 +722,7 @@ data MacawOpcode arch s where
   Undefined :: MacawOpcode arch s
   ReadMem :: MacawOpcode arch s
   CondReadMem :: MacawOpcode arch s
+  CondWriteMem :: MacawOpcode arch s
   App :: MC.App (MC.Value arch ids) tp -> MacawOpcode arch s
   EvalArchFn :: MC.ArchFn arch (MC.Value arch ids) tp -> MacawOpcode arch s
   ExecArchStmt :: MC.ArchStmt arch (MC.Value arch ids) -> MacawOpcode arch s
@@ -711,9 +730,9 @@ data MacawOpcode arch s where
   Call :: MacawOpcode arch s
   TailCall :: MacawOpcode arch s
   Jump :: MacawOpcode arch s
+  Branch :: MacawOpcode arch s
   IndirectJumpTable :: MacawOpcode arch s
   Return :: MacawOpcode arch s
-  ITE :: MacawOpcode arch s
   TranslateError :: T.Text -> MacawOpcode arch s
   ClassifyFailure :: MacawOpcode arch s
   ArchTermStmt :: MC.ArchTermStmt arch ids -> MacawOpcode arch s
@@ -734,7 +753,7 @@ data MacawOperand arch s where
   StateUpdate :: !(MapF.MapF (MC.ArchReg arch) (MC.Value arch ids)) -> MacawOperand arch s
   RegState :: !(MC.RegState (MC.ArchReg arch) (MC.Value arch ids)) -> MacawOperand arch s
   JumpTable :: !(V.Vector (MC.ArchSegmentOff arch)) -> MacawOperand arch s
-  Relocation :: !(MC.Relocation (MC.ArchAddrWidth arch)) -> MacawOperand arch s
+  Relocation :: !MC.VersionedSymbol -> MacawOperand arch s
 
 instance NFData (MacawOperand arch s) where
   rnf !_o = ()

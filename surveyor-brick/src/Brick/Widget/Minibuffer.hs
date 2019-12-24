@@ -22,6 +22,7 @@ module Brick.Widget.Minibuffer (
   ) where
 
 import qualified Brick as B
+import qualified Brick.Widgets.Edit as BWE
 import qualified Control.Concurrent.Async as A
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
@@ -166,6 +167,7 @@ handleMinibufferEvent :: forall b n t (r :: C.ArgumentKind b -> Type)
                         , C.CommandLike b
                         , r ~ C.ArgumentRepr b
                         , TestEquality r
+                        , BWE.DecodeUtf8 t
                         )
                       => V.Event
                       -> C.Chan (C.EventType b)
