@@ -138,8 +138,8 @@ import           Surveyor.Core.Commands
 import qualified Surveyor.Core.Context as CCX
 import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.Events as CE
-import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.IRRepr as IR
+import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.Loader as CL
 import qualified Surveyor.Core.Mode as M
 import           Surveyor.Core.State

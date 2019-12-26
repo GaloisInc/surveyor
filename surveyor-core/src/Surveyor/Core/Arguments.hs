@@ -39,13 +39,13 @@ import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Events as E
 import qualified Surveyor.Core.Command as C
 
-data SurveyorCommand (s :: *) (st :: k -> * -> *)
+data SurveyorCommand (s :: *) (st :: * -> * -> *)
 
 class HasNonce st where
   getNonce :: SomeState st s -> SomeNonce s
 
 data SomeState st s where
-  SomeState :: st arch s -> SomeState st s
+  SomeState :: (A.Architecture arch s) => st arch s -> SomeState st s
 
 instance C.CommandLike (SurveyorCommand s st) where
   type EventType (SurveyorCommand s st) = E.Events s st

@@ -111,7 +111,9 @@ asynchronouslyLoadLLVM ng customEventChan bcPath = do
           C.writeChan customEventChan (ErrorLoadingLLVM (LL.formatError err))
         Right m -> do
           nonce <- NG.freshNonce ng
-          C.writeChan customEventChan (AnalysisFinished (A.mkLLVMResult nonce m) [])
+          hdlAlloc <- CFH.newHandleAllocator
+          llvmRes <- A.mkLLVMResult ng nonce hdlAlloc m
+          C.writeChan customEventChan (AnalysisFinished llvmRes [])
     C.putMVar mv worker
     eres <- A.waitCatch worker
     case eres of

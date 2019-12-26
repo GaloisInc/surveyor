@@ -69,6 +69,7 @@ library
                        jvm-parser,
                        llvm-pretty >= 0.10 && < 0.11,
                        llvm-pretty-bc-parser,
+                       crucible-llvm,
                        macaw-base,
                        macaw-loader,
                        macaw-loader-ppc,

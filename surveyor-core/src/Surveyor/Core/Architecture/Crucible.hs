@@ -24,7 +24,16 @@ module Surveyor.Core.Architecture.Crucible (
   toRegisterOperand,
   allocateRegister,
   toExtensionOperand,
-  Instruction(..)
+  Instruction(..),
+  initialCache,
+  cacheSize,
+  Operand(..),
+  CrucibleOperand(..),
+  crucibleStmtOperands,
+  crucibleTermStmtOperands,
+  AddrK(..),
+  Addr(..),
+  Address(..)
   ) where
 
 import           Control.DeepSeq ( NFData(rnf) )
@@ -41,14 +50,14 @@ import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.SymbolRepr as PS
-import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Parameterized.TH.GADT as PTH
+import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import           Data.Word ( Word64 )
-import qualified Fmt as Fmt
 import           Fmt ( (+|), (|+), (||+) )
+import qualified Fmt as Fmt
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Expr as C
 import qualified Lang.Crucible.FunctionHandle as CFH

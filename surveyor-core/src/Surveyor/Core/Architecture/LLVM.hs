@@ -7,26 +7,49 @@
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Surveyor.Core.Architecture.LLVM ( mkLLVMResult ) where
 
 import           Control.DeepSeq ( NFData, rnf )
-import qualified Control.Once as O
+import qualified Control.Exception as X
+import           Control.Lens ( (^.) )
+import qualified Control.Lens as L
 import           Control.Monad ( guard )
+import qualified Control.Once as O
 import qualified Data.Foldable as F
 import qualified Data.Map.Strict as M
 import           Data.Maybe ( catMaybes, isJust, fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
+import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as NG
+import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Parameterized.TraversableFC as FC
+import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Lang.Crucible.CFG.Core as C
+import qualified Lang.Crucible.CFG.Extension as CCE
+import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.LLVM.Bytes as CLLB
+import qualified Lang.Crucible.LLVM.DataLayout as CLDL
+import qualified Lang.Crucible.LLVM.Extension as LE
+import qualified Lang.Crucible.LLVM.MemModel as LLM
+import qualified Lang.Crucible.LLVM.Translation as LT
+import qualified Lang.Crucible.LLVM.TypeContext as LTC
+import           System.FilePath ( (</>) )
+import qualified System.FilePath as SFP
 import qualified Text.LLVM as LL
 import qualified Text.LLVM.PP as LL
 import qualified Text.PrettyPrint as PP
 import           Text.Printf ( printf )
+import qualified What4.ProgramLoc as WPL
 
 import           Surveyor.Core.Architecture.Class
+import qualified Surveyor.Core.Architecture.Crucible as AC
+import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr), Crucible )
 
 data LLVM
 
@@ -34,32 +57,119 @@ data LLVMResult s =
   LLVMResult { llvmNonce :: NG.Nonce s LLVM
              , llvmModule :: LL.Module
              , llvmFunctionIndex :: FunctionIndex s
+             , llvmNonceGen :: NG.NonceGenerator IO s
+             , llvmHdlAlloc :: CFH.HandleAllocator
+             -- ^ The handle allocator used for the Crucible translation - this needs to be kept
+             -- around to symbolically simulate later
+             , llvmCrucibleTranslation :: Some LT.ModuleTranslation
+             -- ^ The (cached) Crucible translation
              }
 
 type FunctionIndex s = M.Map LL.Symbol (FunctionHandle LLVM s, LL.Define, BlockIndex)
-type BlockIndex = M.Map (Maybe LL.BlockLabel) LL.BasicBlock
+
+-- | Mapping from block labels to their blocks, along with the computed position
+-- information for each block (derived from debug information)
+data BlockIndex =
+  BlockIndex { biLabelToBlock :: M.Map (Maybe LL.BlockLabel) LL.BasicBlock
+             , biPosToBlock :: M.Map WPL.Position LL.BasicBlock
+             }
+-- type BlockIndex = M.Map (Maybe LL.BlockLabel) (LL.BasicBlock, Maybe WPL.Position)
 
 indexFunctions :: LL.Module -> FunctionIndex s
-indexFunctions = F.foldl' indexDefine M.empty . LL.modDefines
+indexFunctions llvmmodule = F.foldl' indexDefine M.empty (LL.modDefines llvmmodule)
   where
+    (_, ltc) = LTC.typeContextFromModule llvmmodule
     indexDefine m def
       | null (LL.defBody def) = m
       | otherwise  =
-        let blockIndex = F.foldl' indexBlock M.empty (LL.defBody def)
+        let blockIndex = BlockIndex { biLabelToBlock = F.foldl' indexBlock M.empty (LL.defBody def)
+                                    , biPosToBlock = F.foldl' indexPosition M.empty (LL.defBody def)
+                                    }
             fh = FunctionHandle { fhAddress = LLVMAddress (FunctionAddr (LL.defName def))
                                 , fhName = T.pack (show (LL.ppSymbol (LL.defName def)))
                                 }
         in M.insert (LL.defName def) (fh, def, blockIndex) m
     indexBlock m b = M.insert (LL.bbLabel b) b m
+    indexPosition m b =
+      maybe m (\p -> M.insert p b m) (blockPosition ltc b)
 
-mkLLVMResult :: NG.Nonce s LLVM -> LL.Module -> SomeResult s LLVM
-mkLLVMResult nonce m =
-  SomeResult (AnalysisResult (LLVMAnalysisResult lr) (indexResult lr))
+blockPosition :: LTC.TypeContext -> LL.BasicBlock -> Maybe WPL.Position
+blockPosition ltc bb0 =
+  let ?lc = ltc
+  in go (LL.bbStmts bb0)
   where
-    lr = LLVMResult { llvmNonce = nonce
-                    , llvmModule = m
-                    , llvmFunctionIndex = indexFunctions m
-                    }
+    go [] = Nothing
+    go (stmt:stmts) =
+      case stmt of
+        LL.Result _ _ md -> extractLoc md stmts
+        LL.Effect _ md -> extractLoc md stmts
+    extractLoc [] stmts = go stmts
+    extractLoc (md:mds) stmts =
+      case md of
+        ("dbg", LL.ValMdLoc dl) -> do
+          let ln = fromIntegral (LL.dlLine dl)
+          let col = fromIntegral (LL.dlCol dl)
+          let file = getFile (LL.dlScope dl)
+          return (WPL.SourcePos file ln col)
+        ("dbg", LL.ValMdDebugInfo (LL.DebugInfoSubprogram subp))
+          | Just file' <- LL.dispFile subp -> do
+              let ln = fromIntegral (LL.dispLine subp)
+              let file = getFile file'
+              return (WPL.SourcePos file ln 0)
+        _ -> extractLoc mds stmts
+
+    getFile :: (?lc :: LTC.TypeContext) => LL.ValMd -> T.Text
+    getFile = T.pack . maybe "" filenm . findFile
+
+    filenm di
+      | SFP.isRelative (LL.difFilename di) = LL.difDirectory di </> LL.difFilename di
+      | otherwise = LL.difFilename di
+
+    findFile :: (?lc :: LTC.TypeContext) => LL.ValMd -> Maybe LL.DIFile
+    findFile (LL.ValMdRef x) = findFile =<< lookupMetadata x
+
+    findFile (LL.ValMdNode (_:Just (LL.ValMdRef y):_)) =
+      case lookupMetadata y of
+        Just (LL.ValMdNode [Just (LL.ValMdString fname), Just (LL.ValMdString fpath)]) ->
+            Just (LL.DIFile fname fpath)
+        _ -> Nothing
+
+    findFile (LL.ValMdDebugInfo di) =
+      case di of
+        LL.DebugInfoFile dif -> Just dif
+        LL.DebugInfoLexicalBlock dilex
+          | Just md <- LL.dilbFile dilex -> findFile md
+          | Just md <- LL.dilbScope dilex -> findFile md
+        LL.DebugInfoLexicalBlockFile dilexFile
+          | Just md <- LL.dilbfFile dilexFile -> findFile md
+          | otherwise -> findFile (LL.dilbfScope dilexFile)
+        LL.DebugInfoSubprogram disub
+          | Just md <- LL.dispFile disub -> findFile md
+          | Just md <- LL.dispScope disub -> findFile md
+        _ -> Nothing
+
+    findFile _ = Nothing
+
+    lookupMetadata :: (?lc :: LTC.TypeContext) => Int -> Maybe LL.ValMd
+    lookupMetadata x = L.view (L.at x) (LTC.llvmMetadataMap ?lc)
+
+
+mkLLVMResult :: NG.NonceGenerator IO s
+             -> NG.Nonce s LLVM
+             -> CFH.HandleAllocator
+             -> LL.Module
+             -> IO (SomeResult s LLVM)
+mkLLVMResult ng nonce hdlAlloc m = do
+  let ?laxArith = True
+  ct <- LT.translateModule hdlAlloc m
+  let lr = LLVMResult { llvmNonce = nonce
+                      , llvmModule = m
+                      , llvmFunctionIndex = indexFunctions m
+                      , llvmHdlAlloc = hdlAlloc
+                      , llvmCrucibleTranslation = ct
+                      , llvmNonceGen = ng
+                      }
+  return (SomeResult (AnalysisResult (LLVMAnalysisResult lr) (indexResult lr)))
 
 indexResult :: LLVMResult s -> O.Once (ResultIndex LLVM s)
 indexResult lr = O.once idx
@@ -208,8 +318,301 @@ instance Architecture LLVM s where
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   functionBlocks (AnalysisResult (LLVMAnalysisResult lr) _) fh =
     llvmFunctionBlocks lr fh
-  alternativeIRs _ = []
-  asAlternativeIR _ _ _ = return Nothing
+  alternativeIRs _ = [SomeIRRepr CrucibleRepr]
+  asAlternativeIR repr (AnalysisResult (LLVMAnalysisResult llr) _) fh =
+    case repr of
+      BaseRepr -> return Nothing
+      MacawRepr -> return Nothing
+      CrucibleRepr ->
+        crucibleForLLVMBlocks (llvmNonceGen llr) (llvmFunctionIndex llr) fh (llvmCrucibleTranslation llr)
+
+data CrucibleLLVMOperand arch s where
+  Alignment :: CLDL.Alignment -> CrucibleLLVMOperand arch s
+  StringLiteral :: String -> CrucibleLLVMOperand arch s
+  StorageType :: LLM.StorageType -> CrucibleLLVMOperand arch s
+  Bytes :: CLLB.Bytes -> CrucibleLLVMOperand arch s
+  GlobalSymbol :: LLM.GlobalSymbol -> CrucibleLLVMOperand arch s
+
+-- NOTE: We only support x86/llvm right now (since crucible-llvm only supports that)
+--
+-- If that changes, we'll need to extend our own LLVM type (or possibly just re-use the
+-- crucible-llvm one)
+instance AC.CrucibleExtension LLVM where
+  type CrucibleExt LLVM = LE.LLVM (LE.X86 64)
+  type CrucibleExtensionOperand LLVM = CrucibleLLVMOperand (LE.LLVM (LE.X86 64))
+
+  prettyExtensionStmt _ = prettyLLVMStmt
+  prettyExtensionApp _ = prettyLLVMApp
+  prettyExtensionOperand _ = prettyLLVMExtensionOperand
+  extensionExprOperands = llvmExtensionExprOperands
+  extensionStmtOperands = llvmExtensionStmtOperands
+  -- FIXME: Figure out which kinds of LLVM-specific operands can be selected
+  extensionOperandSelectable _ _ = False
+
+prettyLLVMExtensionOperand :: CrucibleLLVMOperand arch s -> T.Text
+prettyLLVMExtensionOperand o =
+  case o of
+    Alignment a -> T.pack (show a)
+    StringLiteral s -> T.pack (show s)
+    StorageType t -> T.pack (show t)
+    Bytes b -> T.pack (show b)
+    GlobalSymbol sym -> T.pack (show sym)
+
+prettyLLVMStmt :: CCE.StmtExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp -> T.Text
+prettyLLVMStmt s =
+  case s of
+    LE.LLVM_PushFrame {} -> "llvm.push-frame"
+    LE.LLVM_PopFrame {} -> "llvm.pop-frame"
+    LE.LLVM_Alloca {} -> "llvm.alloca"
+    LE.LLVM_Load {} -> "llvm.load"
+    LE.LLVM_Store {} -> "llvm.store"
+    LE.LLVM_MemClear {} -> "llvm.mem-clear"
+    LE.LLVM_LoadHandle {} -> "llvm.load-handle"
+    LE.LLVM_ResolveGlobal {} -> "llvm.load-global"
+    LE.LLVM_PtrEq {} -> "llvm.ptr-eq"
+    LE.LLVM_PtrLe {} -> "llvm.ptr-le"
+    LE.LLVM_PtrAddOffset {} -> "llvm.ptr-add-offset"
+    LE.LLVM_PtrSubtract {} -> "llvm.ptr-subtract"
+
+prettyLLVMApp :: CCE.ExprExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp -> T.Text
+prettyLLVMApp a =
+  case a of
+    LE.LLVM_PointerExpr {} -> "llvm.pointer-expr"
+    LE.LLVM_PointerBlock {} -> "llvm.pointer-block"
+    LE.LLVM_PointerOffset {} -> "llvm.pointer-offset"
+    LE.LLVM_PointerIte {} -> "llvm.pointer-ite"
+    -- FIXME: Probably need to examine the x86.ExtX86 here
+    LE.X86Expr {} -> "llvm.x86-expr"
+
+llvmExtensionExprOperands :: AC.NonceCache s ctx
+                          -> NG.NonceGenerator IO s
+                          -> CCE.ExprExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp
+                          -> IO [Operand (AC.Crucible LLVM) s]
+llvmExtensionExprOperands cache ng e =
+  case e of
+    -- FIXME: Walk the subterm
+    LE.X86Expr x86e -> return []
+    LE.LLVM_PointerExpr nr r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    LE.LLVM_PointerBlock nr r -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.toRegisterOperand cache r
+             ]
+    LE.LLVM_PointerOffset nr r -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.toRegisterOperand cache r
+             ]
+    LE.LLVM_PointerIte nr r1 r2 r3 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             , AC.toRegisterOperand cache r3
+             ]
+
+llvmExtensionStmtOperands :: AC.NonceCache s ctx
+                          -> NG.NonceGenerator IO s
+                          -> CCE.StmtExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp
+                          -> IO [Operand (AC.Crucible LLVM) s]
+llvmExtensionStmtOperands cache ng s =
+  case s of
+    LE.LLVM_PushFrame gv -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv) ]
+    LE.LLVM_PopFrame gv -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv) ]
+    LE.LLVM_Alloca nr gv r align locStr -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      n3 <- NG.freshNonce ng
+      n4 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.CrucibleOperand n2 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r
+             , AC.toExtensionOperand n3 (Alignment align)
+             , AC.toExtensionOperand n4 (StringLiteral locStr)
+             ]
+    LE.LLVM_Load gv r trep storageType align -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      n3 <- NG.freshNonce ng
+      n4 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r
+             , AC.CrucibleOperand n2 (AC.TypeRepr trep)
+             , AC.toExtensionOperand n3 (StorageType storageType)
+             , AC.toExtensionOperand n4 (Alignment align)
+             ]
+    LE.LLVM_Store gv r1 trep storageType align r2 -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      n3 <- NG.freshNonce ng
+      n4 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r1
+             , AC.CrucibleOperand n2 (AC.TypeRepr trep)
+             , AC.toExtensionOperand n3 (StorageType storageType)
+             , AC.toExtensionOperand n4 (Alignment align)
+             , AC.toRegisterOperand cache r2
+             ]
+    LE.LLVM_MemClear gv r bytes -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r
+             , AC.toExtensionOperand n2 (Bytes bytes)
+             ]
+    LE.LLVM_LoadHandle gv r argReprs retRepr -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      n3 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r
+             , AC.CrucibleOperand n2 (AC.CtxRepr argReprs)
+             , AC.CrucibleOperand n3 (AC.TypeRepr retRepr)
+             ]
+    LE.LLVM_ResolveGlobal nr gv gsym -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      n3 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.CrucibleOperand n2 (AC.GlobalVar gv)
+             , AC.toExtensionOperand n3 (GlobalSymbol gsym)
+             ]
+    LE.LLVM_PtrEq gv r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    LE.LLVM_PtrLe gv r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    LE.LLVM_PtrAddOffset nr gv r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.CrucibleOperand n2 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+    LE.LLVM_PtrSubtract nr gv r1 r2 -> do
+      n1 <- NG.freshNonce ng
+      n2 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.NatRepr nr)
+             , AC.CrucibleOperand n2 (AC.GlobalVar gv)
+             , AC.toRegisterOperand cache r1
+             , AC.toRegisterOperand cache r2
+             ]
+
+data LLVMException where
+  InvalidFunctionAddress :: Addr addrTy -> LLVMException
+  MissingIndexForFunction :: LL.Symbol -> LLVMException
+  UnsupportedLLVMArchitecture :: LE.ArchRepr arch -> LLVMException
+
+-- We need a custom instance here because there is no Show instance for ArchReprs
+instance Show LLVMException where
+  show e =
+    case e of
+      InvalidFunctionAddress addr -> "InvalidFunctionAddress " ++ show addr
+      MissingIndexForFunction sym -> "MissingIndexForFunction " ++ show sym
+      UnsupportedLLVMArchitecture arep ->
+        case arep of
+          LE.X86Repr nr -> "UnsupportedLLVMArchitecture X86 " ++ show nr
+
+instance X.Exception LLVMException
+
+crucibleForLLVMBlocks :: forall s
+                       . NG.NonceGenerator IO s
+                      -> FunctionIndex s
+                      -> FunctionHandle LLVM s
+                      -> Some LT.ModuleTranslation
+                      -> IO (Maybe (BlockMapping LLVM (Crucible LLVM) s))
+crucibleForLLVMBlocks ng funcIndex fh (Some mt) =
+  case fhAddress fh of
+    LLVMAddress fa@(FunctionAddr sym) ->
+      case M.lookup sym (LT.cfgMap mt) of
+        Nothing -> return Nothing
+        Just (C.AnyCFG cfg) -> do
+          case M.lookup sym funcIndex of
+            Nothing -> X.throwIO (MissingIndexForFunction sym)
+            Just (_, _, blockIndex) -> do
+              case LT.llvmArch (mt ^. LT.transContext) of
+                LE.X86Repr wrep
+                  | Just Refl <- testEquality wrep (C.knownNat @64) -> do
+                      let bm0 :: BlockMapping LLVM (Crucible LLVM) s
+                          bm0 = BlockMapping mempty mempty mempty
+                      Just <$> FC.foldlMFC' (toLLVMCrucibleBlock ng blockIndex fa fh cfg) bm0 (C.cfgBlockMap cfg)
+                arep -> X.throwIO (UnsupportedLLVMArchitecture arep)
+    LLVMAddress a -> X.throwIO (InvalidFunctionAddress a)
+
+toLLVMCrucibleBlock :: forall s blocks init ret ctx (arch :: LE.LLVMArch)
+                     . (arch ~ LE.X86 64)
+                    => NG.NonceGenerator IO s
+                    -> BlockIndex
+                    -> Addr 'FuncK
+                    -> FunctionHandle LLVM s
+                    -> C.CFG (LE.LLVM arch) blocks init ret
+                    -> BlockMapping LLVM (Crucible LLVM) s
+                    -> C.Block (LE.LLVM arch) blocks ret ctx
+                    -> IO (BlockMapping LLVM (Crucible LLVM) s)
+toLLVMCrucibleBlock ng blockIndex (FunctionAddr sym) fh cfg bm crucBlock = do
+  let hdl = CFH.handleID (C.cfgHandle cfg)
+  let hdlNum = NG.indexValue hdl
+  case M.lookup (WPL.plSourceLoc (C.blockLoc crucBlock)) (biPosToBlock blockIndex) of
+    Nothing -> return bm
+    Just llvmBlock -> do
+      c0 <- AC.initialCache ng (C.blockInputs crucBlock)
+      -- We use the nonce ID of the CFG for the function address; it is stable
+      -- and probably as good as any other address we could give.  Maybe it
+      -- would be better to generalize the type of function addresses for
+      -- Crucible and have it be a string for LLVM/Crucible?
+      let baddr = AC.BlockAddr (AC.FunctionAddr hdlNum) (Ctx.indexVal (C.blockIDIndex (C.blockID crucBlock)))
+      stmts <- buildBlock c0 baddr 0 (crucBlock ^. C.blockStmts)
+      let crucAddr = FunctionHandle { fhName = fhName fh
+                                    , fhAddress = AC.CrucibleAddress (AC.FunctionAddr hdlNum)
+                                    }
+      let crucBlock' = Block { blockAddress = AC.CrucibleAddress baddr
+                             , blockInstructions = stmts
+                             , blockFunction = crucAddr
+                             }
+      let llvmBlock' = toBlock fh sym llvmBlock
+
+      return BlockMapping { blockMapping = M.insert (blockAddress llvmBlock') (llvmBlock', crucBlock') (blockMapping bm)
+                          , baseToIRAddrs = M.insert (blockAddress llvmBlock') (S.singleton (blockAddress crucBlock')) (baseToIRAddrs bm)
+                          , irToBaseAddrs = M.insert (blockAddress crucBlock') (S.singleton (blockAddress llvmBlock')) (irToBaseAddrs bm)
+                          }
+  where
+    buildBlock :: forall ctx'
+                . AC.NonceCache s ctx'
+               -> AC.Addr 'AC.BlockK
+               -> Int
+               -> C.StmtSeq (LE.LLVM arch) blocks ret ctx'
+               -> IO [(AC.Address (Crucible LLVM) s, Instruction (Crucible LLVM) s)]
+    buildBlock nc baddr iidx ss =
+      case ss of
+        C.ConsStmt _loc stmt ss' -> do
+          (nc', mBinder, ops) <- AC.crucibleStmtOperands nc ng stmt
+          rest <- buildBlock nc' baddr (iidx + 1) ss'
+          let sz = AC.cacheSize nc
+          let iaddr = AC.CrucibleAddress (AC.InstructionAddr baddr iidx)
+          let cstmt = AC.CrucibleStmt sz stmt mBinder ops
+          return ((iaddr, cstmt) : rest )
+        C.TermStmt _loc term -> do
+          ops <- AC.crucibleTermStmtOperands nc ng term
+          let iaddr = AC.CrucibleAddress (AC.InstructionAddr baddr iidx)
+          let cstmt = AC.CrucibleTermStmt term ops
+          return [(iaddr, cstmt)]
 
 instance Eq (Address LLVM s) where
   LLVMAddress a1 == LLVMAddress a2 = isJust (testEquality a1 a2)
@@ -477,11 +880,11 @@ llvmContainingBlocks lr addr =
     FunctionAddr _ -> []
     BlockAddr (FunctionAddr sym) lab -> fromMaybe [] $ do
       (fh, _, bix) <- M.lookup sym (llvmFunctionIndex lr)
-      bb <- M.lookup lab bix
+      bb <- M.lookup lab (biLabelToBlock bix)
       return [toBlock fh sym bb]
     InsnAddr (BlockAddr (FunctionAddr sym) lab) _ -> fromMaybe [] $ do
       (fh, _, bix) <- M.lookup sym (llvmFunctionIndex lr)
-      bb <- M.lookup lab bix
+      bb <- M.lookup lab (biLabelToBlock bix)
       return [toBlock fh sym bb]
 
 llvmFunctionBlocks :: LLVMResult s -> FunctionHandle LLVM s -> [Block LLVM s]

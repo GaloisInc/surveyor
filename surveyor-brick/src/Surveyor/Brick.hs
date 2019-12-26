@@ -80,7 +80,7 @@ drawStatusBar s =
         C.Ready -> B.str "Ready"
         C.AwaitingFile -> B.str "Waiting for file"
 
-drawAppShell :: C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
+drawAppShell :: (C.Architecture arch s) => C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w =
   [ B.vBox [ B.borderWithLabel (title (C.sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
            , drawKeyBindings s
@@ -100,7 +100,7 @@ drawAppShell s w =
             MB.renderMinibuffer True mb
         _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (C.sEchoArea s))
 
-drawKeyBindings :: C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names
+drawKeyBindings :: (C.Architecture arch s) => C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names
 drawKeyBindings s = B.hBox (mapMaybe toKeyHint keys)
   where
     keys = C.modeKeybindings (s ^. C.lKeymap) (s ^. C.lUIMode)
