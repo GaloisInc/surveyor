@@ -44,7 +44,7 @@ import           Data.Kind ( Type )
 import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Symbolic as MS
 import qualified Data.Map as Map
-import           Data.Maybe ( catMaybes, isJust )
+import           Data.Maybe ( isJust, mapMaybe )
 import           Data.Parameterized.Classes ( TestEquality(testEquality), OrdF(compareF), toOrdering )
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.NatRepr as NR
@@ -111,7 +111,7 @@ crucibleForMCBlocks :: forall arch s
                     -> R.BlockInfo arch
                     -> R.ConcreteAddress arch
                     -> [(MC.ArchSegmentOff arch, Block arch s)]
-                    -> IO (Maybe (BlockMapping arch (Crucible arch) s))
+                    -> IO (Maybe ([Block (Crucible arch) s], BlockMapping arch (Crucible arch) s))
 crucibleForMCBlocks ng blockIndexer binfo faddr blocks = do
   case Map.lookup faddr (R.biCFG binfo) of
     Nothing -> return Nothing
@@ -124,14 +124,19 @@ crucibleForMCBlocks ng blockIndexer binfo faddr blocks = do
                               }
       let blkIdx = Map.fromList [(MC.segoffAddr a, b) | (a, b) <- blocks]
       blks <- FC.traverseFC (toMCCrucibleBlock ng blkIdx fa fh) (C.cfgBlockMap symCFG)
-      let irtbMap = blockIndexer (catMaybes (FC.toListFC getConst blks))
-      return $ Just $ BlockMapping { baseToIRAddrs = flipAddressMap irtbMap
-                                   , irToBaseAddrs = irtbMap
-                                   , blockMapping = toBlockMap (catMaybes (FC.toListFC getConst blks))
-                                   }
+      let irtbMap = blockIndexer (mapMaybe asJustPair (FC.toListFC getConst blks))
+      let crucBlocks = FC.toListFC asCrucibleBlock blks
+      let bm = BlockMapping { baseToIRAddrs = flipAddressMap irtbMap
+                            , irToBaseAddrs = irtbMap
+                            , blockMapping = toBlockMap (FC.toListFC getConst blks)
+                            }
+      return $ Just (crucBlocks, bm)
   where
+    asJustPair (Just a, b) = Just (a, b)
+    asJustPair (Nothing, _) = Nothing
+    asCrucibleBlock (Const (_, cb)) = cb
     toBlockMap pairs = Map.fromList [ (blockAddress origBlock, (origBlock, cblock))
-                                    | (origBlock, cblock) <- pairs
+                                    | (Just origBlock, cblock) <- pairs
                                     ]
 
 flipAddressMap :: (Ord (Address arch s))
@@ -162,7 +167,7 @@ toMCCrucibleBlock :: forall arch s blocks ret ctx
                   -> Addr 'FunctionK
                   -> FunctionHandle (Crucible arch) s
                   -> C.Block (CrucibleExt arch) blocks ret ctx
-                  -> IO (Const (Maybe (Block arch s, Block (Crucible arch) s)) ctx)
+                  -> IO (Const (Maybe (Block arch s), Block (Crucible arch) s) ctx)
 toMCCrucibleBlock ng blockIndex faddr fh b = do
   c0 <- initialCache ng (C.blockInputs b)
   let baddr = BlockAddr faddr (Ctx.indexVal (C.blockIDIndex (C.blockID b)))
@@ -174,9 +179,9 @@ toMCCrucibleBlock ng blockIndex faddr fh b = do
   case mMinAddr of
     Just minAddr ->
       case Map.lookup minAddr blockIndex of
-        Just archBlock -> return (Const (Just (archBlock, cb)))
-        Nothing -> return (Const Nothing)
-    Nothing -> return (Const Nothing)
+        Just archBlock -> return (Const (Just archBlock, cb))
+        Nothing -> return (Const (Nothing, cb))
+    Nothing -> return (Const (Nothing, cb))
   where
     buildBlock :: NonceCache s ctx'
                -> Addr 'BlockK

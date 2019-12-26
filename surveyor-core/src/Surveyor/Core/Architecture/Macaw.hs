@@ -57,7 +57,7 @@ macawForBlocks :: forall arch s
                -> R.BlockInfo arch
                -> R.ConcreteAddress arch
                -> [(MC.ArchSegmentOff arch, Block arch s)]
-               -> IO (BlockMapping arch (Macaw arch) s)
+               -> IO ([Block (Macaw arch) s], BlockMapping arch (Macaw arch) s)
 macawForBlocks toArchAddr nonceGen binfo faddr blocks = do
   case M.lookup faddr (R.biFunctions binfo) of
     Nothing -> X.throwIO (NoMacawFunctionFor faddr)
@@ -68,10 +68,11 @@ macawForBlocks toArchAddr nonceGen binfo faddr blocks = do
                               }
       blks <- mapM (toMacawBlock nonceGen dfi fh) blocks
       let (_, macawInsnIdx) = F.foldl' (buildMacawInstIndex toArchAddr) (Nothing, M.empty) (concatMap (blockInstructions . snd) blks)
-      return $ BlockMapping { blockMapping = toBlockMap blks
+      let bm = BlockMapping { blockMapping = toBlockMap blks
                             , irToBaseAddrs = macawInsnIdx
                             , baseToIRAddrs = flipAddressMap macawInsnIdx
                             }
+      return (map snd blks, bm)
   where
     toBlockMap pairs = M.fromList [ (blockAddress origBlock, (origBlock, mblock))
                                   | (origBlock, mblock) <- pairs

@@ -116,12 +116,16 @@ class (IR arch s) => Architecture (arch :: *) (s :: *) where
   alternativeIRs :: proxy (arch, s) -> [SomeIRRepr arch s]
   -- | Retrieve an alternative representation of the given function (the target
   -- IR is specified by the 'IRRepr').  If there is an error while constructing
-  -- the alternative view, the empty list will be returned.  If the requested IR
-  -- is not supported, an empty list will also be returned.
+  -- the alternative view or if the alternative view requested is not supported,
+  -- 'Nothing' will be returned.
   --
-  -- FIXME: Some source IR blocks may translate to *multiple* alternative IR
-  -- blocks (esp. Crucible)
-  asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe (BlockMapping arch ir s))
+  -- Otherwise, two things are returned:
+  --
+  -- 1. The alternative view (as a collection of blocks)
+  --
+  -- 2. A mapping from base block addresses to their corresponding alternative
+  -- blocks; this mapping is not guaranteed to be complete.
+  asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe ([Block ir s], BlockMapping arch ir s))
 
 data BlockMapping arch ir s =
   BlockMapping { blockMapping :: M.Map (Address arch s) (Block arch s, Block ir s)

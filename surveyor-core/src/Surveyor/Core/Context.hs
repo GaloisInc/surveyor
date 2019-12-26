@@ -207,7 +207,7 @@ makeBlockState tcache ares origBlock rep = do
   mBlockMapping <- TC.translateFunctionBlocks tcache ares rep fh
   return $ do
     bm <- mBlockMapping
-    (_, trBlock) <- Map.lookup (CA.blockAddress origBlock) (CA.blockMapping bm)
+    (_, trBlock) <- Map.lookup (CA.blockAddress origBlock) (CA.blockMapping (snd bm))
     let insnList = [ (ix, addr, i)
                    | (ix, (addr, i)) <- zip [0..] (CA.blockInstructions trBlock)
                    ]
@@ -215,7 +215,7 @@ makeBlockState tcache ares origBlock rep = do
         bs = BlockState { bsSelection = NoSelection
                         , bsBlock = trBlock
                         , bsList = V.fromList insnList
-                        , bsBlockMapping = mBlockMapping
+                        , bsBlockMapping = Just (snd bm)
                         , withConstraints = \a -> a
                         , bsRepr = rep
                         }

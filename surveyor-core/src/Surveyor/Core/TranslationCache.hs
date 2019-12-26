@@ -17,7 +17,7 @@ newtype TranslationCache arch s =
   TranslationCache (IOR.IORef (MapF.MapF (IRRepr arch) (TranslatedBlocks arch s)))
 
 newtype TranslatedBlocks arch s ir =
-  TranslatedBlocks (Map.Map (CA.FunctionHandle arch s) (Maybe (CA.BlockMapping arch ir s)))
+  TranslatedBlocks (Map.Map (CA.FunctionHandle arch s) (Maybe ([CA.Block ir s], CA.BlockMapping arch ir s)))
 
 -- | Construct a new (empty) 'TranslationCache'
 newTranslationCache :: IO (TranslationCache arch s)
@@ -35,7 +35,7 @@ translateFunctionBlocks :: (CA.Architecture arch s, CA.ArchConstraints arch s)
                         -> CA.AnalysisResult arch s
                         -> IRRepr arch ir
                         -> CA.FunctionHandle arch s
-                        -> IO (Maybe (CA.BlockMapping arch ir s))
+                        -> IO (Maybe ([CA.Block ir s], CA.BlockMapping arch ir s))
 translateFunctionBlocks (TranslationCache cacheRef) ares rep fh = do
   m0 <- IOR.readIORef cacheRef
   case MapF.lookup rep m0 of

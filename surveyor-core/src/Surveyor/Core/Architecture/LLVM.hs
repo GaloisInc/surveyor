@@ -537,7 +537,7 @@ crucibleForLLVMBlocks :: forall s
                       -> FunctionIndex s
                       -> FunctionHandle LLVM s
                       -> Some LT.ModuleTranslation
-                      -> IO (Maybe (BlockMapping LLVM (Crucible LLVM) s))
+                      -> IO (Maybe ([Block (Crucible LLVM) s], BlockMapping LLVM (Crucible LLVM) s))
 crucibleForLLVMBlocks ng funcIndex fh (Some mt) =
   case fhAddress fh of
     LLVMAddress fa@(FunctionAddr sym) ->
@@ -552,7 +552,8 @@ crucibleForLLVMBlocks ng funcIndex fh (Some mt) =
                   | Just Refl <- testEquality wrep (C.knownNat @64) -> do
                       let bm0 :: BlockMapping LLVM (Crucible LLVM) s
                           bm0 = BlockMapping mempty mempty mempty
-                      Just <$> FC.foldlMFC' (toLLVMCrucibleBlock ng blockIndex fa fh cfg) bm0 (C.cfgBlockMap cfg)
+                      (rblks, bm) <- FC.foldlMFC' (toLLVMCrucibleBlock ng blockIndex fa fh cfg) ([], bm0) (C.cfgBlockMap cfg)
+                      return (Just (reverse rblks, bm))
                 arep -> X.throwIO (UnsupportedLLVMArchitecture arep)
     LLVMAddress a -> X.throwIO (InvalidFunctionAddress a)
 
@@ -563,35 +564,37 @@ toLLVMCrucibleBlock :: forall s blocks init ret ctx (arch :: LE.LLVMArch)
                     -> Addr 'FuncK
                     -> FunctionHandle LLVM s
                     -> C.CFG (LE.LLVM arch) blocks init ret
-                    -> BlockMapping LLVM (Crucible LLVM) s
+                    -> ([Block (Crucible LLVM) s], BlockMapping LLVM (Crucible LLVM) s)
                     -> C.Block (LE.LLVM arch) blocks ret ctx
-                    -> IO (BlockMapping LLVM (Crucible LLVM) s)
-toLLVMCrucibleBlock ng blockIndex (FunctionAddr sym) fh cfg bm crucBlock = do
+                    -> IO ([Block (Crucible LLVM) s], BlockMapping LLVM (Crucible LLVM) s)
+toLLVMCrucibleBlock ng blockIndex (FunctionAddr sym) fh cfg (blks, bm) crucBlock = do
   let hdl = CFH.handleID (C.cfgHandle cfg)
   let hdlNum = NG.indexValue hdl
-  case M.lookup (WPL.plSourceLoc (C.blockLoc crucBlock)) (biPosToBlock blockIndex) of
-    Nothing -> return bm
-    Just llvmBlock -> do
-      c0 <- AC.initialCache ng (C.blockInputs crucBlock)
-      -- We use the nonce ID of the CFG for the function address; it is stable
-      -- and probably as good as any other address we could give.  Maybe it
-      -- would be better to generalize the type of function addresses for
-      -- Crucible and have it be a string for LLVM/Crucible?
-      let baddr = AC.BlockAddr (AC.FunctionAddr hdlNum) (Ctx.indexVal (C.blockIDIndex (C.blockID crucBlock)))
-      stmts <- buildBlock c0 baddr 0 (crucBlock ^. C.blockStmts)
-      let crucAddr = FunctionHandle { fhName = fhName fh
-                                    , fhAddress = AC.CrucibleAddress (AC.FunctionAddr hdlNum)
-                                    }
-      let crucBlock' = Block { blockAddress = AC.CrucibleAddress baddr
-                             , blockInstructions = stmts
-                             , blockFunction = crucAddr
-                             }
-      let llvmBlock' = toBlock fh sym llvmBlock
 
-      return BlockMapping { blockMapping = M.insert (blockAddress llvmBlock') (llvmBlock', crucBlock') (blockMapping bm)
-                          , baseToIRAddrs = M.insert (blockAddress llvmBlock') (S.singleton (blockAddress crucBlock')) (baseToIRAddrs bm)
-                          , irToBaseAddrs = M.insert (blockAddress crucBlock') (S.singleton (blockAddress llvmBlock')) (irToBaseAddrs bm)
-                          }
+  c0 <- AC.initialCache ng (C.blockInputs crucBlock)
+  -- We use the nonce ID of the CFG for the function address; it is stable
+  -- and probably as good as any other address we could give.  Maybe it
+  -- would be better to generalize the type of function addresses for
+  -- Crucible and have it be a string for LLVM/Crucible?
+  let baddr = AC.BlockAddr (AC.FunctionAddr hdlNum) (Ctx.indexVal (C.blockIDIndex (C.blockID crucBlock)))
+  stmts <- buildBlock c0 baddr 0 (crucBlock ^. C.blockStmts)
+  let crucAddr = FunctionHandle { fhName = fhName fh
+                                , fhAddress = AC.CrucibleAddress (AC.FunctionAddr hdlNum)
+                                }
+  let crucBlock' = Block { blockAddress = AC.CrucibleAddress baddr
+                         , blockInstructions = stmts
+                         , blockFunction = crucAddr
+                         }
+
+  case M.lookup (WPL.plSourceLoc (C.blockLoc crucBlock)) (biPosToBlock blockIndex) of
+    Nothing -> return (crucBlock':blks, bm)
+    Just llvmBlock -> do
+      let llvmBlock' = toBlock fh sym llvmBlock
+      let bm' = BlockMapping { blockMapping = M.insert (blockAddress llvmBlock') (llvmBlock', crucBlock') (blockMapping bm)
+                             , baseToIRAddrs = M.insert (blockAddress llvmBlock') (S.singleton (blockAddress crucBlock')) (baseToIRAddrs bm)
+                             , irToBaseAddrs = M.insert (blockAddress crucBlock') (S.singleton (blockAddress llvmBlock')) (irToBaseAddrs bm)
+                             }
+      return (crucBlock':blks, bm')
   where
     buildBlock :: forall ctx'
                 . AC.NonceCache s ctx'
