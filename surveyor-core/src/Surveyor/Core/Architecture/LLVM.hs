@@ -352,7 +352,7 @@ instance AC.CrucibleExtension LLVM where
 prettyLLVMExtensionOperand :: CrucibleLLVMOperand arch s -> T.Text
 prettyLLVMExtensionOperand o =
   case o of
-    Alignment a -> T.pack (show a)
+    Alignment a -> T.pack (show (CLDL.fromAlignment a))
     StringLiteral s -> T.pack (show s)
     StorageType t -> T.pack (show t)
     Bytes b -> T.pack (show b)
