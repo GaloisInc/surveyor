@@ -64,7 +64,6 @@ import           Surveyor.Core.BinaryAnalysisResult
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr) )
 
 instance AC.CrucibleExtension PPC.PPC32 where
-  type CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
   type CrucibleExtensionOperand PPC.PPC32 = MacawOperand PPC.PPC32
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
@@ -74,7 +73,6 @@ instance AC.CrucibleExtension PPC.PPC32 where
   extensionOperandSelectable _ = macawExtensionOperandSelectable
 
 instance AC.CrucibleExtension PPC.PPC64 where
-  type CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
   type CrucibleExtensionOperand PPC.PPC64 = MacawOperand PPC.PPC64
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
@@ -84,7 +82,6 @@ instance AC.CrucibleExtension PPC.PPC64 where
   extensionOperandSelectable _ = macawExtensionOperandSelectable
 
 instance AC.CrucibleExtension X86.X86_64 where
-  type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
   type CrucibleExtensionOperand X86.X86_64 = MacawOperand X86.X86_64
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
@@ -309,7 +306,7 @@ macawExtensionStmtOperands cache ng ext =
              , AC.toRegisterOperand cache r3
              ]
 
-indexCrucibleMCBlocks :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (AC.CrucibleExt arch)
+indexCrucibleMCBlocks :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (CrucibleExt arch)
                          , MM.MemWidth (MM.ArchAddrWidth arch)
                          , Ord (Address arch s)
                          )
@@ -322,7 +319,7 @@ indexCrucibleMCBlocks toArchAddr blks =
       (_, idx) = F.foldl' (buildCrucibleInstIndex toArchAddr) s0 instrs
   in idx
 
-buildCrucibleInstIndex :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (AC.CrucibleExt arch)
+buildCrucibleInstIndex :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (CrucibleExt arch)
                           , MM.MemWidth (MM.ArchAddrWidth arch)
                           , Ord (Address arch s)
                           )
@@ -588,6 +585,7 @@ ppcOperandSelectable o =
 instance Architecture PPC.PPC32 s where
   data ArchResult PPC.PPC32 s =
     PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32)
+  type CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
 
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   archNonce (AnalysisResult (PPC32AnalysisResult bar) _) = mcNonce bar
@@ -631,6 +629,38 @@ instance Architecture PPC.PPC32 s where
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC32Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  crucibleCFG (AnalysisResult (PPC32AnalysisResult bar) _) = mcCrucibleCFG ppcaddr32ToConcrete bar
+
+ppcaddr32ToConcrete :: Address PPC.PPC32 s -> R.ConcreteAddress PPC.PPC32
+ppcaddr32ToConcrete (PPC32Address ma32) =
+  case MM.asAbsoluteAddr ma32 of
+    Just absAddr -> R.concreteFromAbsolute absAddr
+    Nothing -> error ("Unsupported address translation: " ++ show ma32)
+
+ppcaddr64ToConcrete :: Address PPC.PPC64 s -> R.ConcreteAddress PPC.PPC64
+ppcaddr64ToConcrete (PPC64Address ma64) =
+  case MM.asAbsoluteAddr ma64 of
+    Just absAddr -> R.concreteFromAbsolute absAddr
+    Nothing -> error ("Unsupported address translation: " ++ show ma64)
+
+x86addr64ToConcrete :: Address X86.X86_64 s -> R.ConcreteAddress X86.X86_64
+x86addr64ToConcrete (X86Address addr) =
+  case MM.asAbsoluteAddr addr of
+    Just absAddr -> R.concreteFromAbsolute absAddr
+    Nothing -> error ("Unsupported address translation: " ++ show addr)
+
+mcCrucibleCFG :: (Address arch s -> R.ConcreteAddress arch)
+              -> BinaryAnalysisResult s o arch
+              -> FunctionHandle arch s
+              -> IO (Maybe (C.AnyCFG (MS.MacawExt arch)))
+mcCrucibleCFG addrToConcrete bar fh =
+  case M.lookup (addrToConcrete (fhAddress fh)) cfgs of
+    Nothing -> return Nothing
+    Just scfg -> do
+      C.SomeCFG cfg <- R.getSymbolicCFG scfg
+      return (Just (C.AnyCFG cfg))
+  where
+    cfgs = R.biCFG (rBlockInfo bar)
 
 instance Eq (Address PPC.PPC32 s) where
   PPC32Address a1 == PPC32Address a2 = a1 == a2
@@ -675,6 +705,7 @@ instance IR PPC.PPC64 s where
 instance Architecture PPC.PPC64 s where
   data ArchResult PPC.PPC64 s =
     PPC64AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64)
+  type CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
 
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   archNonce (AnalysisResult (PPC64AnalysisResult bar) _) = mcNonce bar
@@ -717,6 +748,7 @@ instance Architecture PPC.PPC64 s where
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC64Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  crucibleCFG (AnalysisResult (PPC64AnalysisResult bar) _) = mcCrucibleCFG ppcaddr64ToConcrete bar
 
 
 instance Eq (Address PPC.PPC64 s) where
@@ -793,6 +825,7 @@ instance IR X86.X86_64 s where
 instance Architecture X86.X86_64 s where
   data ArchResult X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.X86_64)
+  type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
 
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   archNonce (AnalysisResult (X86AnalysisResult bar) _) = mcNonce bar
@@ -831,6 +864,7 @@ instance Architecture X86.X86_64 s where
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks X86Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  crucibleCFG (AnalysisResult (X86AnalysisResult bar) _) = mcCrucibleCFG x86addr64ToConcrete bar
 
 
 

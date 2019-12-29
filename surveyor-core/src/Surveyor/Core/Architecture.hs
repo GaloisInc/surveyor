@@ -28,7 +28,8 @@ module Surveyor.Core.Architecture (
   MC.mkPPC32Result,
   MC.mkPPC64Result,
   MC.mkX86Result,
-  J.mkJVMResult,
+  J.mkInitialJVMResult,
+  J.extendJVMResult,
   LL.mkLLVMResult,
   M.Macaw,
   -- * Operand Lists

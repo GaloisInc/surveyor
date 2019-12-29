@@ -33,6 +33,7 @@ instance IR Void s where
 
 instance Architecture Void s where
   data ArchResult Void s = VoidAnalysisResult Void
+  type CrucibleExt Void = Void
   summarizeResult (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   archNonce (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   containingBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
@@ -41,6 +42,7 @@ instance Architecture Void s where
   functionBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
   alternativeIRs _ = []
   asAlternativeIR _ (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
+  crucibleCFG _ _ = return Nothing
 
 instance Eq (Address Void s) where
   VoidAddress v == _ = absurd v

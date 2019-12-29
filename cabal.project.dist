@@ -8,6 +8,8 @@ packages: surveyor-core
           deps/crucible/what4
           deps/crucible/crucible
           deps/crucible/crucible-llvm
+          deps/crucible/crucible-jvm
+          deps/crucible/crux
           deps/dismantle/dismantle-tablegen
           deps/dismantle/dismantle-ppc
           deps/dismantle/dismantle-arm

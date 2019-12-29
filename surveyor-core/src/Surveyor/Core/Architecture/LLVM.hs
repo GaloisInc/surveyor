@@ -310,6 +310,7 @@ instance IR LLVM s where
 
 instance Architecture LLVM s where
   data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
+  type CrucibleExt LLVM = LE.LLVM (LE.X86 64)
   archNonce (AnalysisResult (LLVMAnalysisResult lr) _) = llvmNonce lr
   genericSemantics _ _ = Nothing
   functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
@@ -325,6 +326,22 @@ instance Architecture LLVM s where
       MacawRepr -> return Nothing
       CrucibleRepr ->
         crucibleForLLVMBlocks (llvmNonceGen llr) (llvmFunctionIndex llr) fh (llvmCrucibleTranslation llr)
+  crucibleCFG = llvmCrucibleCFG
+
+llvmCrucibleCFG :: AnalysisResult LLVM s
+                -> FunctionHandle LLVM s
+                -> IO (Maybe (C.AnyCFG (CrucibleExt LLVM)))
+llvmCrucibleCFG (AnalysisResult (LLVMAnalysisResult llr) _) fh =
+  case fhAddress fh of
+    LLVMAddress (FunctionAddr sym) ->
+      case llvmCrucibleTranslation llr of
+        Some mt ->
+          case LT.llvmArch (mt ^. LT.transContext) of
+            LE.X86Repr nr
+              | Just Refl <- testEquality nr (C.knownNat @64) ->
+                return (M.lookup sym (LT.cfgMap mt))
+            _ -> return Nothing
+    _ -> return Nothing
 
 data CrucibleLLVMOperand arch s where
   Alignment :: CLDL.Alignment -> CrucibleLLVMOperand arch s
@@ -338,7 +355,6 @@ data CrucibleLLVMOperand arch s where
 -- If that changes, we'll need to extend our own LLVM type (or possibly just re-use the
 -- crucible-llvm one)
 instance AC.CrucibleExtension LLVM where
-  type CrucibleExt LLVM = LE.LLVM (LE.X86 64)
   type CrucibleExtensionOperand LLVM = CrucibleLLVMOperand (LE.LLVM (LE.X86 64))
 
   prettyExtensionStmt _ = prettyLLVMStmt

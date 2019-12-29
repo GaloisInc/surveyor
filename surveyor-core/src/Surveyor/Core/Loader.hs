@@ -74,14 +74,16 @@ asynchronouslyLoad ng customEventChan path
 asynchronouslyLoadJAR :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadJAR ng customEventChan jarPath = do
   nonce <- NG.freshNonce ng
+  jr0 <- A.mkInitialJVMResult nonce
   mv <- C.newEmptyMVar
   errThread <- A.async $ do
     worker <- A.async $ do
       jr <- J.newJarReader [jarPath]
       let chunks = L.chunksOf 10 (J.jarClasses jr)
-      lastRes <- F.foldlM (addJARChunk nonce jr) Nothing chunks
-      let lastRes' = A.mkJVMResult nonce jr lastRes []
-      C.writeChan customEventChan (AnalysisFinished (A.SomeResult lastRes') [])
+      -- The loader chunks the class list so that it can report incremental
+      -- progress to the user
+      lastRes <- F.foldlM (addJARChunk jr) jr0 chunks
+      C.writeChan customEventChan (AnalysisFinished (A.SomeResult lastRes) [])
     C.putMVar mv worker
     eres <- A.waitCatch worker
     case eres of
@@ -92,12 +94,12 @@ asynchronouslyLoadJAR ng customEventChan jarPath = do
                      , workerThread = worker
                      }
   where
-    addJARChunk nonce jr mres classNames = do
+    addJARChunk jr res classNames = do
       let readClass className = J.loadClassFromJar className jr
       classes <- catMaybes <$> mapM readClass classNames
-      let res' = A.mkJVMResult nonce jr mres classes
+      res' <- A.extendJVMResult res classes
       C.writeChan customEventChan (AnalysisProgress (A.SomeResult res'))
-      return (Just res')
+      return res'
 
 asynchronouslyLoadLLVM :: NG.NonceGenerator IO s -> C.Chan (Events s st) -> FilePath -> IO AsyncLoader
 asynchronouslyLoadLLVM ng customEventChan bcPath = do

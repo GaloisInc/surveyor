@@ -58,6 +58,7 @@ import qualified Data.Traversable as TR
 import qualified SemMC.Architecture as SA
 import qualified SemMC.Formula as F
 import qualified Lang.Crucible.Backend.Simple as SB
+import qualified Lang.Crucible.CFG.Core as CCC
 
 import           Surveyor.Core.IRRepr ( IRRepr )
 
@@ -99,6 +100,7 @@ type ArchConstraints arch s = (Eq (Address arch s),
 
 class (IR arch s) => Architecture (arch :: *) (s :: *) where
   data ArchResult arch s :: *
+  type CrucibleExt arch :: *
 
   -- | Extract the nonce for the analysis result
   archNonce :: AnalysisResult arch s -> NG.Nonce s arch
@@ -126,6 +128,8 @@ class (IR arch s) => Architecture (arch :: *) (s :: *) where
   -- 2. A mapping from base block addresses to their corresponding alternative
   -- blocks; this mapping is not guaranteed to be complete.
   asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe ([Block ir s], BlockMapping arch ir s))
+  -- | Get the Crucible CFG (if available) for the given function
+  crucibleCFG :: AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe (CCC.AnyCFG (CrucibleExt arch)))
 
 data BlockMapping arch ir s =
   BlockMapping { blockMapping :: M.Map (Address arch s) (Block arch s, Block ir s)

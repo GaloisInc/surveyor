@@ -10,10 +10,14 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Surveyor.Core.Architecture.JVM ( mkJVMResult ) where
+module Surveyor.Core.Architecture.JVM (
+  mkInitialJVMResult
+  , extendJVMResult
+  ) where
 
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Monad ( guard )
+import qualified Control.Monad.State.Strict as St
 import qualified Control.Once as O
 import qualified Data.Foldable as F
 import           Data.Int ( Int16, Int32 )
@@ -23,9 +27,11 @@ import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 import           Data.Word ( Word8, Word16 )
+import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Lang.Crucible.JVM as CJ
+import qualified Lang.Crucible.FunctionHandle as CFH
 import qualified Language.JVM.CFG as J
 import qualified Language.JVM.Common as J
-import qualified Language.JVM.JarReader as J
 import qualified Language.JVM.Parser as J
 import           Text.Printf ( printf )
 
@@ -35,29 +41,42 @@ data JVM
 
 data JVMResult s =
   JVMResult { jvmNonce :: NG.Nonce s JVM
-            , jvmJarReader :: J.JarReader
             , jvmClassIndex :: M.Map J.ClassName (J.Class, M.Map J.MethodKey J.Method)
+            , jvmHandleAllocator :: CFH.HandleAllocator
+            , jvmContext :: CJ.JVMContext
             }
 
-mkJVMResult :: NG.Nonce s JVM
-            -- ^ The nonce for this analysis run
-            -> J.JarReader
-            -- ^ The underlying JAR reader
-            -> Maybe (AnalysisResult JVM s)
-            -- ^ The previous analysis result (if any)
-            -> [J.Class]
-            -- ^ Newly-discovered classes to add to the old result
-            -> AnalysisResult JVM s
-mkJVMResult nonce jr oldRes newClasses =
-  AnalysisResult { archResult = JVMAnalysisResult r1
-                 , resultIndex = indexResult r1
-                 }
+-- | Construct an empty JVMResult that can be filled in incrementally
+mkInitialJVMResult :: NG.Nonce s JVM
+                   -> IO (AnalysisResult JVM s)
+mkInitialJVMResult nonce = do
+  halloc <- CFH.newHandleAllocator
+  ctx0 <- CJ.mkInitialJVMContext halloc
+  let r0 = JVMResult { jvmNonce = nonce
+                     , jvmClassIndex = M.empty
+                     , jvmHandleAllocator = halloc
+                     , jvmContext = ctx0
+                     }
+  return AnalysisResult { archResult = JVMAnalysisResult r0
+                        , resultIndex = indexResult r0
+                        }
+
+-- | Extend a JVMResult with a list of additional classes
+extendJVMResult :: AnalysisResult JVM s
+                -- ^ The previous analysis result (if any)
+                -> [J.Class]
+                -- ^ Newly-discovered classes to add to the old result
+                -> IO (AnalysisResult JVM s)
+extendJVMResult ar0 newClasses = do
+  let JVMAnalysisResult r0 = archResult ar0
+  let halloc = jvmHandleAllocator r0
+  ctx1 <- St.execStateT (mapM_ (CJ.extendJVMContext halloc) newClasses) (jvmContext r0)
+  let r1 = r0 { jvmContext = ctx1 }
+  let r2 = F.foldl' indexClass r1 newClasses
+  return AnalysisResult { archResult = JVMAnalysisResult r2
+                        , resultIndex = indexResult r2
+                        }
   where
-    r0 = JVMResult { jvmNonce = nonce
-                   , jvmJarReader = jr
-                   , jvmClassIndex = M.empty
-                   }
-    r1 = F.foldl' indexClass (maybe r0 unwrapAnalysis oldRes) newClasses
     indexClass r k =
       let midx = F.foldl' indexMethods M.empty (J.classMethods k)
       in r { jvmClassIndex = M.insert (J.className k) (k, midx) (jvmClassIndex r)
@@ -70,9 +89,6 @@ indexResult r = O.once ri
     ri = ResultIndex { riFunctions = jvmFunctions r
                      , riSummary = jvmSummarize r
                      }
-
-unwrapAnalysis :: AnalysisResult JVM s -> JVMResult s
-unwrapAnalysis (AnalysisResult (JVMAnalysisResult r) _) = r
 
 data AddrType = ClassK | MethodK | BlockK | InsnK
 
@@ -150,6 +166,7 @@ instance IR JVM s where
 
 instance Architecture JVM s where
   data ArchResult JVM s = JVMAnalysisResult (JVMResult s)
+  type CrucibleExt JVM = CJ.JVM
 
   archNonce (AnalysisResult (JVMAnalysisResult r) _) = jvmNonce r
   functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
@@ -172,6 +189,28 @@ instance Architecture JVM s where
   genericSemantics _ _ = Nothing
   alternativeIRs _ = []
   asAlternativeIR _ _ _ = return Nothing
+  crucibleCFG = jvmCrucibleCFG
+
+jvmCrucibleCFG :: AnalysisResult JVM s
+               -> FunctionHandle JVM s
+               -> IO (Maybe (CCC.AnyCFG (CrucibleExt JVM)))
+jvmCrucibleCFG (AnalysisResult (JVMAnalysisResult jr) _) fh =
+  case fhAddress fh of
+    JVMAddress (MethodAddr (ClassAddr kls) mk) -> do
+      let mmethod = do
+            (_, methodMap) <- M.lookup kls (jvmClassIndex jr)
+            M.lookup mk methodMap
+      case mmethod of
+        Nothing -> return Nothing
+        Just method -> do
+          let verbosity = 0
+          let key = (kls, mk)
+          case M.lookup key (CJ.methodHandles (jvmContext jr)) of
+            Just (CJ.JVMHandleInfo _ hdl) -> do
+              CCC.SomeCFG cfg <- CJ.translateMethod (jvmContext jr) verbosity kls method hdl
+              return (Just (CCC.AnyCFG cfg))
+            _ -> return Nothing
+    _ -> return Nothing
 
 jvmFunctions :: JVMResult s -> [FunctionHandle JVM s]
 jvmFunctions r =

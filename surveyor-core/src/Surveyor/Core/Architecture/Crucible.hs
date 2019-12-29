@@ -78,7 +78,6 @@ import           Surveyor.Core.IRRepr ( Crucible )
 -- For machine code architectures, it will be the MacawExt.  It will be
 -- different for JVM and LLVM
 class CrucibleExtension arch where
-  type family CrucibleExt arch
   type family CrucibleExtensionOperand arch :: Type -> Type
   prettyExtensionStmt :: proxy arch -> C.StmtExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
   prettyExtensionApp :: proxy arch -> C.ExprExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
