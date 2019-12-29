@@ -44,7 +44,7 @@ data UIMode s k where
   -- | View a block
   BlockViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
   -- | View a function
-  FunctionViewer :: UIMode s NormalK
+  FunctionViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
   -- | View the semantics for an individual selected base IR instruction
   SemanticsViewer :: UIMode s NormalK
   -- | An interactive widget that takes focus and accepts all
@@ -59,7 +59,7 @@ prettyMode m =
     FunctionSelector -> "Function Selector"
     BlockSelector -> "Block Selector"
     BlockViewer _nonce repr -> Fmt.fmt ("Block Viewer[" +| repr ||+ "]")
-    FunctionViewer -> "Function Viewer"
+    FunctionViewer _nonce repr -> Fmt.fmt ("Function Viewer[" +| repr ||+ "]")
     SemanticsViewer -> "Semantics Viewer"
 
 data SomeUIMode s where

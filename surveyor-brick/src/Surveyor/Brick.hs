@@ -152,8 +152,12 @@ drawUIMode binFileName archState s uim =
       , Just bview <- archState ^. BH.blockViewerG repr ->
           drawAppShell s (BV.renderBlockViewer binfo (archState ^. C.contextG) bview)
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing block viewer for IR: " ++ show repr)))
-    C.FunctionViewer ->
-      drawAppShell s (FV.renderFunctionViewer binfo (archState ^. C.contextG) (archState ^. BH.functionViewerG ))
+    C.FunctionViewer archNonce repr
+      | Just Refl <- testEquality archNonce (s ^. C.lNonce)
+      , Just fv <- archState ^. BH.functionViewerG repr ->
+        FV.withConstraints fv $ do
+          drawAppShell s (FV.renderFunctionViewer binfo (archState ^. C.contextG) fv)
+      | otherwise -> drawAppShell s (B.txt (T.pack ("Missing function view for IR: " ++ show repr)))
     C.SemanticsViewer ->
       drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. C.contextG) ISV.instructionSemanticsViewer)
   where

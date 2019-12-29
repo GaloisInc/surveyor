@@ -10,6 +10,9 @@ module Surveyor.Brick.Command (
   showMacawBlockC,
   showCrucibleBlockC,
   showBaseBlockC,
+  showMacawFunctionC,
+  showCrucibleFunctionC,
+  showBaseFunctionC,
   showInstructionSemanticsC,
   extraCommands
   ) where
@@ -29,6 +32,9 @@ extraCommands :: (C.HasNonce st, st ~ C.S e u) => [C.SomeCommand (C.SurveyorComm
 extraCommands = [ C.SomeCommand showMacawBlockC
                 , C.SomeCommand showCrucibleBlockC
                 , C.SomeCommand showBaseBlockC
+                , C.SomeCommand showMacawFunctionC
+                , C.SomeCommand showCrucibleFunctionC
+                , C.SomeCommand showBaseFunctionC
                 , C.SomeCommand showInstructionSemanticsC
                 ]
 
@@ -41,15 +47,7 @@ showMacawBlockC =
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->do
       C.writeChan eventChan (C.LogDiagnostic (Just C.LogDebug) "Showing macaw IR")
       C.writeChan eventChan (C.ViewBlock archNonce C.MacawRepr)
-    hasMacawRepr :: C.SomeState (C.S e u) s -> Bool
-    hasMacawRepr sst =
-      case sst of
-        C.SomeState (_ :: C.S e u arch s) ->
-          any isMacawRepr (C.alternativeIRs (Proxy @(arch, s)))
-    isMacawRepr (C.SomeIRRepr r) =
-      case r of
-        C.MacawRepr -> True
-        _ -> False
+
 
 showCrucibleBlockC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showCrucibleBlockC =
@@ -60,14 +58,6 @@ showCrucibleBlockC =
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil -> do
       C.writeChan eventChan (C.LogDiagnostic (Just C.LogDebug) "Showing crucible IR")
       C.writeChan eventChan (C.ViewBlock archNonce C.CrucibleRepr)
-    hasCrucibleRepr sst =
-      case sst of
-        C.SomeState (_ :: C.S e u arch s) ->
-          any  isCrucibleRepr (C.alternativeIRs (Proxy @(arch, s)))
-    isCrucibleRepr (C.SomeIRRepr r) =
-      case r of
-        C.CrucibleRepr -> True
-        _ -> False
 
 showBaseBlockC :: forall s st . (C.HasNonce st) => Command s st '[]
 showBaseBlockC =
@@ -78,6 +68,34 @@ showBaseBlockC =
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
       C.writeChan eventChan (C.ViewBlock archNonce C.BaseRepr)
 
+showMacawFunctionC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
+showMacawFunctionC =
+  C.Command "show-macaw-function" doc PL.Nil PL.Nil callback hasMacawRepr
+  where
+    doc = "Show the macaw CFG for the currently-selected function"
+    callback :: Callback s st '[]
+    callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
+      C.writeChan eventChan (C.ViewFunction archNonce C.MacawRepr)
+
+showCrucibleFunctionC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
+showCrucibleFunctionC =
+  C.Command "show-crucible-function" doc PL.Nil PL.Nil callback hasCrucibleRepr
+  where
+    doc = "Show the crucible CFG for the currently-selected function"
+    callback :: Callback s st '[]
+    callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
+      C.writeChan eventChan (C.ViewFunction archNonce C.CrucibleRepr)
+
+
+showBaseFunctionC :: forall s st . (C.HasNonce st) => Command s st '[]
+showBaseFunctionC =
+  C.Command "show-base-function" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Show the base CFG of the currently-selected function"
+    callback :: Callback s st '[]
+    callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
+      C.writeChan eventChan (C.ViewFunction archNonce C.BaseRepr)
+
 showInstructionSemanticsC :: forall s st . (C.HasNonce st) => Command s st '[]
 showInstructionSemanticsC =
   C.Command "show-instruction-semantics" doc PL.Nil PL.Nil callback (const True)
@@ -86,5 +104,27 @@ showInstructionSemanticsC =
     callback :: Callback s st '[]
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
       C.writeChan eventChan (C.ViewInstructionSemantics archNonce)
+
+hasMacawRepr :: C.SomeState (C.S e u) s -> Bool
+hasMacawRepr sst =
+  case sst of
+    C.SomeState (_ :: C.S e u arch s) ->
+      any isMacawRepr (C.alternativeIRs (Proxy @(arch, s)))
+  where
+    isMacawRepr (C.SomeIRRepr r) =
+      case r of
+        C.MacawRepr -> True
+        _ -> False
+
+hasCrucibleRepr :: C.SomeState (C.S e u) s -> Bool
+hasCrucibleRepr sst =
+  case sst of
+    C.SomeState (_ :: C.S e u arch s) ->
+      any isCrucibleRepr (C.alternativeIRs (Proxy @(arch, s)))
+  where
+    isCrucibleRepr (C.SomeIRRepr r) =
+      case r of
+        C.CrucibleRepr -> True
+        _ -> False
 
 -- FIXME: Should these be in core?

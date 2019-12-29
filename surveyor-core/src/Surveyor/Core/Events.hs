@@ -40,14 +40,14 @@ data Events s st where
   LoadFile :: FilePath -> Events s st
 
   -- Context manipulation
-  PushContext :: PN.Nonce s arch -> A.Block arch s -> Events s st
+  PushContext :: (A.ArchConstraints ir s) => PN.Nonce s arch -> A.FunctionHandle arch s -> IR.IRRepr arch ir -> A.Block ir s -> Events s st
   ContextBack :: Events s st
   ContextForward :: Events s st
 
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st
   ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> Events s st
-  ViewFunction :: PN.Nonce s (arch :: *) -> Events s st
+  ViewFunction :: PN.Nonce s (arch :: *) -> IR.IRRepr arch ir -> Events s st
 
 
   -- Block-related events
