@@ -2,6 +2,9 @@ module Surveyor.Brick.Names (
   Names(..)
   ) where
 
+import qualified Data.Text as T
+import qualified Surveyor.Core as C
+
 data Names = DiagnosticView
            | DiagnosticContent
            | FunctionList
@@ -16,4 +19,6 @@ data Names = DiagnosticView
            | FunctionViewport
            | FunctionCFGViewer
            | InteractiveBlockViewer
+           | SolverRadioSelection C.Solver
+           | FloatModeRadioSelection T.Text
   deriving (Eq, Ord, Show)

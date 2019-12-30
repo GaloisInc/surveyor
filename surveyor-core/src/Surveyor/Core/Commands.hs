@@ -258,7 +258,7 @@ initializeSymbolicExecutionC =
     doc = "Initialize symbolic execution for the currently-selected function"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
-      C.writeChan customEventChan (InitializeSymbolicExecution archNonce Nothing)
+      C.writeChan customEventChan (InitializeSymbolicExecution archNonce Nothing Nothing)
 
 hasContext :: AR.SomeState (CS.S e u) s -> Bool
 hasContext (AR.SomeState ss)

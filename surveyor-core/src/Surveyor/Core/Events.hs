@@ -16,6 +16,7 @@ import qualified Renovate as R
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Core.IRRepr as IR
+import qualified Surveyor.Core.Context.SymbolicExecution as SE
 
 data LogLevel = LogDebug
               | LogInfo
@@ -50,7 +51,7 @@ data Events s st where
   -- If the function handle argument is not provided, set up symbolic execution
   -- for the current function.  Entering this state discards any previous
   -- symbolic execution state in the current context.
-  InitializeSymbolicExecution :: PN.Nonce s arch -> Maybe (A.FunctionHandle arch s) -> Events s st
+  InitializeSymbolicExecution :: PN.Nonce s arch -> Maybe SE.SymbolicExecutionConfig -> Maybe (A.FunctionHandle arch s) -> Events s st
 
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st

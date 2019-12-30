@@ -87,7 +87,10 @@ module Surveyor.Core (
   SymEx.SymbolicExecutionConfig(..),
   SymEx.defaultSymbolicExecutionConfig,
   SymEx.SymbolicExecutionState,
-  SymEx.newSymbolicExecutionState,
+  SymEx.configuringSymbolicExecution,
+  SymEx.cleanupSymbolicExecutionState,
+  SymEx.configSolverL,
+  SymEx.configFloatReprL,
   -- ** Modifiers
   CCX.resetBlockSelection,
   CCX.selectNextInstruction,

@@ -53,6 +53,7 @@ import qualified Data.Map as Map
 import           Data.Maybe ( catMaybes, fromMaybe, listToMaybe, mapMaybe, maybeToList )
 import           Data.Parameterized.Classes ( testEquality, (:~:)(Refl), atF )
 import qualified Data.Parameterized.Map as MapF
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableF as TF
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
@@ -90,8 +91,13 @@ data Context arch s =
           -- be updated all at once to ensure consistency.
           , cFunctionState :: MapF.MapF (IR.IRRepr arch) (FunctionState arch s)
           -- ^ State information for the currently-selected function (in each IR)
-          , cSymExecState :: Maybe (SE.SymbolicExecutionState arch s)
+          , cSymExecState :: Some (SE.SymbolicExecutionState arch s)
+          -- ^ State required for symbolic execution
+          --
+          -- We always have at least a default configuration. We lazily
+          -- instantiate the rest as-needed
           , cBaseFunction :: CA.FunctionHandle arch s
+          -- ^ The function handle for the function focused by this context
           }
   deriving (Generic)
 
@@ -110,7 +116,7 @@ data FunctionState arch s ir =
                 , fsWithConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
                 }
 
-symExecStateL :: L.Lens' (Context arch s) (Maybe (SE.SymbolicExecutionState arch s))
+symExecStateL :: L.Lens' (Context arch s) (Some (SE.SymbolicExecutionState arch s))
 symExecStateL = GL.field @"cSymExecState"
 
 functionStateL :: L.Lens' (Context arch s) (MapF.MapF (IR.IRRepr arch) (FunctionState arch s))
@@ -202,7 +208,7 @@ makeContext tcache ares fh irrepr b =
       return Context { cBlockState = MapF.fromList (MapF.Pair IR.BaseRepr baseState : blockStates)
                      , cFunctionState = MapF.fromList (MapF.Pair IR.BaseRepr baseFunctionState : funcStates)
                      , cBaseFunction = fh
-                     , cSymExecState = Nothing
+                     , cSymExecState = Some SE.initialSymbolicExecutionState
                      }
     _ -> do
       bs <- makeAlternativeBlockState b irrepr
@@ -210,7 +216,7 @@ makeContext tcache ares fh irrepr b =
       return Context { cBlockState = MapF.fromList [ MapF.Pair irrepr bs ]
                      , cFunctionState = MapF.fromList (maybeToList mfs)
                      , cBaseFunction = fh
-                     , cSymExecState = Nothing
+                     , cSymExecState = Some SE.initialSymbolicExecutionState
                      }
 
 makeFunctionState :: (CA.Architecture arch s, CA.ArchConstraints ir s)
