@@ -28,6 +28,7 @@ module Surveyor.Core.Context (
   contextBack,
   -- *  Lenses
   currentContext,
+  symExecStateL,
   baseFunctionG,
   blockStateFor,
   blockStateList,
@@ -61,7 +62,8 @@ import qualified Data.Vector as V
 import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.TranslationCache as TC
-
+import qualified Surveyor.Core.Context.SymbolicExecution as SE
+import qualified Surveyor.Core.OperandList as OL
 
 -- | A context focused (at some point) by the user, and used to inform drawing
 -- of various widgets.
@@ -88,9 +90,11 @@ data Context arch s =
           -- be updated all at once to ensure consistency.
           , cFunctionState :: MapF.MapF (IR.IRRepr arch) (FunctionState arch s)
           -- ^ State information for the currently-selected function (in each IR)
+          , cSymExecState :: Maybe (SE.SymbolicExecutionState arch s)
           , cBaseFunction :: CA.FunctionHandle arch s
           }
   deriving (Generic)
+
 
 data FunctionState arch s ir =
   FunctionState { fsSelectedBlock :: Maybe H.Vertex
@@ -105,6 +109,9 @@ data FunctionState arch s ir =
                 -- ^ The base function that this block corresponds to
                 , fsWithConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
                 }
+
+symExecStateL :: L.Lens' (Context arch s) (Maybe (SE.SymbolicExecutionState arch s))
+symExecStateL = GL.field @"cSymExecState"
 
 functionStateL :: L.Lens' (Context arch s) (MapF.MapF (IR.IRRepr arch) (FunctionState arch s))
 functionStateL = GL.field @"cFunctionState"
@@ -195,6 +202,7 @@ makeContext tcache ares fh irrepr b =
       return Context { cBlockState = MapF.fromList (MapF.Pair IR.BaseRepr baseState : blockStates)
                      , cFunctionState = MapF.fromList (MapF.Pair IR.BaseRepr baseFunctionState : funcStates)
                      , cBaseFunction = fh
+                     , cSymExecState = Nothing
                      }
     _ -> do
       bs <- makeAlternativeBlockState b irrepr
@@ -202,6 +210,7 @@ makeContext tcache ares fh irrepr b =
       return Context { cBlockState = MapF.fromList [ MapF.Pair irrepr bs ]
                      , cFunctionState = MapF.fromList (maybeToList mfs)
                      , cBaseFunction = fh
+                     , cSymExecState = Nothing
                      }
 
 makeFunctionState :: (CA.Architecture arch s, CA.ArchConstraints ir s)
@@ -307,7 +316,7 @@ blockStateSelection :: L.Lens' (BlockState arch s ir) (InstructionSelection ir s
 blockStateSelection f bs = fmap (\sel' -> bs { bsSelection = sel' }) (f (bsSelection bs))
 
 data InstructionSelection ir s = NoSelection
-                               | SingleSelection Int (CA.Address ir s) (Maybe (CA.Zipper (Int, CA.Operand ir s)))
+                               | SingleSelection Int (CA.Address ir s) (Maybe (OL.Zipper (Int, CA.Operand ir s)))
                                -- ^ A single instruction is selected and it may have an operand selected
                                | MultipleSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
                                -- ^ Multiple instructions are selected; operands may
@@ -409,14 +418,14 @@ selectPreviousInstruction = moveInstructionSelection (\_nInsns n -> max 0 (n - 1
 -- | If possible, move the operand selection to the right by one
 selectNextOperand :: (CA.IR ir s) => IR.IRRepr arch ir -> ContextStack arch s -> ContextStack arch s
 selectNextOperand repr cs =
-  cs & currentContext . blockStateL . atF repr %~ modifyOperandSelection CA.zipperNext
+  cs & currentContext . blockStateL . atF repr %~ modifyOperandSelection OL.zipperNext
 
 selectPreviousOperand :: (CA.IR ir s) => IR.IRRepr arch ir -> ContextStack arch s -> ContextStack arch s
 selectPreviousOperand repr cs =
-  cs & currentContext . blockStateL . atF repr %~ modifyOperandSelection CA.zipperPrev
+  cs & currentContext . blockStateL . atF repr %~ modifyOperandSelection OL.zipperPrev
 
 modifyOperandSelection :: (CA.IR ir s)
-                       => (forall a . CA.Zipper a -> Maybe (CA.Zipper a))
+                       => (forall a . OL.Zipper a -> Maybe (OL.Zipper a))
                        -> Maybe (BlockState arch s ir)
                        -> Maybe (BlockState arch s ir)
 modifyOperandSelection modz mbs = do
@@ -430,10 +439,10 @@ modifyOperandSelection modz mbs = do
       case i of
         NoSelection -> NoSelection
         SingleSelection n addr Nothing ->
-          let mz0 = CA.zipper (CA.indexOperandList (CA.operands insn))
+          let mz0 = OL.zipper (OL.indexOperandList (CA.operands insn))
           in case mz0 of
             Just z0
-              | CA.operandSelectable (snd (CA.zipperFocused z0)) -> SingleSelection n addr (Just z0)
+              | CA.operandSelectable (snd (OL.zipperFocused z0)) -> SingleSelection n addr (Just z0)
               | otherwise -> SingleSelection n addr (applyUntil (CA.operandSelectable . snd) modz z0)
             Nothing -> SingleSelection n addr Nothing
         SingleSelection n addr (Just z0) ->
@@ -442,12 +451,12 @@ modifyOperandSelection modz mbs = do
         TransientSelection {} -> i
 
 applyUntil :: (a -> Bool)
-           -> (CA.Zipper a -> Maybe (CA.Zipper a))
-           -> CA.Zipper a
-           -> Maybe (CA.Zipper a)
+           -> (OL.Zipper a -> Maybe (OL.Zipper a))
+           -> OL.Zipper a
+           -> Maybe (OL.Zipper a)
 applyUntil p op z = fromMaybe (Just z) $ do
   nz <- op z
-  let elt = CA.zipperFocused nz
+  let elt = OL.zipperFocused nz
   if | p elt -> return (Just nz)
      | otherwise -> return (applyUntil p op nz)
 

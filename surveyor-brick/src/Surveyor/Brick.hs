@@ -160,6 +160,8 @@ drawUIMode binFileName archState s uim =
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing function view for IR: " ++ show repr)))
     C.SemanticsViewer ->
       drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. C.contextG) ISV.instructionSemanticsViewer)
+    C.SymbolicExecution ->
+      drawAppShell s (B.txt "Symbolic execution")
   where
     binfo = C.sAnalysisResult archState
 

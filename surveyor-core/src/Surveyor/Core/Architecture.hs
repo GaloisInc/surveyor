@@ -32,16 +32,6 @@ module Surveyor.Core.Architecture (
   J.extendJVMResult,
   LL.mkLLVMResult,
   M.Macaw,
-  -- * Operand Lists
-  OperandList(..),
-  OperandListItem(..),
-  indexOperandList,
-  Delimiter(..),
-  Zipper,
-  zipper,
-  zipperNext,
-  zipperPrev,
-  zipperFocused
   ) where
 
 import           Surveyor.Core.Architecture.Class

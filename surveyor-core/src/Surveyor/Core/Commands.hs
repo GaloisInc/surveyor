@@ -25,17 +25,21 @@ module Surveyor.Core.Commands (
   resetInstructionSelectionC,
   contextBackC,
   contextForwardC,
+  initializeSymbolicExecutionC,
   allCommands
   ) where
 
+import           Control.Lens ( (^.), (^?) )
 import qualified Data.Functor.Const as C
+import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
 
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
+import qualified Surveyor.Core.Context as CCX
 import           Surveyor.Core.Events ( Events(..) )
-
+import qualified Surveyor.Core.State as CS
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
 type Callback s st tps = C.Chan (Events s st)
@@ -43,7 +47,7 @@ type Callback s st tps = C.Chan (Events s st)
                       -> PL.List (C.ArgumentType (AR.SurveyorCommand s st)) tps
                       -> IO ()
 
-allCommands :: (AR.HasNonce st) => [C.SomeCommand (AR.SurveyorCommand s st)]
+allCommands :: (AR.HasNonce st, st ~ CS.S e u) => [C.SomeCommand (AR.SurveyorCommand s st)]
 allCommands =
   [ C.SomeCommand showSummaryC
   , C.SomeCommand exitC
@@ -63,6 +67,7 @@ allCommands =
   , C.SomeCommand resetInstructionSelectionC
   , C.SomeCommand contextBackC
   , C.SomeCommand contextForwardC
+  , C.SomeCommand initializeSymbolicExecutionC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -245,3 +250,18 @@ loadJARC =
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
       C.writeChan customEventChan (LoadJAR filepath)
+
+initializeSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+initializeSymbolicExecutionC =
+  C.Command "initialize-symbolic-execution" doc PL.Nil PL.Nil callback hasContext
+  where
+    doc = "Initialize symbolic execution for the currently-selected function"
+    callback :: Callback s st '[]
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
+      C.writeChan customEventChan (InitializeSymbolicExecution archNonce Nothing)
+
+hasContext :: AR.SomeState (CS.S e u) s -> Bool
+hasContext (AR.SomeState ss)
+  | Just archState <- ss ^. CS.lArchState =
+      isJust (archState ^? CS.contextL . CCX.currentContext)
+  | otherwise = False

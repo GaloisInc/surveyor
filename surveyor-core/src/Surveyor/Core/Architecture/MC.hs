@@ -62,6 +62,7 @@ import qualified Surveyor.Core.Architecture.Macaw as AM
 import qualified Surveyor.Core.Architecture.Crucible as AC
 import           Surveyor.Core.BinaryAnalysisResult
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr) )
+import qualified Surveyor.Core.OperandList as OL
 
 instance AC.CrucibleExtension PPC.PPC32 where
   type CrucibleExtensionOperand PPC.PPC32 = MacawOperand PPC.PPC32
@@ -531,7 +532,7 @@ instance IR PPC.PPC32 s where
       DPPC.Instruction opc _ -> PPC32Opcode opc
   operands (PPC32Instruction i) =
     case R.toGenericInstruction @PPC.PPC32 i of
-      DPPC.Instruction _ ops -> fromList (FC.toListFC PPC32Operand ops)
+      DPPC.Instruction _ ops -> OL.fromList (FC.toListFC PPC32Operand ops)
   boundValue _ = Nothing
   prettyOperand (PPC32Address addr) (PPC32Operand op) =
     ppcPrettyOperand addr op
@@ -692,7 +693,7 @@ instance IR PPC.PPC64 s where
       DPPC.Instruction opc _ -> PPC64Opcode opc
   operands (PPC64Instruction i) =
     case R.toGenericInstruction @PPC.PPC64 i of
-      DPPC.Instruction _ ops -> fromList (FC.toListFC PPC64Operand ops)
+      DPPC.Instruction _ ops -> OL.fromList (FC.toListFC PPC64Operand ops)
   boundValue _ = Nothing
   prettyOperand (PPC64Address addr) (PPC64Operand op) =
     ppcPrettyOperand addr op
@@ -776,7 +777,7 @@ instance IR X86.X86_64 s where
   data Address X86.X86_64 s = X86Address (MM.MemAddr 64)
   prettyAddress (X86Address addr) = mcPrettyAddress addr
   opcode (X86Instruction i) = X86Opcode (X86.instrOpcode i)
-  operands (X86Instruction i) = fromList (map (uncurry X86Operand) (X86.instrOperands i))
+  operands (X86Instruction i) = OL.fromList (map (uncurry X86Operand) (X86.instrOperands i))
   boundValue _ = Nothing
   prettyOpcode (X86Opcode s) = T.pack s
   prettyOperand (X86Address addr) (X86Operand v _) =

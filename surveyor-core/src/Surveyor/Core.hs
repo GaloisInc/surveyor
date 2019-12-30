@@ -30,15 +30,17 @@ module Surveyor.Core (
   CA.ParameterizedFormula(..),
   CA.prettyParameterizedFormula,
   CA.SomeResult(..),
-  CA.OperandList(..),
-  CA.OperandListItem(..),
-  CA.indexOperandList,
-  CA.Delimiter(..),
-  CA.Zipper,
-  CA.zipper,
-  CA.zipperNext,
-  CA.zipperPrev,
-  CA.zipperFocused,
+  -- ** Operand lists
+  OL.OperandList,
+  OL.OperandListItem(..),
+  OL.indexOperandList,
+  OL.Delimiter(..),
+  OL.Zipper,
+  OL.zipper,
+  OL.zipperNext,
+  OL.zipperPrev,
+  OL.zipperFocused,
+  OL.listItems,
   -- * State
   module Surveyor.Core.State,
   CAS.asynchronously,
@@ -80,6 +82,12 @@ module Surveyor.Core (
   CCX.emptyContextStack,
   CCX.makeContext,
   CCX.selectedIndex,
+  -- ** Symbolic Execution
+  SymEx.Solver(..),
+  SymEx.SymbolicExecutionConfig(..),
+  SymEx.defaultSymbolicExecutionConfig,
+  SymEx.SymbolicExecutionState,
+  SymEx.newSymbolicExecutionState,
   -- ** Modifiers
   CCX.resetBlockSelection,
   CCX.selectNextInstruction,
@@ -92,6 +100,7 @@ module Surveyor.Core (
   CCX.contextBack,
   CCX.contextForward,
   -- ** Lenses
+  CCX.symExecStateL,
   CCX.baseFunctionG,
   CCX.currentContext,
   CCX.blockStateFor,
@@ -137,12 +146,14 @@ import qualified Surveyor.Core.Chan as CS
 import qualified Surveyor.Core.Command as CC
 import           Surveyor.Core.Commands
 import qualified Surveyor.Core.Context as CCX
+import qualified Surveyor.Core.Context.SymbolicExecution as SymEx
 import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.Events as CE
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.Loader as CL
 import qualified Surveyor.Core.Mode as M
+import qualified Surveyor.Core.OperandList as OL
 import           Surveyor.Core.State
 import qualified Surveyor.Core.TranslationCache as TC
 

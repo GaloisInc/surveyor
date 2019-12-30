@@ -193,6 +193,18 @@ handleCustomEvent s0 evt =
         C.SomeMiniBuffer _ -> B.continue (C.State s0)
         C.SomeUIMode mode -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer mode))
 
+    C.InitializeSymbolicExecution archNonce mFuncHandle
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
+          let gen = s0 ^. C.lNonceGenerator
+          -- FIXME: Does this state need to be allocated asynchronously?
+          symExecState <- liftIO $ C.newSymbolicExecutionState C.defaultSymbolicExecutionConfig gen
+          -- FIXME: If we are overwriting a state, make sure we clean it up
+          -- properly (e.g. closing solver connections)
+          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecution
+                      & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Just symExecState
+          B.continue (C.State s1)
+      | otherwise -> B.continue (C.State s0)
+
     C.ViewBlock archNonce rep
       | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
           -- Set the current view to the block viewer (of the appropriate IR)
@@ -500,6 +512,7 @@ functionViewerKeys nonce rep = ( C.SomeUIMode (C.FunctionViewer nonce rep)
                                , [ (C.Key (V.KChar 'm') [], C.SomeCommand BC.showMacawFunctionC)
                                  , (C.Key (V.KChar 'c') [], C.SomeCommand BC.showCrucibleFunctionC)
                                  , (C.Key (V.KChar 'b') [], C.SomeCommand BC.showBaseFunctionC)
+                                 , (C.Key (V.KChar 's') [], C.SomeCommand C.initializeSymbolicExecutionC)
                                  ]
                                )
 

@@ -26,7 +26,6 @@ import qualified Brick.Widgets.List as B
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Lens ( (^.), (^?), (&), (.~) )
 import qualified Data.ByteString as BS
-import qualified Data.Foldable as F
 import qualified Data.List as L
 import           Data.Parameterized.Classes
 import           Data.Proxy ( Proxy(..) )
@@ -189,8 +188,8 @@ renderOperandList :: (C.IR arch s)
                   -> Maybe (C.Zipper (Int, C.Operand arch s))
                   -> C.OperandList (Int, C.Operand arch s)
                   -> [B.Widget Names]
-renderOperandList addr mSelOperand (C.OperandList ol) =
-  concatMap renderOperandListItem (F.toList ol)
+renderOperandList addr mSelOperand ol =
+  concatMap renderOperandListItem (C.listItems ol)
   where
     renderOperandListItem oli =
       case oli of

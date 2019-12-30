@@ -44,6 +44,14 @@ data Events s st where
   ContextBack :: Events s st
   ContextForward :: Events s st
 
+  -- Symbolic execution events
+  -- | Begin setting up symbolic execution for the provided function.
+  --
+  -- If the function handle argument is not provided, set up symbolic execution
+  -- for the current function.  Entering this state discards any previous
+  -- symbolic execution state in the current context.
+  InitializeSymbolicExecution :: PN.Nonce s arch -> Maybe (A.FunctionHandle arch s) -> Events s st
+
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st
   ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> Events s st

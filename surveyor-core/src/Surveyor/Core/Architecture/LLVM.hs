@@ -50,6 +50,7 @@ import qualified What4.ProgramLoc as WPL
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Crucible as AC
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr), Crucible )
+import qualified Surveyor.Core.OperandList as OL
 
 data LLVM
 
@@ -665,115 +666,115 @@ ppOperand op =
     Ordering ao -> LL.ppAtomicOrdering ao
     AtomicOp ao -> LL.ppAtomicOp ao
 
-stmtOperands :: LL.Stmt -> OperandList (Operand LLVM s)
+stmtOperands :: LL.Stmt -> OL.OperandList (Operand LLVM s)
 stmtOperands stmt =
   case stmt of
     LL.Result _ instr _ -> instrOperands instr
     LL.Effect instr _ -> instrOperands instr
 
-instrOperands :: LL.Instr -> OperandList (Operand LLVM s)
+instrOperands :: LL.Instr -> OL.OperandList (Operand LLVM s)
 instrOperands i =
   case i of
-    LL.RetVoid {} -> fromList []
-    LL.Ret rv -> fromList [LLVMOperand (TypedValue rv)]
+    LL.RetVoid {} -> OL.fromList []
+    LL.Ret rv -> OL.fromList [LLVMOperand (TypedValue rv)]
     LL.Arith _ tv v ->
-      fromList [ LLVMOperand (TypedValue tv)
+      OL.fromList [ LLVMOperand (TypedValue tv)
                , LLVMOperand (Value v)
                ]
     LL.Bit _ tv v ->
-      fromList [ LLVMOperand (TypedValue tv)
+      OL.fromList [ LLVMOperand (TypedValue tv)
                , LLVMOperand (Value v)
                ]
     LL.Conv _ tv ty ->
-      fromList [ LLVMOperand (TypedValue tv)
+      OL.fromList [ LLVMOperand (TypedValue tv)
                , LLVMOperand (Type ty)
                ]
     LL.Call _ ty callee args ->
-      fromItemList [ Item (LLVMOperand (Type ty))
-                   , Item (LLVMOperand (Value callee))
-                   , Delimited Parens (fromList (map (LLVMOperand . TypedValue) args))
+      OL.fromItemList [ OL.Item (LLVMOperand (Type ty))
+                   , OL.Item (LLVMOperand (Value callee))
+                   , OL.Delimited OL.Parens (OL.fromList (map (LLVMOperand . TypedValue) args))
                    ]
     LL.Alloca ty nelts align ->
-      fromList $
+      OL.fromList $
       concat [ [LLVMOperand (Type ty)]
              , maybe [] ((:[]) . LLVMOperand . TypedValue) nelts
              , maybe [] ((:[]) . LLVMOperand . ConstantInt) align
              ]
     LL.Load tv _ align ->
-      fromList $
+      OL.fromList $
       concat [ [LLVMOperand (TypedValue tv)]
              , maybe [] ((:[]) . LLVMOperand . ConstantInt) align
              ]
     LL.Store tv1 tv2 ordering align ->
-      fromList $
+      OL.fromList $
       concat [ [LLVMOperand (TypedValue tv1), LLVMOperand (TypedValue tv2)]
              , maybe [] ((:[]) . LLVMOperand . Ordering) ordering
              , maybe [] ((:[]) . LLVMOperand . ConstantInt) align
              ]
-    LL.ICmp _ tv v -> fromList [LLVMOperand (TypedValue tv), LLVMOperand (Value v)]
-    LL.FCmp _ tv v -> fromList [LLVMOperand (TypedValue tv), LLVMOperand (Value v)]
+    LL.ICmp _ tv v -> OL.fromList [LLVMOperand (TypedValue tv), LLVMOperand (Value v)]
+    LL.FCmp _ tv v -> OL.fromList [LLVMOperand (TypedValue tv), LLVMOperand (Value v)]
     LL.Phi ty vs ->
-      fromItemList [ Item (LLVMOperand (Type ty))
-                   , Delimited Parens (fromList (map (LLVMOperand . Value . fst) vs))
+      OL.fromItemList [ OL.Item (LLVMOperand (Type ty))
+                   , OL.Delimited OL.Parens (OL.fromList (map (LLVMOperand . Value . fst) vs))
                    ]
-    LL.GEP _ tv tvs -> fromList (LLVMOperand (TypedValue tv) : map (LLVMOperand . TypedValue) tvs)
+    LL.GEP _ tv tvs -> OL.fromList (LLVMOperand (TypedValue tv) : map (LLVMOperand . TypedValue) tvs)
     LL.Select tv1 tv2 v ->
-      fromList [ LLVMOperand (TypedValue tv1)
+      OL.fromList [ LLVMOperand (TypedValue tv1)
                , LLVMOperand (TypedValue tv2)
                , LLVMOperand (Value v)
                ]
-    LL.ExtractValue tv ixs -> fromList (LLVMOperand (TypedValue tv) : map (LLVMOperand . ConstantInt . fromIntegral) ixs)
+    LL.ExtractValue tv ixs -> OL.fromList (LLVMOperand (TypedValue tv) : map (LLVMOperand . ConstantInt . fromIntegral) ixs)
     LL.InsertValue tv1 tv2 ixs ->
-      fromList (LLVMOperand (TypedValue tv1) : LLVMOperand (TypedValue tv2) : map (LLVMOperand . ConstantInt . fromIntegral) ixs)
-    LL.ExtractElt tv v -> fromList [LLVMOperand (TypedValue tv), LLVMOperand (Value v)]
+      OL.fromList (LLVMOperand (TypedValue tv1) : LLVMOperand (TypedValue tv2) : map (LLVMOperand . ConstantInt . fromIntegral) ixs)
+    LL.ExtractElt tv v -> OL.fromList [LLVMOperand (TypedValue tv), LLVMOperand (Value v)]
     LL.InsertElt tv1 tv2 v ->
-      fromList [ LLVMOperand (TypedValue tv1)
+      OL.fromList [ LLVMOperand (TypedValue tv1)
                , LLVMOperand (TypedValue tv2)
                , LLVMOperand (Value v)
                ]
     LL.ShuffleVector tv1 v tv2 ->
-      fromList [ LLVMOperand (TypedValue tv1)
+      OL.fromList [ LLVMOperand (TypedValue tv1)
                , LLVMOperand (Value v)
                , LLVMOperand (TypedValue tv2)
                ]
-    LL.Jump lab -> fromList [ LLVMOperand (BlockLabel lab) ]
+    LL.Jump lab -> OL.fromList [ LLVMOperand (BlockLabel lab) ]
     LL.Br tv l1 l2 ->
-      fromList [ LLVMOperand (TypedValue tv)
+      OL.fromList [ LLVMOperand (TypedValue tv)
                , LLVMOperand (BlockLabel l1)
                , LLVMOperand (BlockLabel l2)
                ]
     LL.Invoke ty v tvs l1 l2 ->
-      fromItemList [ Item (LLVMOperand (Type ty))
-                   , Item (LLVMOperand (Value v))
-                   , Delimited Parens (fromList (map (LLVMOperand . TypedValue) tvs))
-                   , Item (LLVMOperand (BlockLabel l1))
-                   , Item (LLVMOperand (BlockLabel l2))
+      OL.fromItemList [ OL.Item (LLVMOperand (Type ty))
+                   , OL.Item (LLVMOperand (Value v))
+                   , OL.Delimited OL.Parens (OL.fromList (map (LLVMOperand . TypedValue) tvs))
+                   , OL.Item (LLVMOperand (BlockLabel l1))
+                   , OL.Item (LLVMOperand (BlockLabel l2))
                    ]
-    LL.Comment s -> fromList [ LLVMOperand (ConstantString s) ]
-    LL.Unreachable -> fromList []
-    LL.Unwind -> fromList []
-    LL.VaArg tv t -> fromList [ LLVMOperand (TypedValue tv), LLVMOperand (Type t) ]
+    LL.Comment s -> OL.fromList [ LLVMOperand (ConstantString s) ]
+    LL.Unreachable -> OL.fromList []
+    LL.Unwind -> OL.fromList []
+    LL.VaArg tv t -> OL.fromList [ LLVMOperand (TypedValue tv), LLVMOperand (Type t) ]
     LL.IndirectBr tv labs ->
-      fromItemList [ Item (LLVMOperand (TypedValue tv))
-                   , Delimited Brackets (fromList (map (LLVMOperand . BlockLabel) labs))
+      OL.fromItemList [ OL.Item (LLVMOperand (TypedValue tv))
+                   , OL.Delimited OL.Brackets (OL.fromList (map (LLVMOperand . BlockLabel) labs))
                    ]
     LL.Switch tv lab cases ->
       let ty = LL.typedType tv
-      in fromItemList [ Item (LLVMOperand (TypedValue tv))
-                      , Item (LLVMOperand (BlockLabel lab))
-                      , Delimited Parens (fromList (map (LLVMOperand . SwitchTarget ty) cases))
+      in OL.fromItemList [ OL.Item (LLVMOperand (TypedValue tv))
+                      , OL.Item (LLVMOperand (BlockLabel lab))
+                      , OL.Delimited OL.Parens (OL.fromList (map (LLVMOperand . SwitchTarget ty) cases))
                       ]
     LL.LandingPad ty mtv _ _ ->
-      fromList (catMaybes [ Just (LLVMOperand (Type ty))
+      OL.fromList (catMaybes [ Just (LLVMOperand (Type ty))
                 , (LLVMOperand . TypedValue) <$> mtv
                 ])
-    LL.Resume tv -> fromList [ LLVMOperand (TypedValue tv) ]
+    LL.Resume tv -> OL.fromList [ LLVMOperand (TypedValue tv) ]
     LL.Fence mscope ordering ->
-      fromList (catMaybes [ (LLVMOperand . ConstantString) <$> mscope
+      OL.fromList (catMaybes [ (LLVMOperand . ConstantString) <$> mscope
                 , Just (LLVMOperand (Ordering ordering))
                 ])
     LL.CmpXchg _weak _volatile ptr cmpVal newVal mscope aoSuccess aoFail ->
-      fromList $
+      OL.fromList $
       catMaybes [ Just (LLVMOperand (TypedValue ptr))
                 , Just (LLVMOperand (TypedValue cmpVal))
                 , Just (LLVMOperand (TypedValue newVal))
@@ -782,7 +783,7 @@ instrOperands i =
                 , Just (LLVMOperand (Ordering aoFail))
                 ]
     LL.AtomicRW _volatile op ptr val mscope ordering ->
-      fromList $
+      OL.fromList $
       catMaybes [ Just (LLVMOperand (AtomicOp op))
                 , Just (LLVMOperand (TypedValue ptr))
                 , Just (LLVMOperand (TypedValue val))

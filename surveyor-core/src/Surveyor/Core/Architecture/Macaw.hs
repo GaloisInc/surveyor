@@ -49,6 +49,7 @@ import           Text.Read ( readMaybe )
 
 import           Surveyor.Core.Architecture.Class
 import           Surveyor.Core.IRRepr ( Macaw )
+import qualified Surveyor.Core.OperandList as OL
 
 macawForBlocks :: forall arch s
                 . (MC.MemWidth (MC.ArchAddrWidth arch), Ord (Address arch s), MC.ArchConstraints arch, Show (Address arch s))
@@ -208,9 +209,9 @@ type MacawConstraints arch s = ( Ord (Address (Macaw arch) s)
                                )
 
 instance (MacawConstraints arch s) => IR (Macaw arch) s where
-  data Instruction (Macaw arch) s = forall ids . MacawStmt (MC.Stmt arch ids) (Maybe (Operand (Macaw arch) s)) (OperandList (Operand (Macaw arch) s))
-                                  | forall ids . MacawInstructionStart (MC.ArchSegmentOff arch) (MC.ArchAddrWord arch) (MC.Stmt arch ids) (OperandList (Operand (Macaw arch) s))
-                                  | forall ids . MacawTermStmt (MC.ParsedTermStmt arch ids) (OperandList (Operand (Macaw arch) s))
+  data Instruction (Macaw arch) s = forall ids . MacawStmt (MC.Stmt arch ids) (Maybe (Operand (Macaw arch) s)) (OL.OperandList (Operand (Macaw arch) s))
+                                  | forall ids . MacawInstructionStart (MC.ArchSegmentOff arch) (MC.ArchAddrWord arch) (MC.Stmt arch ids) (OL.OperandList (Operand (Macaw arch) s))
+                                  | forall ids . MacawTermStmt (MC.ParsedTermStmt arch ids) (OL.OperandList (Operand (Macaw arch) s))
   data Address (Macaw arch) s = MacawAddress (MC.ArchAddrWord arch)
                               | BlockNumber (MC.ArchSegmentOff arch)
                               | InstructionNumber Int
@@ -335,35 +336,35 @@ macawTermStmtOpcode stmt =
 macawTermStmtOperands :: NonceCache ids s
                       -> PN.NonceGenerator IO s
                       -> MC.ParsedTermStmt arch ids
-                      -> IO (OperandList (Operand (Macaw arch) s))
+                      -> IO (OL.OperandList (Operand (Macaw arch) s))
 macawTermStmtOperands cache ng stmt =
   case stmt of
     MC.PLTStub regs next relo -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
-      return $ fromList [ MacawOperand n1 (StateUpdate regs)
+      return $ OL.fromList [ MacawOperand n1 (StateUpdate regs)
                         , MacawOperand n2 (SegmentOffset next)
                         , MacawOperand n3 (Relocation relo)
                         ]
     MC.ParsedCall regs Nothing -> do
       n1 <- PN.freshNonce ng
       -- FIXME: We can actually break out all of the registers as individual arguments
-      return $ fromList [MacawOperand n1 (RegState regs)]
+      return $ OL.fromList [MacawOperand n1 (RegState regs)]
     MC.ParsedCall regs (Just next) -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
+      return $ OL.fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
     MC.ParsedJump regs next -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
+      return $ OL.fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
     MC.ParsedBranch regs cond addr1 addr2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
       cond' <- toValueCached cache ng cond
-      return $ fromList [ MacawOperand n1 (RegState regs)
+      return $ OL.fromList [ MacawOperand n1 (RegState regs)
                         , cond'
                         , MacawOperand n2 (SegmentOffset addr1)
                         , MacawOperand n3 (SegmentOffset addr2)
@@ -372,40 +373,40 @@ macawTermStmtOperands cache ng stmt =
       n1 <- PN.freshNonce ng
       idx' <- toValueCached cache ng idx
       n3 <- PN.freshNonce ng
-      return $ fromList [ MacawOperand n1 (RegState regs)
+      return $ OL.fromList [ MacawOperand n1 (RegState regs)
              , idx'
              , MacawOperand n3 (JumpTable tbl)
              ]
     MC.ParsedReturn regs -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (RegState regs)]
+      return $ OL.fromList [MacawOperand n1 (RegState regs)]
     MC.ParsedArchTermStmt _ regs Nothing -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (RegState regs)]
+      return $ OL.fromList [MacawOperand n1 (RegState regs)]
     MC.ParsedArchTermStmt _ regs (Just next) -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
-    MC.ParsedTranslateError {} -> return $ fromList []
+      return $ OL.fromList [MacawOperand n1 (RegState regs), MacawOperand n2 (SegmentOffset next)]
+    MC.ParsedTranslateError {} -> return $ OL.fromList []
     MC.ClassifyFailure regs _ -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (RegState regs)]
+      return $ OL.fromList [MacawOperand n1 (RegState regs)]
 
-macawStmtOperands :: NonceCache ids s -> PN.NonceGenerator IO s -> MC.Stmt arch ids -> IO (OperandList (Operand (Macaw arch) s))
+macawStmtOperands :: NonceCache ids s -> PN.NonceGenerator IO s -> MC.Stmt arch ids -> IO (OL.OperandList (Operand (Macaw arch) s))
 macawStmtOperands cache ng stmt =
   case stmt of
     MC.Comment t -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (CommentText t)]
+      return $ OL.fromList [MacawOperand n1 (CommentText t)]
     MC.InstructionStart addr t -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (AddressLiteral addr), MacawOperand n2 (CommentText t)]
+      return $ OL.fromList [MacawOperand n1 (AddressLiteral addr), MacawOperand n2 (CommentText t)]
     MC.WriteMem addr memRep v -> do
       addr' <- toValueCached cache ng addr
       n2 <- PN.freshNonce ng
       v' <- toValueCached cache ng v
-      return $ fromList [ addr'
+      return $ OL.fromList [ addr'
                         , MacawOperand n2 (MemRepr memRep)
                         , v'
                         ]
@@ -414,7 +415,7 @@ macawStmtOperands cache ng stmt =
       cond' <- toValueCached cache ng cond
       addr' <- toValueCached cache ng addr
       v' <- toValueCached cache ng v
-      return $ fromList [ cond'
+      return $ OL.fromList [ cond'
                         , addr'
                         , MacawOperand n1 (MemRepr memRep)
                         , v'
@@ -422,26 +423,26 @@ macawStmtOperands cache ng stmt =
     MC.ArchState addr upd -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [MacawOperand n1 (Addr addr), MacawOperand n2 (StateUpdate upd)]
+      return $ OL.fromList [MacawOperand n1 (Addr addr), MacawOperand n2 (StateUpdate upd)]
   --   -- FIXME: Need a helper to deconstruct these on a per-arch basis
-    MC.ExecArchStmt {} -> return (fromList [])
+    MC.ExecArchStmt {} -> return (OL.fromList [])
     MC.AssignStmt asgn -> do
       case MC.assignRhs asgn of
         -- FIXME: Need a helper to dissect arch-specific functions
-        MC.EvalArchFn {} -> return (fromList [])
+        MC.EvalArchFn {} -> return (OL.fromList [])
         MC.SetUndefined rep -> do
           n1 <- PN.freshNonce ng
-          return $ fromList [MacawOperand n1 (TypeRepr rep)]
+          return $ OL.fromList [MacawOperand n1 (TypeRepr rep)]
         MC.ReadMem addr memRep -> do
           addr' <- toValueCached cache ng addr
           n2 <- PN.freshNonce ng
-          return $ fromList [addr', MacawOperand n2 (MemRepr memRep)]
+          return $ OL.fromList [addr', MacawOperand n2 (MemRepr memRep)]
         MC.CondReadMem memRep c addr def -> do
           n1 <- PN.freshNonce ng
           c' <- toValueCached cache ng c
           addr' <- toValueCached cache ng addr
           def' <- toValueCached cache ng def
-          return $ fromList [ MacawOperand n1 (MemRepr memRep)
+          return $ OL.fromList [ MacawOperand n1 (MemRepr memRep)
                             , c'
                             , addr'
                             , def'
@@ -451,13 +452,13 @@ macawStmtOperands cache ng stmt =
             MC.Eq v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.Mux rep c v1 v2 -> do
               n1 <- PN.freshNonce ng
               c' <- toValueCached cache ng c
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [ MacawOperand n1 (TypeRepr rep)
+              return $ OL.fromList [ MacawOperand n1 (TypeRepr rep)
                                 , c'
                                 , v1'
                                 , v2'
@@ -466,45 +467,45 @@ macawStmtOperands cache ng stmt =
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
               n3 <- PN.freshNonce ng
-              return $ fromList [MacawOperand n1 (TypeReprs tps), v', MacawOperand n3 (Index ix)]
+              return $ OL.fromList [MacawOperand n1 (TypeReprs tps), v', MacawOperand n3 (Index ix)]
             MC.AndApp v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.OrApp v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.NotApp v -> do
               v' <- toValueCached cache ng v
-              return $ fromList [v']
+              return $ OL.fromList [v']
             MC.XorApp v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.Trunc v tp -> do
               v' <- toValueCached cache ng v
               n2 <- PN.freshNonce ng
-              return $ fromList [v', MacawOperand n2 (NatRepr tp)]
+              return $ OL.fromList [v', MacawOperand n2 (NatRepr tp)]
             MC.SExt v tp -> do
               v' <- toValueCached cache ng v
               n2 <- PN.freshNonce ng
-              return $ fromList [v', MacawOperand n2 (NatRepr tp)]
+              return $ OL.fromList [v', MacawOperand n2 (NatRepr tp)]
             MC.UExt v tp -> do
               v' <- toValueCached cache ng v
               n2 <- PN.freshNonce ng
-              return $ fromList [v', MacawOperand n2 (NatRepr tp)]
+              return $ OL.fromList [v', MacawOperand n2 (NatRepr tp)]
             MC.BVAdd tp v1 v2 -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVAdc tp v1 v2 c -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
               c' <- toValueCached cache ng c
-              return $ fromList [ MacawOperand n1 (NatRepr tp)
+              return $ OL.fromList [ MacawOperand n1 (NatRepr tp)
                                 , v1'
                                 , v2'
                                 , c'
@@ -513,13 +514,13 @@ macawStmtOperands cache ng stmt =
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVSbb tp v1 v2 c -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
               c' <- toValueCached cache ng c
-              return $ fromList [ MacawOperand n1 (NatRepr tp)
+              return $ OL.fromList [ MacawOperand n1 (NatRepr tp)
                                 , v1'
                                 , v2'
                                 , c'
@@ -528,100 +529,100 @@ macawStmtOperands cache ng stmt =
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVUnsignedLe v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.BVUnsignedLt v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.BVSignedLe v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.BVSignedLt v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.BVTestBit v1 v2 -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [v1', v2']
+              return $ OL.fromList [v1', v2']
             MC.BVComplement tp v -> do
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
-              return $ fromList [MacawOperand n1 (NatRepr tp), v']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v']
             MC.BVAnd tp v1 v2 -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVOr tp v1 v2 -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVXor tp v1 v2 -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVShl tp v1 v2 -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVShr tp v1 v2 -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.BVSar tp v1 v2 -> do
               n1 <- PN.freshNonce ng
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
-              return $ fromList [MacawOperand n1 (NatRepr tp), v1', v2']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v1', v2']
             MC.UadcOverflows v1 v2 c -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
               c' <- toValueCached cache ng c
-              return $ fromList [v1', v2', c']
+              return $ OL.fromList [v1', v2', c']
             MC.SadcOverflows v1 v2 c -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
               c' <- toValueCached cache ng c
-              return $ fromList [v1', v2', c']
+              return $ OL.fromList [v1', v2', c']
             MC.UsbbOverflows v1 v2 c -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
               c' <- toValueCached cache ng c
-              return $ fromList [v1', v2', c']
+              return $ OL.fromList [v1', v2', c']
             MC.SsbbOverflows v1 v2 c -> do
               v1' <- toValueCached cache ng v1
               v2' <- toValueCached cache ng v2
               c' <- toValueCached cache ng c
-              return $ fromList [v1', v2', c']
+              return $ OL.fromList [v1', v2', c']
             MC.PopCount tp v -> do
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
-              return $ fromList [MacawOperand n1 (NatRepr tp), v']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v']
             MC.ReverseBytes tp v -> do
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
-              return $ fromList [MacawOperand n1 (NatRepr tp), v']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v']
             MC.Bsf tp v -> do
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
-              return $ fromList [MacawOperand n1 (NatRepr tp), v']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v']
             MC.Bsr tp v -> do
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
-              return $ fromList [MacawOperand n1 (NatRepr tp), v']
+              return $ OL.fromList [MacawOperand n1 (NatRepr tp), v']
             MC.Bitcast v proof -> do
               v' <- toValueCached cache ng v
-              return $ fromList [ v' ]
+              return $ OL.fromList [ v' ]
 
 macawPrettyOpcode :: (MacawConstraints arch s) => MacawOpcode arch s -> T.Text
 macawPrettyOpcode opc =

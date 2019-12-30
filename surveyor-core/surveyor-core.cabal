@@ -31,6 +31,7 @@ library
                        Surveyor.Core.Command
                        Surveyor.Core.Commands
                        Surveyor.Core.Context
+                       Surveyor.Core.Context.SymbolicExecution
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events
                        Surveyor.Core.IRRepr
@@ -39,6 +40,7 @@ library
                        Surveyor.Core.Loader.PPCConfig
                        Surveyor.Core.Loader.RenovateAnalysis
                        Surveyor.Core.Mode
+                       Surveyor.Core.OperandList
                        Surveyor.Core.State
                        Surveyor.Core.TranslationCache
   -- other-extensions:    

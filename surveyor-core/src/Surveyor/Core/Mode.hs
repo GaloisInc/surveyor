@@ -47,6 +47,9 @@ data UIMode s k where
   FunctionViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
   -- | View the semantics for an individual selected base IR instruction
   SemanticsViewer :: UIMode s NormalK
+  -- | A UI for setting up, running, and examining the results of symbolic
+  -- execution for a function
+  SymbolicExecution :: UIMode s NormalK
   -- | An interactive widget that takes focus and accepts all
   -- keystrokes except for C-g
   MiniBuffer :: UIMode s NormalK -> UIMode s MiniBufferK
