@@ -3,6 +3,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.Context.SymbolicExecution (
   SymbolicExecutionConfig(..),
@@ -11,6 +12,10 @@ module Surveyor.Core.Context.SymbolicExecution (
   SymbolicExecutionState,
   symbolicExecutionConfig,
   initialSymbolicExecutionState,
+  -- * Exposed State
+  SymbolicState(..),
+  withSymbolicExecutionState,
+  withPossibleSymbolicExecutionState,
   -- * State Constructors
   configuringSymbolicExecution,
   initializingSymbolicExecution,
@@ -35,11 +40,13 @@ import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.Simulator as CS
 import qualified Lang.Crucible.Types as CT
 import qualified What4.Expr.Builder as WEB
+import qualified What4.Interface as WI
 import qualified What4.ProblemFeatures as WPF
 import qualified What4.Protocol.SMTLib2 as SMT2
 import qualified What4.Solver.CVC4 as WSC
 import qualified What4.Solver.Yices as WSY
 import qualified What4.Solver.Z3 as WSZ
+import qualified What4.Symbol as WS
 
 import qualified Surveyor.Core.Architecture as CA
 
@@ -78,19 +85,36 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   -- incrementally modified via the UI/messages).  The type of the CFG fixes the
   -- shape of the initial registers.  It also contains initial values for global
   -- variables.
-  Initializing :: (sym ~ CBO.OnlineBackend s solver (WEB.Flags fm))
-               => SymbolicExecutionState arch s 'Config
-               -> CCC.SomeCFG (CA.CrucibleExt arch) init reg
-               -> sym
-               -> Ctx.Assignment (CS.RegEntry sym) init
-               -> CS.SymGlobalState sym
+  Initializing :: SymbolicState arch s solver fm init reg
                -> SymbolicExecutionState arch s 'SetupArgs
+
+data SymbolicState arch s solver fm init reg =
+  SymbolicState { symbolicConfig :: SymbolicExecutionConfig
+                , symbolicBackend :: CBO.OnlineBackend s solver (WEB.Flags fm)
+                , someCFG :: CCC.SomeCFG (CA.CrucibleExt arch) init reg
+                , symbolicRegs :: Ctx.Assignment (CS.RegEntry (CBO.OnlineBackend s solver (WEB.Flags fm))) init
+                , symbolicGlobals :: CS.SymGlobalState (CBO.OnlineBackend s solver (WEB.Flags fm))
+                }
 
 symbolicExecutionConfig :: SymbolicExecutionState arch s k -> SymbolicExecutionConfig
 symbolicExecutionConfig s =
   case s of
     Configuring c -> c
-    Initializing s' _ _ _ _ -> symbolicExecutionConfig s'
+    Initializing s' -> symbolicConfig s'
+
+withSymbolicExecutionState :: SymbolicExecutionState arch s 'SetupArgs
+                           -> (forall init reg solver fm . SymbolicState arch s solver fm init reg -> a)
+                           -> a
+withSymbolicExecutionState (Initializing s) k = k s
+
+withPossibleSymbolicExecutionState :: SymbolicExecutionState arch s k
+                                   -> a
+                                   -> (forall init reg solver fm . SymbolicState arch s solver fm init reg -> a)
+                                   -> a
+withPossibleSymbolicExecutionState s def k =
+  case s of
+    Configuring {} -> def
+    Initializing s' -> k s'
 
 initialSymbolicExecutionState :: SymbolicExecutionState arch s 'Config
 initialSymbolicExecutionState = Configuring defaultSymbolicExecutionConfig
@@ -117,10 +141,27 @@ initializingSymbolicExecution gen symExConfig scfg@(CCC.SomeCFG cfg) = do
       -- also set things up that way.  Maybe we should just have an
       -- arch-specific method to make a fresh set of globals.
       let globals = CS.emptyGlobals
-      return (Initializing prevState scfg sym regs globals)
+      let state = SymbolicState { symbolicConfig = symExConfig
+                                , symbolicBackend = sym
+                                , someCFG = scfg
+                                , symbolicRegs = regs
+                                , symbolicGlobals = globals
+                                }
+      return (Initializing state)
 
-allocateSymbolicValue :: sym -> CT.TypeRepr tp -> IO (CS.RegEntry sym tp)
-allocateSymbolicValue = undefined
+-- FIXME: Plumb argument names through
+allocateSymbolicValue :: (WI.IsSymExprBuilder sym) => sym -> CT.TypeRepr tp -> IO (CS.RegEntry sym tp)
+allocateSymbolicValue sym rep =
+  case CT.asBaseType rep of
+    CT.AsBaseType btr -> do
+      symVal <- WI.freshConstant sym name btr
+      return CS.RegEntry { CS.regType = rep
+                         , CS.regValue = symVal
+                         }
+    -- To handle some non-base types, we'll need a typeclass method based on arch
+    CT.NotBaseType -> error "Non-base types not handled yet"
+  where
+    name = WS.safeSymbol "argument"
 
 -- | Clean up any resources held by the provided state.
 --

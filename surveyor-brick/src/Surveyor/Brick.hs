@@ -36,6 +36,7 @@ import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.InstructionSemanticsViewer as ISV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution.Configuration as SEC
+import qualified Surveyor.Brick.Widget.SymbolicExecution.Setup as SES
 
 drawSummary :: (C.Architecture arch s) => FilePath -> C.AnalysisResult arch s -> B.Widget Names
 drawSummary binFileName ares =
@@ -164,8 +165,11 @@ drawUIMode binFileName archState s uim =
     C.SymbolicExecutionConfiguration -> do
       let configurator = archState ^. BH.symbolicExecutionConfiguratorG
       drawAppShell s (SEC.renderSymbolicExecutionConfigurator configurator)
-    C.SymbolicExecutionSetup -> do
-      drawAppShell s (B.txt "Setup symbolic execution state")
+    C.SymbolicExecutionSetup
+      | Just w <- archState ^. BH.symbolicExecutionSetupG ->
+        drawAppShell s (SES.renderSymbolicExecutionSetup w)
+      | otherwise ->
+        drawAppShell s (B.txt "Error: missing expected symbolic execution setup state")
   where
     binfo = C.sAnalysisResult archState
 
