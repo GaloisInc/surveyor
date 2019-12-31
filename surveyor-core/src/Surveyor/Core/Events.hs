@@ -10,6 +10,7 @@ import           Data.Int ( Int64 )
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
+import qualified Lang.Crucible.CFG.Core as CCC
 
 import qualified Renovate as R
 
@@ -51,7 +52,14 @@ data Events s st where
   -- If the function handle argument is not provided, set up symbolic execution
   -- for the current function.  Entering this state discards any previous
   -- symbolic execution state in the current context.
-  InitializeSymbolicExecution :: PN.Nonce s arch -> Maybe SE.SymbolicExecutionConfig -> Maybe (A.FunctionHandle arch s) -> Events s st
+  InitializeSymbolicExecution :: PN.Nonce s arch
+                              -> Maybe SE.SymbolicExecutionConfig
+                              -> Maybe (A.FunctionHandle arch s)
+                              -> Events s st
+  BeginSymbolicExecutionSetup :: PN.Nonce s arch
+                              -> SE.SymbolicExecutionConfig
+                              -> CCC.SomeCFG (A.CrucibleExt arch) init reg
+                              -> Events s st
 
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st

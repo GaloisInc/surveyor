@@ -164,6 +164,8 @@ drawUIMode binFileName archState s uim =
     C.SymbolicExecutionConfiguration -> do
       let configurator = archState ^. BH.symbolicExecutionConfiguratorG
       drawAppShell s (SEC.renderSymbolicExecutionConfigurator configurator)
+    C.SymbolicExecutionSetup -> do
+      drawAppShell s (B.txt "Setup symbolic execution state")
   where
     binfo = C.sAnalysisResult archState
 

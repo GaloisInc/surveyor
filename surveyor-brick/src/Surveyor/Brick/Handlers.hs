@@ -130,7 +130,12 @@ handleVtyEvent s0@(C.State s) evt
       | Just archState <- s ^. C.lArchState -> do
         let conf0 = archState ^. symbolicExecutionConfiguratorG
         conf1 <- SEC.handleSymbolicExecutionConfiguratorEvent (B.VtyEvent evt) conf0
+        -- After we handle user input that might affect the configuration, sync
+        -- the new configuration into the state so that we can always have easy
+        -- access to the latest through the context.
+        let newState = C.configuringSymbolicExecution (SEC.selectedConfiguration conf1)
         let s' = s & C.lArchState . _Just . symbolicExecutionConfiguratorL .~ conf1
+                   & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some newState
         B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
@@ -216,6 +221,15 @@ handleCustomEvent s0 evt =
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionConfiguration
                       & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some newState
                       & C.lArchState . _Just . symbolicExecutionConfiguratorL .~ SEC.symbolicExecutionConfigurator conf
+          B.continue (C.State s1)
+      | otherwise -> B.continue (C.State s0)
+
+    C.BeginSymbolicExecutionSetup archNonce symExConfig cfg
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
+          let ng = C.sNonceGenerator s0
+          symExSt <- liftIO $ C.initializingSymbolicExecution ng symExConfig cfg
+          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionSetup
+                      & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some symExSt
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
 
@@ -505,6 +519,8 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                , functionViewerKeys (C.archNonce ares) C.BaseRepr
                , functionViewerKeys (C.archNonce ares) C.MacawRepr
                , functionViewerKeys (C.archNonce ares) C.CrucibleRepr
+               , (C.SomeUIMode C.SymbolicExecutionConfiguration,
+                  [(C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)])
                ]
     addModeKeys (mode, keys) modeKeymap =
       foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
