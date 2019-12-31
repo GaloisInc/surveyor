@@ -6,24 +6,25 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.Context.SymbolicExecution (
+  -- * Configuration
   SymbolicExecutionConfig(..),
   defaultSymbolicExecutionConfig,
   Solver(..),
-  SymbolicExecutionState,
+  configSolverL,
+  configFloatReprL,
+  -- * The state of the symbolic execution automaton
+  Config,
+  SetupArgs,
+  SymbolicExecutionState(..),
   symbolicExecutionConfig,
   initialSymbolicExecutionState,
   -- * Exposed State
   SymbolicState(..),
-  withSymbolicExecutionState,
-  withPossibleSymbolicExecutionState,
   -- * State Constructors
   configuringSymbolicExecution,
   initializingSymbolicExecution,
   -- * Cleanup
-  cleanupSymbolicExecutionState,
-  -- * Lenses
-  configSolverL,
-  configFloatReprL
+  cleanupSymbolicExecutionState
   ) where
 
 import           GHC.Generics ( Generic )
@@ -61,6 +62,8 @@ data SymbolicExecutionConfig =
                           }
   deriving (Generic)
 
+-- | A default configuration for the symbolic execution engine that uses Yices
+-- and interprets floating point values as reals
 defaultSymbolicExecutionConfig :: SymbolicExecutionConfig
 defaultSymbolicExecutionConfig =
   SymbolicExecutionConfig { symExecSolver = Yices
@@ -78,15 +81,18 @@ configFloatReprL = GL.field @"symExecFloatRepr"
 -- | Data kind for the symbolic execution state machine
 data SymExK = Config | SetupArgs | Execute | Inspect
 
+type Config = 'Config
+type SetupArgs = 'SetupArgs
+
 data SymbolicExecutionState arch s (k :: SymExK) where
   -- | Holds the current configuration during symbolic execution setup
-  Configuring :: SymbolicExecutionConfig -> SymbolicExecutionState arch s 'Config
+  Configuring :: SymbolicExecutionConfig -> SymbolicExecutionState arch s Config
   -- | Holds the current set of initial register values (that can be
   -- incrementally modified via the UI/messages).  The type of the CFG fixes the
   -- shape of the initial registers.  It also contains initial values for global
   -- variables.
   Initializing :: SymbolicState arch s solver fm init reg
-               -> SymbolicExecutionState arch s 'SetupArgs
+               -> SymbolicExecutionState arch s SetupArgs
 
 data SymbolicState arch s solver fm init reg =
   SymbolicState { symbolicConfig :: SymbolicExecutionConfig
@@ -102,26 +108,18 @@ symbolicExecutionConfig s =
     Configuring c -> c
     Initializing s' -> symbolicConfig s'
 
-withSymbolicExecutionState :: SymbolicExecutionState arch s 'SetupArgs
-                           -> (forall init reg solver fm . SymbolicState arch s solver fm init reg -> a)
-                           -> a
-withSymbolicExecutionState (Initializing s) k = k s
-
-withPossibleSymbolicExecutionState :: SymbolicExecutionState arch s k
-                                   -> a
-                                   -> (forall init reg solver fm . SymbolicState arch s solver fm init reg -> a)
-                                   -> a
-withPossibleSymbolicExecutionState s def k =
-  case s of
-    Configuring {} -> def
-    Initializing s' -> k s'
-
+-- | Construct the default state of the symbolic execution automaton
+-- (initializing with the default symbolic execution configuration)
 initialSymbolicExecutionState :: SymbolicExecutionState arch s 'Config
 initialSymbolicExecutionState = Configuring defaultSymbolicExecutionConfig
 
+-- | Construct an initial symbolic execution state with a user-provided
+-- configuration
 configuringSymbolicExecution :: SymbolicExecutionConfig -> SymbolicExecutionState arch s 'Config
 configuringSymbolicExecution = Configuring
 
+-- | Construct a symbolic execution state that is ready for the user to start
+-- specifying initial values (or transition to the executing state)
 initializingSymbolicExecution :: PN.NonceGenerator IO s
                               -> SymbolicExecutionConfig
                               -> CCC.SomeCFG (CA.CrucibleExt arch) init reg

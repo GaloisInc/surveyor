@@ -3,11 +3,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 module Surveyor.Brick.Widget.SymbolicExecution.Setup (
-  SymbolicExecutionSetup,
-  symbolicExecutionSetup,
   renderSymbolicExecutionSetup,
-  handleSymbolicExecutionSetupEvent,
-  withCurrentState
+  handleSymbolicExecutionSetupEvent
   ) where
 
 import qualified Brick as B
@@ -21,23 +18,9 @@ import qualified Lang.Crucible.Simulator as CS
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
 
-data SymbolicExecutionSetup arch s =
-  forall solver fm init reg .
-  SymbolicExecutionSetup { setupState :: C.SymbolicState arch s solver fm init reg
-                         }
-
-withCurrentState :: SymbolicExecutionSetup arch s
-                 -> (forall init reg solver fm . C.SymbolicState arch s solver fm init reg -> a)
-                 -> a
-withCurrentState SymbolicExecutionSetup { setupState = st } k = k st
-
-symbolicExecutionSetup :: C.SymbolicState arch s solver fm init reg
-                       -> SymbolicExecutionSetup arch s
-symbolicExecutionSetup = SymbolicExecutionSetup
-
-renderSymbolicExecutionSetup :: SymbolicExecutionSetup arch s
+renderSymbolicExecutionSetup :: C.SymbolicExecutionState arch s C.SetupArgs
                              -> B.Widget Names
-renderSymbolicExecutionSetup SymbolicExecutionSetup { setupState = st } =
+renderSymbolicExecutionSetup (C.Initializing st) =
   B.vBox [ B.hBox [ B.txt "Solver: ", B.txt (T.pack (show solver))
                   , B.txt "Float Mode: ", B.txt (T.pack (show fm))
                   ]
@@ -46,7 +29,7 @@ renderSymbolicExecutionSetup SymbolicExecutionSetup { setupState = st } =
     solver = C.symbolicConfig st ^. C.configSolverL
     fm = C.symbolicConfig st ^. C.configFloatReprL
 
-handleSymbolicExecutionSetupEvent :: Vty.Event
-                                  -> SymbolicExecutionSetup arch s
-                                  -> B.EventM Names (SymbolicExecutionSetup arch s)
+handleSymbolicExecutionSetupEvent :: B.BrickEvent Names e
+                                  -> C.SymbolicExecutionState arch s C.SetupArgs
+                                  -> B.EventM Names (C.SymbolicExecutionState arch s C.SetupArgs)
 handleSymbolicExecutionSetupEvent _ s = return s

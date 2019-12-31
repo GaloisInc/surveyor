@@ -24,8 +24,7 @@ module Surveyor.Brick.Handlers (
   functionSelectorG,
   functionViewerG,
   minibufferG,
-  symbolicExecutionConfiguratorG,
-  symbolicExecutionSetupG
+  symbolicExecutionManagerG
   ) where
 
 import           GHC.Generics ( Generic )
@@ -66,8 +65,7 @@ import qualified Surveyor.Brick.Widget.BlockViewer as BV
 import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
-import qualified Surveyor.Brick.Widget.SymbolicExecution.Configuration as SEC
-import qualified Surveyor.Brick.Widget.SymbolicExecution.Setup as SES
+import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
 
 appHandleEvent :: C.State BrickUIExtension BrickUIState s -> B.BrickEvent Names (C.Events s (C.S BrickUIExtension BrickUIState)) -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
 appHandleEvent (C.State s0) evt =
@@ -128,17 +126,17 @@ handleVtyEvent s0@(C.State s) evt
           cstk' <- FV.handleFunctionViewerEvent evt fview cstk
           let s' = s & C.lArchState . _Just . C.contextL .~ cstk'
           B.continue $! C.State s'
-    C.SomeUIMode C.SymbolicExecutionConfiguration
+    C.SomeUIMode C.SymbolicExecutionManager
       | Just archState <- s ^. C.lArchState -> do
-        let conf0 = archState ^. symbolicExecutionConfiguratorG
-        conf1 <- SEC.handleSymbolicExecutionConfiguratorEvent (B.VtyEvent evt) conf0
-        -- After we handle user input that might affect the configuration, sync
-        -- the new configuration into the state so that we can always have easy
-        -- access to the latest through the context.
-        let newState = C.configuringSymbolicExecution (SEC.selectedConfiguration conf1)
-        let s' = s & C.lArchState . _Just . symbolicExecutionConfiguratorL .~ conf1
-                   & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some newState
-        B.continue $! C.State s'
+          let manager0 = archState ^. symbolicExecutionManagerL
+          manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
+          let st1 = SEM.symbolicExecutionManagerState manager1
+          -- FIXME: If we don't need any additional state in the SymExManager,
+          -- we can just pass in the state without the wrapper and won't need to
+          -- maintain both
+          let s' = s & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ st1
+                     & C.lArchState . _Just . symbolicExecutionManagerL .~ manager1
+          B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
 handleCustomEvent :: (C.Architecture arch s)
@@ -220,9 +218,10 @@ handleCustomEvent s0 evt =
             Just (Some oldState) -> liftIO $ C.cleanupSymbolicExecutionState oldState
             Nothing -> return ()
           let newState = C.configuringSymbolicExecution conf
-          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionConfiguration
+          let manager = SEM.symbolicExecutionManager (Some newState)
+          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
                       & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some newState
-                      & C.lArchState . _Just . symbolicExecutionConfiguratorL .~ SEC.symbolicExecutionConfigurator conf
+                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
 
@@ -230,12 +229,11 @@ handleCustomEvent s0 evt =
       | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
           let ng = C.sNonceGenerator s0
           symExSt <- liftIO $ C.initializingSymbolicExecution ng symExConfig cfg
-          C.withSymbolicExecutionState symExSt $ \symExSt' -> do
-            let setupWidget = SES.symbolicExecutionSetup symExSt'
-            let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionSetup
-                        & C.lArchState . _Just .symbolicExecutionSetupL .~ Just setupWidget
-                        & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some symExSt
-            B.continue (C.State s1)
+          let manager = SEM.symbolicExecutionManager (Some symExSt)
+          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
+                      & C.lArchState . _Just .symbolicExecutionManagerL .~ manager
+                      & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some symExSt
+          B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
 
     C.ViewBlock archNonce rep
@@ -504,9 +502,8 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                                    , sBlockViewers = MapF.fromList blockViewers
                                                    , sFunctionViewer = MapF.fromList funcViewers
                                                    , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                                   , sSymbolicExecutionConfigurator =
-                                                     SEC.symbolicExecutionConfigurator C.defaultSymbolicExecutionConfig
-                                                   , sSymbolicExecutionSetup = Nothing
+                                                   , sSymbolicExecutionManager =
+                                                     SEM.symbolicExecutionManager (Some (C.Configuring C.defaultSymbolicExecutionConfig))
                                                    }
                         return C.ArchState { C.sAnalysisResult = ares
                                            , C.sUIState = uiState
@@ -525,7 +522,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                , functionViewerKeys (C.archNonce ares) C.BaseRepr
                , functionViewerKeys (C.archNonce ares) C.MacawRepr
                , functionViewerKeys (C.archNonce ares) C.CrucibleRepr
-               , (C.SomeUIMode C.SymbolicExecutionConfiguration,
+               , (C.SomeUIMode C.SymbolicExecutionManager,
                   [(C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)])
                ]
     addModeKeys (mode, keys) modeKeymap =
@@ -579,8 +576,7 @@ data BrickUIState arch s =
                , sBlockSelector :: !(BS.BlockSelector arch s)
                , sBlockViewers :: !(MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
                , sFunctionViewer :: !(MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
-               , sSymbolicExecutionConfigurator :: !(SEC.SymbolicExecutionConfigurator (C.Events s (C.S BrickUIExtension BrickUIState)))
-               , sSymbolicExecutionSetup :: Maybe (SES.SymbolicExecutionSetup arch s)
+               , sSymbolicExecutionManager :: !(SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
                }
   deriving (Generic)
 
@@ -635,14 +631,8 @@ functionViewersL = C.lUIState . GL.field @"sFunctionViewer"
 functionViewerG :: C.IRRepr arch ir -> L.Getter (C.ArchState BrickUIState arch s) (Maybe (FV.FunctionViewer arch s ir))
 functionViewerG rep = L.to (\as -> MapF.lookup rep (as ^. functionViewersL))
 
-symbolicExecutionConfiguratorL :: L.Lens' (C.ArchState BrickUIState arch s) (SEC.SymbolicExecutionConfigurator (C.Events s (C.S BrickUIExtension BrickUIState)))
-symbolicExecutionConfiguratorL = C.lUIState . GL.field @"sSymbolicExecutionConfigurator"
+symbolicExecutionManagerL :: L.Lens' (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
+symbolicExecutionManagerL = C.lUIState . GL.field @"sSymbolicExecutionManager"
 
-symbolicExecutionConfiguratorG :: L.Getter (C.ArchState BrickUIState arch s) (SEC.SymbolicExecutionConfigurator (C.Events s (C.S BrickUIExtension BrickUIState)))
-symbolicExecutionConfiguratorG = L.to (^. symbolicExecutionConfiguratorL)
-
-symbolicExecutionSetupL :: L.Lens' (C.ArchState BrickUIState arch s) (Maybe (SES.SymbolicExecutionSetup arch s))
-symbolicExecutionSetupL = C.lUIState . GL.field @"sSymbolicExecutionSetup"
-
-symbolicExecutionSetupG :: L.Getter (C.ArchState BrickUIState arch s) (Maybe (SES.SymbolicExecutionSetup arch s))
-symbolicExecutionSetupG = L.to (^. symbolicExecutionSetupL)
+symbolicExecutionManagerG :: L.Getter (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
+symbolicExecutionManagerG = L.to (^. symbolicExecutionManagerL)
