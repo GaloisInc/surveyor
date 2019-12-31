@@ -9,6 +9,7 @@ module Surveyor.Brick.Widget.SymbolicExecution (
   ) where
 
 import qualified Brick as B
+import qualified Brick.Forms as B
 import           Data.Parameterized.Some ( Some(..) )
 
 import           Surveyor.Brick.Names ( Names(..) )
@@ -19,29 +20,36 @@ import qualified Surveyor.Core as C
 
 data SymbolicExecutionManager e arch s =
   SymbolicExecutionManager { managerState :: Some (C.SymbolicExecutionState arch s)
+                           , configForm :: B.Form (C.SymbolicExecutionConfig s) e Names
                            }
 
 symbolicExecutionManager :: Some (C.SymbolicExecutionState arch s)
                          -> SymbolicExecutionManager e arch s
-symbolicExecutionManager = SymbolicExecutionManager
+symbolicExecutionManager (Some state) =
+  SymbolicExecutionManager { managerState = Some state
+                           , configForm = SEC.form (C.symbolicExecutionConfig state)
+                           }
 
 renderSymbolicExecutionManager :: SymbolicExecutionManager e arch s
                                -> B.Widget Names
-renderSymbolicExecutionManager (managerState -> Some st) =
+renderSymbolicExecutionManager sem@(managerState -> Some st) =
   case st of
-    C.Configuring {} -> SEC.renderSymbolicExecutionConfigurator st
+    C.Configuring {} -> SEC.renderSymbolicExecutionConfigurator (configForm sem)
     C.Initializing {} -> SES.renderSymbolicExecutionSetup st
 
 handleSymbolicExecutionManagerEvent :: B.BrickEvent Names e
                                     -> SymbolicExecutionManager e arch s
                                     -> B.EventM Names (SymbolicExecutionManager e arch s)
-handleSymbolicExecutionManagerEvent evt (managerState -> Some st) =
+handleSymbolicExecutionManagerEvent evt sem@(managerState -> Some st) =
   case st of
-    C.Configuring {} -> toManager <$> SEC.handleSymbolicExecutionConfiguratorEvent evt st
-    C.Initializing {} -> toManager <$> SES.handleSymbolicExecutionSetupEvent evt st
-
-toManager :: C.SymbolicExecutionState arch s k -> SymbolicExecutionManager e arch s
-toManager = SymbolicExecutionManager . Some
+    C.Configuring {} -> do
+      f' <- SEC.handleSymbolicExecutionConfiguratorEvent evt (configForm sem)
+      return SymbolicExecutionManager { managerState = Some (C.Configuring (B.formState f'))
+                                      , configForm = f'
+                                      }
+    C.Initializing {} -> do
+      st' <- SES.handleSymbolicExecutionSetupEvent evt st
+      return sem { managerState = Some st' }
 
 symbolicExecutionManagerState :: SymbolicExecutionManager e arch s
                               -> Some (C.SymbolicExecutionState arch s)

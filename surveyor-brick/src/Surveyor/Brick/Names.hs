@@ -21,4 +21,5 @@ data Names = DiagnosticView
            | InteractiveBlockViewer
            | SolverRadioSelection C.Solver
            | FloatModeRadioSelection T.Text
+           | SolverInteractionFileEdit
   deriving (Eq, Ord, Show)

@@ -97,6 +97,7 @@ module Surveyor.Core (
   SymEx.cleanupSymbolicExecutionState,
   SymEx.configSolverL,
   SymEx.configFloatReprL,
+  SymEx.solverInteractionFileL,
   -- ** Modifiers
   CCX.resetBlockSelection,
   CCX.selectNextInstruction,

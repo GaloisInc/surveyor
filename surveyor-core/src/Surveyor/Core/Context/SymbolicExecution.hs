@@ -3,6 +3,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -16,6 +17,7 @@ module Surveyor.Core.Context.SymbolicExecution (
   Solver(..),
   configSolverL,
   configFloatReprL,
+  solverInteractionFileL,
   -- * The state of the symbolic execution automaton
   Config,
   SetupArgs,
@@ -32,18 +34,21 @@ module Surveyor.Core.Context.SymbolicExecution (
   ) where
 
 import qualified Control.Lens as L
+import           Control.Monad ( unless )
 import           Data.Maybe ( isJust )
 import           Data.Parameterized.Classes ( testEquality )
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
+import qualified Data.Text as T
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Backend.Online as CBO
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.Simulator as CS
 import qualified Lang.Crucible.Types as CT
 import qualified What4.Config as WC
+import qualified What4.Concrete as WCC
 import qualified What4.Expr.Builder as WEB
 import qualified What4.Interface as WI
 import qualified What4.InterpretedFloatingPoint as WIF
@@ -54,6 +59,7 @@ import qualified What4.Solver.CVC4 as WSC
 import qualified What4.Solver.Yices as WSY
 import qualified What4.Solver.Z3 as WSZ
 import qualified What4.Symbol as WS
+import qualified What4.Utils.StringLiteral as WUS
 
 import qualified Surveyor.Core.Architecture as CA
 
@@ -77,21 +83,26 @@ data SymbolicExecutionConfig s where
   SymbolicExecutionConfig :: (forall st . WIF.IsInterpretedFloatExprBuilder (WEB.ExprBuilder s st (WEB.Flags fm)))
                           => Solver
                           -> WEB.FloatModeRepr fm
+                          -> T.Text
                           -> SymbolicExecutionConfig s
 
 -- | a default configuration for the symbolic execution engine that uses Yices
 -- and interprets floating point values as reals
 defaultSymbolicExecutionConfig :: SymbolicExecutionConfig s
 defaultSymbolicExecutionConfig =
-  SymbolicExecutionConfig Yices WEB.FloatRealRepr
+  SymbolicExecutionConfig Yices WEB.FloatRealRepr ""
 
 configSolverL :: L.Lens' (SymbolicExecutionConfig s) Solver
-configSolverL f (SymbolicExecutionConfig solver fm) =
-  fmap (\solver' -> SymbolicExecutionConfig solver' fm) (f solver)
+configSolverL f (SymbolicExecutionConfig solver fm fp) =
+  fmap (\solver' -> SymbolicExecutionConfig solver' fm fp) (f solver)
 
 configFloatReprL :: L.Lens' (SymbolicExecutionConfig s) (SomeFloatModeRepr s)
-configFloatReprL f (SymbolicExecutionConfig solver fm) =
-  fmap (\(SomeFloatModeRepr fm') -> SymbolicExecutionConfig solver fm') (f (SomeFloatModeRepr fm))
+configFloatReprL f (SymbolicExecutionConfig solver fm fp) =
+  fmap (\(SomeFloatModeRepr fm') -> SymbolicExecutionConfig solver fm' fp) (f (SomeFloatModeRepr fm))
+
+solverInteractionFileL :: L.Lens' (SymbolicExecutionConfig s) T.Text
+solverInteractionFileL f (SymbolicExecutionConfig solver fm fp) =
+  fmap (\fp' -> SymbolicExecutionConfig solver fm fp') (f fp)
 
 -- Setup of the symbolic execution engine (parameters and globals)
 
@@ -143,8 +154,13 @@ initializingSymbolicExecution :: forall s arch init reg
                               -> SymbolicExecutionConfig s
                               -> CCC.SomeCFG (CA.CrucibleExt arch) init reg
                               -> IO (SymbolicExecutionState arch s 'SetupArgs)
-initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig solver floatRep) scfg@(CCC.SomeCFG cfg) = do
+initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig solver floatRep solverFilePath) scfg@(CCC.SomeCFG cfg) = do
   withOnlineBackend gen solver floatRep $ \_proxy sym -> do
+    sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
+    let interactionFilePath = T.strip solverFilePath
+    unless (T.null interactionFilePath) $ do
+      _ <- WC.setOption sifSetting (WCC.ConcreteString (WUS.UnicodeLiteral interactionFilePath))
+      return ()
     regs <- FC.traverseFC (allocateSymbolicEntry (Proxy @(arch, s)) sym) (CCC.cfgArgTypes cfg)
     -- FIXME: We don't really have a good way to enumerate all of the
     -- possibly-needed globals in a CFG... for some backends we can do it...
@@ -223,16 +239,19 @@ withOnlineBackend gen solver floatRep k = do
       sym <- WEB.newExprBuilder floatRep st gen
       let proxy = Proxy @(SMT2.Writer WSC.CVC4)
       WC.extendConfig WSC.cvc4Options (WI.getConfiguration sym)
+      WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
       k proxy sym
     Yices -> do
       st <- CBO.initialOnlineBackendState gen features
       sym <- WEB.newExprBuilder floatRep st gen
       let proxy = Proxy @(WSY.Connection s)
       WC.extendConfig WSY.yicesOptions (WI.getConfiguration sym)
+      WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
       k proxy sym
     Z3 -> do
       st <- CBO.initialOnlineBackendState gen features
       sym <- WEB.newExprBuilder floatRep st gen
       let proxy = Proxy @(SMT2.Writer WSZ.Z3)
       WC.extendConfig WSZ.z3Options (WI.getConfiguration sym)
+      WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
       k proxy sym
