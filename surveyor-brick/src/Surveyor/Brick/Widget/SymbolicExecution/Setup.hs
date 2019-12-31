@@ -22,7 +22,7 @@ renderSymbolicExecutionSetup :: C.SymbolicExecutionState arch s C.SetupArgs
                              -> B.Widget Names
 renderSymbolicExecutionSetup (C.Initializing st) =
   B.vBox [ B.hBox [ B.txt "Solver: ", B.txt (T.pack (show solver))
-                  , B.txt "Float Mode: ", B.txt (T.pack (show fm))
+                  , B.padLeft (B.Pad 10) (B.txt "Float Mode: "), B.txt (T.pack (show fm))
                   ]
          ]
   where
