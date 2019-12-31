@@ -191,6 +191,7 @@ instance Architecture JVM s where
   alternativeIRs _ = []
   asAlternativeIR _ _ _ = return Nothing
   crucibleCFG = jvmCrucibleCFG
+  freshSymbolicEntry _ _ _ = Nothing
 
 jvmCrucibleCFG :: AnalysisResult JVM s
                -> FunctionHandle JVM s

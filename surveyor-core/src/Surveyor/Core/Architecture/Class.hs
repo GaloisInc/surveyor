@@ -42,8 +42,11 @@ import qualified Data.Text as T
 
 import qualified SemMC.Architecture as SA
 import qualified SemMC.Formula as F
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Backend.Simple as SB
 import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Lang.Crucible.Simulator as CS
+import qualified Lang.Crucible.Types as CT
 
 import           Surveyor.Core.IRRepr ( IRRepr )
 import qualified Surveyor.Core.OperandList as OL
@@ -116,6 +119,11 @@ class (IR arch s) => Architecture (arch :: *) (s :: *) where
   asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe ([Block ir s], BlockMapping arch ir s))
   -- | Get the Crucible CFG (if available) for the given function
   crucibleCFG :: AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe (CCC.AnyCFG (CrucibleExt arch)))
+  -- | Allocate a fresh symbolic value of the given type; this is provided so
+  -- that architecture-specific symbolic values can be allocated (e.g., for new
+  -- intrinsic types).  This function is expected to return Nothing if it cannot
+  -- allocate a value for the given type representative.
+  freshSymbolicEntry :: (CB.IsSymInterface sym) => proxy (arch, s) -> sym -> CT.TypeRepr tp -> Maybe (IO (CS.RegValue sym tp))
 
 data BlockMapping arch ir s =
   BlockMapping { blockMapping :: M.Map (Address arch s) (Block arch s, Block ir s)

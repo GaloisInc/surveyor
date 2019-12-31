@@ -23,7 +23,7 @@ import qualified What4.Expr.Builder as WEB
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
 
-form :: C.SymbolicExecutionConfig -> B.Form C.SymbolicExecutionConfig e Names
+form :: C.SymbolicExecutionConfig s -> B.Form (C.SymbolicExecutionConfig s) e Names
 form = B.newForm [ (B.str "Solver: " <+>) @@= B.radioField C.configSolverL solvers
                  , (B.str "Floating point mode: " <+>) @@= B.radioField C.configFloatReprL floatModes
                  ]
@@ -34,10 +34,10 @@ solvers = [ (C.CVC4, SolverRadioSelection C.CVC4, "CVC4")
           , (C.Z3, SolverRadioSelection C.Z3, "Z3")
           ]
 
-floatModes :: [(Some WEB.FloatModeRepr, Names, T.Text)]
-floatModes = [ (Some WEB.FloatRealRepr, FloatModeRadioSelection "Real", "Real")
-             , (Some WEB.FloatIEEERepr, FloatModeRadioSelection "IEEE", "IEEE")
-             , (Some WEB.FloatUninterpretedRepr, FloatModeRadioSelection "Uninterpreted", "Uninterpreted")
+floatModes :: [(C.SomeFloatModeRepr s, Names, T.Text)]
+floatModes = [ (C.SomeFloatModeRepr WEB.FloatRealRepr, FloatModeRadioSelection "Real", "Real")
+             , (C.SomeFloatModeRepr WEB.FloatIEEERepr, FloatModeRadioSelection "IEEE", "IEEE")
+             , (C.SomeFloatModeRepr WEB.FloatUninterpretedRepr, FloatModeRadioSelection "Uninterpreted", "Uninterpreted")
              ]
 
 renderSymbolicExecutionConfigurator :: C.SymbolicExecutionState arch s C.Config

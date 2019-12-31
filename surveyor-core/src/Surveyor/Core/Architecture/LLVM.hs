@@ -30,6 +30,7 @@ import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Extension as CCE
 import qualified Lang.Crucible.FunctionHandle as CFH
@@ -39,13 +40,17 @@ import qualified Lang.Crucible.LLVM.Extension as LE
 import qualified Lang.Crucible.LLVM.MemModel as LLM
 import qualified Lang.Crucible.LLVM.Translation as LT
 import qualified Lang.Crucible.LLVM.TypeContext as LTC
+import qualified Lang.Crucible.Simulator as CS
+import qualified Lang.Crucible.Types as CT
 import           System.FilePath ( (</>) )
 import qualified System.FilePath as SFP
 import qualified Text.LLVM as LL
 import qualified Text.LLVM.PP as LL
 import qualified Text.PrettyPrint as PP
 import           Text.Printf ( printf )
+import qualified What4.Interface as WI
 import qualified What4.ProgramLoc as WPL
+import qualified What4.Symbol as WS
 
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Crucible as AC
@@ -328,6 +333,7 @@ instance Architecture LLVM s where
       CrucibleRepr ->
         crucibleForLLVMBlocks (llvmNonceGen llr) (llvmFunctionIndex llr) fh (llvmCrucibleTranslation llr)
   crucibleCFG = llvmCrucibleCFG
+  freshSymbolicEntry _ = llvmFreshSymbolicEntry
 
 llvmCrucibleCFG :: AnalysisResult LLVM s
                 -> FunctionHandle LLVM s
@@ -343,6 +349,17 @@ llvmCrucibleCFG (AnalysisResult (LLVMAnalysisResult llr) _) fh =
                 return (M.lookup sym (LT.cfgMap mt))
             _ -> return Nothing
     _ -> return Nothing
+
+llvmFreshSymbolicEntry :: (CB.IsSymInterface sym) => sym -> CT.TypeRepr tp -> Maybe (IO (CS.RegValue sym tp))
+llvmFreshSymbolicEntry sym rep =
+  case rep of
+    LLM.LLVMPointerRepr w -> return $ do
+      -- We allocate just plain bitvectors for LLVMPointer, as fully symbolic
+      -- pointers aren't useful and users have to provide more interesting
+      -- pointer relations manually.
+      bv <- WI.freshConstant sym (WS.safeSymbol "bv") (WI.BaseBVRepr w)
+      LLM.llvmPointer_bv sym bv
+    _ -> Nothing
 
 data CrucibleLLVMOperand arch s where
   Alignment :: CLDL.Alignment -> CrucibleLLVMOperand arch s

@@ -44,18 +44,24 @@ import           Text.Read ( readMaybe )
 import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MM
 import qualified Data.Macaw.Discovery as MD
+import           Data.Macaw.PPC.Symbolic ()
 import qualified Data.Macaw.Symbolic as MS
 import qualified Data.Macaw.Types as MT
 import           Data.Macaw.X86.Symbolic ()
-import           Data.Macaw.PPC.Symbolic ()
+import qualified Data.Parameterized.HasRepr as HR
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Extension as CE
+import qualified Lang.Crucible.LLVM.MemModel as LLM
+import qualified Lang.Crucible.Simulator as CS
+import qualified Lang.Crucible.Types as CT
 import qualified Renovate as R
 import qualified Renovate.Arch.PPC as PPC
 import qualified Renovate.Arch.X86_64 as X86
-import qualified Data.Parameterized.HasRepr as HR
+import qualified What4.Interface as WI
+import qualified What4.Symbol as WS
 
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Macaw as AM
@@ -631,6 +637,7 @@ instance Architecture PPC.PPC32 s where
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC32Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
   crucibleCFG (AnalysisResult (PPC32AnalysisResult bar) _) = mcCrucibleCFG ppcaddr32ToConcrete bar
+  freshSymbolicEntry _ = mcFreshSymbolicEntry
 
 ppcaddr32ToConcrete :: Address PPC.PPC32 s -> R.ConcreteAddress PPC.PPC32
 ppcaddr32ToConcrete (PPC32Address ma32) =
@@ -750,6 +757,7 @@ instance Architecture PPC.PPC64 s where
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC64Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
   crucibleCFG (AnalysisResult (PPC64AnalysisResult bar) _) = mcCrucibleCFG ppcaddr64ToConcrete bar
+  freshSymbolicEntry _ = mcFreshSymbolicEntry
 
 
 instance Eq (Address PPC.PPC64 s) where
@@ -866,7 +874,7 @@ instance Architecture X86.X86_64 s where
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks X86Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
   crucibleCFG (AnalysisResult (X86AnalysisResult bar) _) = mcCrucibleCFG x86addr64ToConcrete bar
-
+  freshSymbolicEntry _ = mcFreshSymbolicEntry
 
 
 instance Eq (Address X86.X86_64 s) where
@@ -1011,3 +1019,16 @@ prettyDisplacement (FD.Disp8 x) =
     HPJ.text ("0x" ++ showHex x "")
    else
     HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int16)) "")
+
+-- Symbolic execution support
+
+mcFreshSymbolicEntry :: (CB.IsSymInterface sym) => sym -> CT.TypeRepr tp -> Maybe (IO (CS.RegValue sym tp))
+mcFreshSymbolicEntry sym rep =
+  case rep of
+    LLM.LLVMPointerRepr w -> return $ do
+      -- We allocate just plain bitvectors for LLVMPointer, as fully symbolic
+      -- pointers aren't useful and users have to provide more interesting
+      -- pointer relations manually.
+      bv <- WI.freshConstant sym (WS.safeSymbol "bv") (WI.BaseBVRepr w)
+      LLM.llvmPointer_bv sym bv
+    _ -> Nothing

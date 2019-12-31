@@ -85,6 +85,7 @@ module Surveyor.Core (
   -- ** Symbolic Execution
   SymEx.Solver(..),
   SymEx.SymbolicExecutionConfig(..),
+  SymEx.SomeFloatModeRepr(..),
   SymEx.defaultSymbolicExecutionConfig,
   SymEx.SymbolicState(..),
   SymEx.SymbolicExecutionState(..),

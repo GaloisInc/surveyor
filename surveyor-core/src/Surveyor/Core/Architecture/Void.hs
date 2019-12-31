@@ -43,6 +43,7 @@ instance Architecture Void s where
   alternativeIRs _ = []
   asAlternativeIR _ (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
   crucibleCFG _ _ = return Nothing
+  freshSymbolicEntry _ _ _ = Nothing
 
 instance Eq (Address Void s) where
   VoidAddress v == _ = absurd v

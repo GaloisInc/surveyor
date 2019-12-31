@@ -53,11 +53,11 @@ data Events s st where
   -- for the current function.  Entering this state discards any previous
   -- symbolic execution state in the current context.
   InitializeSymbolicExecution :: PN.Nonce s arch
-                              -> Maybe SE.SymbolicExecutionConfig
+                              -> Maybe (SE.SymbolicExecutionConfig s)
                               -> Maybe (A.FunctionHandle arch s)
                               -> Events s st
   BeginSymbolicExecutionSetup :: PN.Nonce s arch
-                              -> SE.SymbolicExecutionConfig
+                              -> SE.SymbolicExecutionConfig s
                               -> CCC.SomeCFG (A.CrucibleExt arch) init reg
                               -> Events s st
 
