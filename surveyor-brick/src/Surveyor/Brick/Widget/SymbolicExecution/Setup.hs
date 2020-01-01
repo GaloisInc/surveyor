@@ -9,11 +9,7 @@ module Surveyor.Brick.Widget.SymbolicExecution.Setup (
 
 import qualified Brick as B
 import           Control.Lens ( (^.) )
-import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Text as T
-import qualified Graphics.Vty as Vty
-import qualified Lang.Crucible.CFG.Core as CCC
-import qualified Lang.Crucible.Simulator as CS
 
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
