@@ -13,7 +13,7 @@
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.Context.SymbolicExecution (
   -- * Configuration
-  SymbolicExecutionConfig(..),
+  SymbolicExecutionConfig,
   SomeFloatModeRepr(..),
   defaultSymbolicExecutionConfig,
   Solver(..),

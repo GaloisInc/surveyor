@@ -84,7 +84,7 @@ module Surveyor.Core (
   CCX.selectedIndex,
   -- ** Symbolic Execution
   SymEx.Solver(..),
-  SymEx.SymbolicExecutionConfig(..),
+  SymEx.SymbolicExecutionConfig,
   SymEx.SomeFloatModeRepr(..),
   SymEx.defaultSymbolicExecutionConfig,
   SymEx.SymbolicState(..),
