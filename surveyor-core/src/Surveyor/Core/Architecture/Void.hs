@@ -1,6 +1,7 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeInType #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | The 'Void' architecture is an unfortunate artifact, but we need it to
 -- instantiate the @arch@ type parameter to something before we have loaded a
@@ -31,9 +32,13 @@ instance IR Void s where
   showInstructionAddresses _ = False
   operandSelectable _ = False
 
+
+type instance CruciblePersonality Void sym = ()
+
 instance Architecture Void s where
   data ArchResult Void s = VoidAnalysisResult Void
-  type CrucibleExt Void = Void
+  type CrucibleExt Void = ()
+
   summarizeResult (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   archNonce (AnalysisResult (VoidAnalysisResult v) _) = absurd v
   containingBlocks (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
@@ -44,6 +49,7 @@ instance Architecture Void s where
   asAlternativeIR _ (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
   crucibleCFG _ _ = return Nothing
   freshSymbolicEntry _ _ _ = Nothing
+  symbolicInitializers (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
 
 instance Eq (Address Void s) where
   VoidAddress v == _ = absurd v

@@ -5,8 +5,10 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | Instantiations of the 'Architecture' class for machine code architectures
 module Surveyor.Core.Architecture.MC (
@@ -14,6 +16,8 @@ module Surveyor.Core.Architecture.MC (
   mkPPC64Result,
   mkX86Result
   ) where
+
+import           GHC.TypeNats
 
 import           Control.DeepSeq ( NFData, rnf )
 import qualified Control.Once as O
@@ -28,6 +32,7 @@ import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
+import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -54,6 +59,8 @@ import qualified Flexdis86 as FD
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Extension as CE
+import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.LLVM.Intrinsics as CLLI
 import qualified Lang.Crucible.LLVM.MemModel as LLM
 import qualified Lang.Crucible.Simulator as CS
 import qualified Lang.Crucible.Types as CT
@@ -589,6 +596,8 @@ ppcOperandSelectable o =
     DPPC.U16imm {} -> False
     DPPC.U16imm64 {} -> False
 
+type instance CruciblePersonality PPC.PPC32 sym = MS.MacawSimulatorState sym
+
 instance Architecture PPC.PPC32 s where
   data ArchResult PPC.PPC32 s =
     PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32)
@@ -638,6 +647,7 @@ instance Architecture PPC.PPC32 s where
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
   crucibleCFG (AnalysisResult (PPC32AnalysisResult bar) _) = mcCrucibleCFG ppcaddr32ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
+  symbolicInitializers = mcSymbolicInitializers
 
 ppcaddr32ToConcrete :: Address PPC.PPC32 s -> R.ConcreteAddress PPC.PPC32
 ppcaddr32ToConcrete (PPC32Address ma32) =
@@ -710,6 +720,8 @@ instance IR PPC.PPC64 s where
   showInstructionAddresses _ = True
   operandSelectable (PPC64Operand o) = ppcOperandSelectable o
 
+type instance CruciblePersonality PPC.PPC64 sym = MS.MacawSimulatorState sym
+
 instance Architecture PPC.PPC64 s where
   data ArchResult PPC.PPC64 s =
     PPC64AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64)
@@ -758,6 +770,7 @@ instance Architecture PPC.PPC64 s where
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
   crucibleCFG (AnalysisResult (PPC64AnalysisResult bar) _) = mcCrucibleCFG ppcaddr64ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
+  symbolicInitializers = mcSymbolicInitializers
 
 
 instance Eq (Address PPC.PPC64 s) where
@@ -831,10 +844,13 @@ instance IR X86.X86_64 s where
 
       FD.SegmentValue {} -> False
 
+type instance CruciblePersonality X86.X86_64 sym = MS.MacawSimulatorState sym
+
 instance Architecture X86.X86_64 s where
   data ArchResult X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.X86_64)
   type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
+--  type CruciblePersonality X86.X86_64 = forall sym . MS.MacawSimulatorState sym
 
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   archNonce (AnalysisResult (X86AnalysisResult bar) _) = mcNonce bar
@@ -875,7 +891,38 @@ instance Architecture X86.X86_64 s where
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
   crucibleCFG (AnalysisResult (X86AnalysisResult bar) _) = mcCrucibleCFG x86addr64ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
+  symbolicInitializers = mcSymbolicInitializers
 
+-- FIXME: This needs to be completed once the memory model rewrite for
+-- macaw-symbolic is merged to master macaw.
+mcSymbolicInitializers :: forall arch s sym
+                        . ( CB.IsSymInterface sym
+                          , MS.ArchInfo arch
+                          , 1 <= MM.ArchAddrWidth arch
+                          , CruciblePersonality arch sym ~ MS.MacawSimulatorState sym
+                          , CrucibleExt arch ~ MS.MacawExt arch
+                          )
+                       => AnalysisResult arch s
+                       -> sym
+                       -> IO ( CS.IntrinsicTypes sym
+                             , CFH.HandleAllocator
+                             , CS.FunctionBindings (MS.MacawSimulatorState sym) sym (CrucibleExt arch)
+                             , CS.ExtensionImpl (MS.MacawSimulatorState sym) sym (CrucibleExt arch)
+                             , CruciblePersonality arch sym
+                             )
+mcSymbolicInitializers _ares sym = do
+  let Just archVals = MS.archVals (Proxy @arch)
+  let intrinsics = CLLI.llvmIntrinsicTypes
+  halloc <- CFH.newHandleAllocator
+  let bindings = CFH.emptyHandleMap
+  MS.withArchEval archVals sym $ \archEvalFns -> do
+    -- These values are not hard to get, but it will be easier after a branch is
+    -- merged from macaw that redoes some of the details of memory access.
+    let gv = error "Global var for macaw"
+    let globalMap = error "Global map for macaw"
+    let lfh = error "lfh for macaw"
+    let extImpl = MS.macawExtensions archEvalFns gv globalMap lfh
+    return (intrinsics, halloc, bindings, extImpl, MS.MacawSimulatorState)
 
 instance Eq (Address X86.X86_64 s) where
   X86Address a1 == X86Address a2 = a1 == a2

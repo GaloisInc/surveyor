@@ -32,6 +32,7 @@ library
                        Surveyor.Core.Commands
                        Surveyor.Core.Context
                        Surveyor.Core.Context.SymbolicExecution
+                       Surveyor.Core.Context.SymbolicExecution.Config
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events
                        Surveyor.Core.IRRepr
@@ -58,6 +59,7 @@ library
                        prettyprinter,
                        pretty,
                        ansi-wl-pprint,
+                       process,
                        split >= 0.2 && < 0.3,
                        lens >= 4.15 && < 5,
                        generic-lens >= 0.5.1.0 && < 1.3,

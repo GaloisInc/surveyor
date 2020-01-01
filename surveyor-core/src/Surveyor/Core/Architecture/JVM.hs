@@ -27,9 +27,11 @@ import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 import           Data.Word ( Word8, Word16 )
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.JVM as CJ
 import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.Simulator as CS
 import qualified Language.JVM.CFG as J
 import qualified Language.JVM.Common as J
 import qualified Language.JVM.Parser as J
@@ -165,6 +167,8 @@ instance IR JVM s where
       W8 {} -> False
       W16 {} -> False
 
+type instance CruciblePersonality JVM sym = ()
+
 instance Architecture JVM s where
   data ArchResult JVM s = JVMAnalysisResult (JVMResult s)
   type CrucibleExt JVM = CJ.JVM
@@ -192,6 +196,7 @@ instance Architecture JVM s where
   asAlternativeIR _ _ _ = return Nothing
   crucibleCFG = jvmCrucibleCFG
   freshSymbolicEntry _ _ _ = Nothing
+  symbolicInitializers = jvmSymbolicInitializers
 
 jvmCrucibleCFG :: AnalysisResult JVM s
                -> FunctionHandle JVM s
@@ -213,6 +218,21 @@ jvmCrucibleCFG (AnalysisResult (JVMAnalysisResult jr) _) fh =
               return (Just (CCC.AnyCFG cfg))
             _ -> return Nothing
     _ -> return Nothing
+
+jvmSymbolicInitializers :: (CB.IsSymInterface sym)
+                        => AnalysisResult JVM s
+                        -> sym
+                        -> IO ( CS.IntrinsicTypes sym
+                              , CFH.HandleAllocator
+                              , CS.FunctionBindings () sym (CrucibleExt JVM)
+                              , CS.ExtensionImpl () sym (CrucibleExt JVM)
+                              , ()
+                              )
+jvmSymbolicInitializers (AnalysisResult (JVMAnalysisResult jr) _) _sym = do
+  let intrinsics = CJ.jvmIntrinsicTypes
+  let funcBindings = CFH.emptyHandleMap
+  let extImpl = CJ.jvmExtensionImpl
+  return (intrinsics, jvmHandleAllocator jr, funcBindings, extImpl, ())
 
 jvmFunctions :: JVMResult s -> [FunctionHandle JVM s]
 jvmFunctions r =

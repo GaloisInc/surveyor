@@ -34,10 +34,12 @@ import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Extension as CCE
 import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.LLVM as LL
 import qualified Lang.Crucible.LLVM.Bytes as CLLB
 import qualified Lang.Crucible.LLVM.DataLayout as CLDL
 import qualified Lang.Crucible.LLVM.Extension as LE
 import qualified Lang.Crucible.LLVM.MemModel as LLM
+import qualified Lang.Crucible.LLVM.Intrinsics as LLI
 import qualified Lang.Crucible.LLVM.Translation as LT
 import qualified Lang.Crucible.LLVM.TypeContext as LTC
 import qualified Lang.Crucible.Simulator as CS
@@ -314,6 +316,8 @@ instance IR LLVM s where
       Ordering {} -> False
       AtomicOp {} -> False
 
+type instance CruciblePersonality LLVM sym = ()
+
 instance Architecture LLVM s where
   data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
   type CrucibleExt LLVM = LE.LLVM (LE.X86 64)
@@ -334,6 +338,7 @@ instance Architecture LLVM s where
         crucibleForLLVMBlocks (llvmNonceGen llr) (llvmFunctionIndex llr) fh (llvmCrucibleTranslation llr)
   crucibleCFG = llvmCrucibleCFG
   freshSymbolicEntry _ = llvmFreshSymbolicEntry
+  symbolicInitializers = llvmSymbolicInitializers
 
 llvmCrucibleCFG :: AnalysisResult LLVM s
                 -> FunctionHandle LLVM s
@@ -360,6 +365,22 @@ llvmFreshSymbolicEntry sym rep =
       bv <- WI.freshConstant sym (WS.safeSymbol "bv") (WI.BaseBVRepr w)
       LLM.llvmPointer_bv sym bv
     _ -> Nothing
+
+llvmSymbolicInitializers :: (CB.IsSymInterface sym)
+                         => AnalysisResult LLVM s
+                         -> sym
+                         -> IO ( CS.IntrinsicTypes sym
+                               , CFH.HandleAllocator
+                               , CS.FunctionBindings () sym (CrucibleExt LLVM)
+                               , CS.ExtensionImpl () sym (CrucibleExt LLVM)
+                               , ()
+                               )
+llvmSymbolicInitializers (AnalysisResult (LLVMAnalysisResult llr) _) _sym = do
+  let ?ptrWidth = WI.knownNat @64
+  let intrinsics = LLI.llvmIntrinsicTypes
+  let funcBindings = CFH.emptyHandleMap
+  let extImpl = LL.llvmExtensionImpl LLM.laxPointerMemOptions
+  return (intrinsics, llvmHdlAlloc llr, funcBindings, extImpl, ())
 
 data CrucibleLLVMOperand arch s where
   Alignment :: CLDL.Alignment -> CrucibleLLVMOperand arch s

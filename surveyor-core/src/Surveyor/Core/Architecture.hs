@@ -18,6 +18,7 @@ module Surveyor.Core.Architecture (
   IR(..),
   SomeIRRepr(..),
   Architecture(..),
+  CruciblePersonality,
   AnalysisResult,
   Block(..),
   FunctionHandle(..),

@@ -9,13 +9,16 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeInType #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Surveyor.Core.Architecture.Class (
   IR(..),
   SomeIRRepr(..),
   Architecture(..),
+  CruciblePersonality,
   SomeResult(..),
   ResultIndex(..),
   AnalysisResult(..),
@@ -45,6 +48,8 @@ import qualified SemMC.Formula as F
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Backend.Simple as SB
 import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Lang.Crucible.CFG.Extension as CCE
+import qualified Lang.Crucible.FunctionHandle as CFH
 import qualified Lang.Crucible.Simulator as CS
 import qualified Lang.Crucible.Types as CT
 
@@ -86,8 +91,13 @@ type ArchConstraints arch s = (Eq (Address arch s),
                                NFData (Operand arch s),
                                NFData (Instruction arch s))
 
+-- | The type of the personality for each simulator
+--
+-- This is a standalone type family because it needs access to a parameter (sym)
+-- that isn't a class method.
+type family CruciblePersonality arch sym :: *
 
-class (IR arch s) => Architecture (arch :: *) (s :: *) where
+class (IR arch s, CCE.IsSyntaxExtension (CrucibleExt arch)) => Architecture (arch :: *) (s :: *) where
   data ArchResult arch s :: *
   type CrucibleExt arch :: *
 
@@ -124,6 +134,17 @@ class (IR arch s) => Architecture (arch :: *) (s :: *) where
   -- intrinsic types).  This function is expected to return Nothing if it cannot
   -- allocate a value for the given type representative.
   freshSymbolicEntry :: (CB.IsSymInterface sym) => proxy (arch, s) -> sym -> CT.TypeRepr tp -> Maybe (IO (CS.RegValue sym tp))
+  -- | Collect and return the architecture-specific information required to run
+  -- the symbolic execution engine
+  symbolicInitializers :: (CB.IsSymInterface sym)
+                       => AnalysisResult arch s
+                       -> sym
+                       -> IO ( CS.IntrinsicTypes sym
+                             , CFH.HandleAllocator
+                             , CS.FunctionBindings (CruciblePersonality arch sym) sym (CrucibleExt arch)
+                             , CS.ExtensionImpl (CruciblePersonality arch sym) sym (CrucibleExt arch)
+                             , CruciblePersonality arch sym
+                             )
 
 data BlockMapping arch ir s =
   BlockMapping { blockMapping :: M.Map (Address arch s) (Block arch s, Block ir s)
