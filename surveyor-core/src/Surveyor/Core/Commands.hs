@@ -299,11 +299,12 @@ startSymbolicExecutionC =
     doc = "Start symbolic execution with the current setup state"
     callback :: Callback s st '[]
     callback customEventChan (AR.SomeState state) PL.Nil
-      | Just archState <- state ^. CS.lArchState
+      | nonce <- state ^. CS.lNonce
+      , Just archState <- state ^. CS.lArchState
       , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
       , Some (SymEx.Initializing symExecState) <- curCtx ^. CCX.symExecStateL = do
           let ares = archState ^. CS.lAnalysisResult
-          C.writeChan customEventChan (StartSymbolicExecution ares symExecState)
+          C.writeChan customEventChan (StartSymbolicExecution nonce ares symExecState)
       | otherwise =
         -- If we weren't in an appropriate state, just don't do anything
         return ()

@@ -30,6 +30,7 @@ module Surveyor.Brick.Handlers (
 import           GHC.Generics ( Generic )
 
 import qualified Brick as B
+import qualified Control.Concurrent.Async as A
 import qualified Control.Lens as L
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
 import           Control.Monad.IO.Class ( liftIO )
@@ -231,9 +232,31 @@ handleCustomEvent s0 evt =
           symExSt <- liftIO $ C.initializingSymbolicExecution ng symExConfig cfg
           let manager = SEM.symbolicExecutionManager (Some symExSt)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                      & C.lArchState . _Just .symbolicExecutionManagerL .~ manager
+                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
                       & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some symExSt
           B.continue (C.State s1)
+      | otherwise -> B.continue (C.State s0)
+    C.StartSymbolicExecution archNonce ares symState
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
+        let eventChan = s0 ^. C.lEventChannel
+        (newState, executionLoop) <- liftIO $ C.startSymbolicExecution eventChan ares symState
+        task <- liftIO $ A.async $ do
+          inspectState <- executionLoop
+          let updateSymExecState _ st =
+                let manager = SEM.symbolicExecutionManager (Some inspectState)
+                in st & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some inspectState
+                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
+                      & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
+          -- We pass () as the value of the update state and capture the real
+          -- value (the new state) because there isn't an easy way to get an
+          -- NFData instance for states.  That is okay, though, because they are
+          -- evaluated enough.
+          C.writeChan eventChan (C.AsyncStateUpdate archNonce (NF.nf ()) updateSymExecState)
+        let manager = SEM.symbolicExecutionManager (Some newState)
+        let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
+                    & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
+                    & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some newState
+        B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
 
     C.ViewBlock archNonce rep

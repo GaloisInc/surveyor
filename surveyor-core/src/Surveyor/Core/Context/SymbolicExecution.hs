@@ -41,7 +41,6 @@ module Surveyor.Core.Context.SymbolicExecution (
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Data.Functor.Identity as I
-import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
@@ -183,11 +182,12 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig solver fl
 -- provide a callback that just does an async state update.
 startSymbolicExecution :: (CA.Architecture arch s)
                        => SCC.Chan (SCE.Events s st)
-                       -> (SymbolicExecutionState arch s Inspect -> IO ())
                        -> CA.AnalysisResult arch s
                        -> SymbolicState arch s solver fm init reg
-                       -> IO (SymbolicExecutionState arch s Execute , IO ())
-startSymbolicExecution eventChan whenDone ares st = do
+                       -> IO ( SymbolicExecutionState arch s Execute
+                             , IO (SymbolicExecutionState arch s Inspect)
+                             )
+startSymbolicExecution eventChan ares st = do
   case someCFG st of
     CCC.SomeCFG cfg -> withSymConstraints st $ do
       let sym = symbolicBackend st
@@ -206,7 +206,7 @@ startSymbolicExecution eventChan whenDone ares st = do
 
       let startExec = do
             res <- executeCrucible executionFeatures simulatorState0
-            whenDone (Inspecting st res)
+            return (Inspecting st res)
       let progress = ExecutionProgress { executionMetrics = initialMetrics
                                        , executionOutputHandle = readH
                                        , executionConfig = symbolicConfig st
