@@ -76,6 +76,7 @@ import qualified Surveyor.Core.Chan as SCC
 import qualified Surveyor.Core.Events as SCE
 
 import           Surveyor.Core.Context.SymbolicExecution.Config
+import           Surveyor.Core.Context.SymbolicExecution.State
 
 -- Setup of the symbolic execution engine (parameters and globals)
 
@@ -116,14 +117,10 @@ data ExecutionProgress s =
                     , executionConfig :: SymbolicExecutionConfig s
                     }
 
-data SymbolicState arch s solver fm init reg =
-  SymbolicState { symbolicConfig :: SymbolicExecutionConfig s
-                , symbolicBackend :: CBO.OnlineBackend s solver (WEB.Flags fm)
-                , someCFG :: CCC.SomeCFG (CA.CrucibleExt arch) init reg
-                , symbolicRegs :: Ctx.Assignment (CS.RegEntry (CBO.OnlineBackend s solver (WEB.Flags fm))) init
-                , symbolicGlobals :: CS.SymGlobalState (CBO.OnlineBackend s solver (WEB.Flags fm))
-                , withSymConstraints :: forall a . ((WPO.OnlineSolver s solver, CB.IsSymInterface (CBO.OnlineBackend s solver (WEB.Flags fm))) => a) -> a
-                }
+
+-- FIXME: Assign a unique nonce to each symbolic execution session so that we
+-- can associate metrics with the correct session as they come out of the
+-- symbolic execution engine.
 
 symbolicExecutionConfig :: SymbolicExecutionState arch s k -> SymbolicExecutionConfig s
 symbolicExecutionConfig s =

@@ -27,6 +27,7 @@ module Surveyor.Core.Commands (
   contextForwardC,
   initializeSymbolicExecutionC,
   beginSymbolicExecutionSetupC,
+  startSymbolicExecutionC,
   allCommands
   ) where
 
@@ -75,6 +76,7 @@ allCommands =
   , C.SomeCommand contextForwardC
   , C.SomeCommand initializeSymbolicExecutionC
   , C.SomeCommand beginSymbolicExecutionSetupC
+  , C.SomeCommand startSymbolicExecutionC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -289,6 +291,27 @@ beginSymbolicExecutionSetupC =
               C.writeChan customEventChan (LogDiagnostic Nothing msg)
       | otherwise =
         C.writeChan customEventChan (LogDiagnostic Nothing "Missing context for symbolic execution")
+
+startSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+startSymbolicExecutionC =
+  C.Command "start-symbolic-execution" doc PL.Nil PL.Nil callback isInitializingSymEx
+  where
+    doc = "Start symbolic execution with the current setup state"
+    callback :: Callback s st '[]
+    callback customEventChan (AR.SomeState state) PL.Nil
+      | Just archState <- state ^. CS.lArchState
+      , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
+      , Some (SymEx.Initializing symExecState) <- curCtx ^. CCX.symExecStateL = do
+          let ares = archState ^. CS.lAnalysisResult
+          C.writeChan customEventChan (StartSymbolicExecution ares symExecState)
+      | otherwise =
+        -- If we weren't in an appropriate state, just don't do anything
+        return ()
+    isInitializingSymEx (AR.SomeState ss)
+      | Just archState <- ss ^. CS.lArchState
+      , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
+      , Some (SymEx.Initializing {}) <- curCtx ^. CCX.symExecStateL = True
+      | otherwise = False
 
 hasContext :: AR.SomeState (CS.S e u) s -> Bool
 hasContext (AR.SomeState ss)

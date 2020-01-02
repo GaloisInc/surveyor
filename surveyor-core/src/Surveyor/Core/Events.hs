@@ -20,6 +20,7 @@ import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Context.SymbolicExecution.Config as SE
+import qualified Surveyor.Core.Context.SymbolicExecution.State as SES
 
 data LogLevel = LogDebug
               | LogInfo
@@ -62,6 +63,9 @@ data Events s st where
                               -> SE.SymbolicExecutionConfig s
                               -> CCC.SomeCFG (A.CrucibleExt arch) init reg
                               -> Events s st
+  StartSymbolicExecution :: A.AnalysisResult arch s
+                         -> SES.SymbolicState arch s solver fm init reg
+                         -> Events s st
   ReportSymbolicExecutionMetrics :: CSP.Metrics I.Identity -> Events s st
 
   -- Function-related events

@@ -523,7 +523,9 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                , functionViewerKeys (C.archNonce ares) C.MacawRepr
                , functionViewerKeys (C.archNonce ares) C.CrucibleRepr
                , (C.SomeUIMode C.SymbolicExecutionManager,
-                  [(C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)])
+                  [ (C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)
+                  , (C.Key (V.KChar 's') [], C.SomeCommand C.startSymbolicExecutionC)
+                  ])
                ]
     addModeKeys (mode, keys) modeKeymap =
       foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
