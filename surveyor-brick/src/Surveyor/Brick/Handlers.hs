@@ -239,7 +239,7 @@ handleCustomEvent s0 evt =
     C.StartSymbolicExecution archNonce ares symState
       | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
         let eventChan = s0 ^. C.lEventChannel
-        (newState, executionLoop) <- liftIO $ C.startSymbolicExecution eventChan ares symState
+        (newState, executionLoop) <- liftIO $ C.startSymbolicExecution ares symState
         task <- liftIO $ A.async $ do
           inspectState <- executionLoop
           let updateSymExecState _ st =
