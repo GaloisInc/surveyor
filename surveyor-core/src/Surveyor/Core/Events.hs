@@ -6,11 +6,13 @@ module Surveyor.Core.Events ( Events(..), LogLevel(..) ) where
 import qualified Control.Exception as X
 import qualified Control.NF as NF
 import qualified Data.ElfEdit as E
+import qualified Data.Functor.Identity as I
 import           Data.Int ( Int64 )
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
 import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Lang.Crucible.Simulator.Profiling as CSP
 
 import qualified Renovate as R
 
@@ -65,6 +67,7 @@ data Events s st where
                          -> A.AnalysisResult arch s
                          -> SES.SymbolicState arch s solver fm init reg
                          -> Events s st
+  ReportSymbolicExecutionMetrics :: CSP.Metrics I.Identity -> Events s st
 
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st

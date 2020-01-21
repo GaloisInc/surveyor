@@ -38,18 +38,13 @@ module Surveyor.Core.Context.SymbolicExecution (
   cleanupSymbolicExecutionState
   ) where
 
-import qualified Control.Concurrent.Async as A
-import qualified Control.Concurrent.MVar as MVar
 import qualified Control.Lens as L
-import           Control.Monad ( forever, unless )
+import           Control.Monad ( unless )
 import qualified Data.Functor.Identity as I
-import qualified Data.Map.Strict as M
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
-import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Backend.Online as CBO
 import qualified Lang.Crucible.CFG.Core as CCC
@@ -76,6 +71,8 @@ import qualified What4.Symbol as WS
 import qualified What4.Utils.StringLiteral as WUS
 
 import qualified Surveyor.Core.Architecture as CA
+import qualified Surveyor.Core.Chan as SCC
+import qualified Surveyor.Core.Events as SCE
 
 import           Surveyor.Core.Context.SymbolicExecution.Config
 import           Surveyor.Core.Context.SymbolicExecution.State
@@ -113,28 +110,16 @@ data SymbolicExecutionState arch s (k :: SymExK) where
                                 (CS.RegEntry sym reg)
              -> SymbolicExecutionState arch s Inspect
 
--- | Data required to manage an in-progress symbolic execution task
 data ExecutionProgress s =
-  ExecutionProgress { executionData :: MVar.MVar DynamicExecutionProgress
-                    -- ^ Data that is updated dynamically as the symbolic
-                    -- execution proceeds.
+  ExecutionProgress { executionMetrics :: CSP.Metrics I.Identity
                     , executionOutputHandle :: IO.Handle
-                    -- ^ The handle that the symbolic execution writes it output to
-                    , executionOutputReader :: A.Async ()
-                    -- ^ An asynchronous task that reads output from the handle
-                    -- and updates the 'DynamicExecutionProgress'
                     , executionConfig :: SymbolicExecutionConfig s
-                    -- ^ The configuration that spawned this task
                     }
 
--- | Data that is updated dynamically during symbolic execution
-data DynamicExecutionProgress =
-  DynamicExecutionProgress { executionOutput :: Seq.Seq T.Text
-                           -- ^ Output produced by the symbolic execution engine
-                           -- stored broken down by line
-                           , executionMetrics :: CSP.Metrics I.Identity
-                           -- ^ Metrics computed by the profiling feature
-                           }
+
+-- FIXME: Assign a unique nonce to each symbolic execution session so that we
+-- can associate metrics with the correct session as they come out of the
+-- symbolic execution engine.
 
 symbolicExecutionConfig :: SymbolicExecutionState arch s k -> SymbolicExecutionConfig s
 symbolicExecutionConfig s =
@@ -196,12 +181,13 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig solver fl
 -- concrete state type (and therefore avoid import cycles).  The caller should
 -- provide a callback that just does an async state update.
 startSymbolicExecution :: (CA.Architecture arch s)
-                       => CA.AnalysisResult arch s
+                       => SCC.Chan (SCE.Events s st)
+                       -> CA.AnalysisResult arch s
                        -> SymbolicState arch s solver fm init reg
                        -> IO ( SymbolicExecutionState arch s Execute
                              , IO (SymbolicExecutionState arch s Inspect)
                              )
-startSymbolicExecution ares st = do
+startSymbolicExecution eventChan ares st = do
   case someCFG st of
     CCC.SomeCFG cfg -> withSymConstraints st $ do
       let sym = symbolicBackend st
@@ -214,52 +200,36 @@ startSymbolicExecution ares st = do
       let econt = CS.runOverrideSim retRep action
       let simulatorState0 = CS.InitialState ctx globals CS.defaultAbortHandler retRep econt
 
-      let initialMetrics = CSP.Metrics { CSP.metricSplits = I.Identity 0
-                                       , CSP.metricMerges = I.Identity 0
-                                       , CSP.metricAborts = I.Identity 0
-                                       , CSP.metricSolverStats = I.Identity WI.zeroStatistics
-                                       , CSP.metricExtraMetrics = I.Identity M.empty
-                                       }
-
-      let initialDynamicData = DynamicExecutionProgress { executionMetrics = initialMetrics
-                                                        , executionOutput = Seq.empty
-                                                        }
-      mv <- MVar.newMVar initialDynamicData
-      outputReader <- A.async $ forever $ do
-        line <- TIO.hGetLine readH
-        MVar.modifyMVar_ mv $ \dynData -> do
-          return dynData { executionOutput = executionOutput dynData Seq.|> line }
-
-      profilingFeature <- setupProfiling mv
+      (initialMetrics, profilingFeature) <- setupProfiling eventChan
       let executionFeatures = [ CSE.genericToExecutionFeature profilingFeature
                               ]
 
       let startExec = do
             res <- executeCrucible executionFeatures simulatorState0
             return (Inspecting st res)
-      let progress = ExecutionProgress { executionData = mv
+      let progress = ExecutionProgress { executionMetrics = initialMetrics
                                        , executionOutputHandle = readH
-                                       , executionOutputReader = outputReader
                                        , executionConfig = symbolicConfig st
                                        }
       return (Executing progress, startExec)
 
 -- | Create a profiling execution feature that sends collected metrics out on
 -- the event channel every 100ms
-setupProfiling :: MVar.MVar DynamicExecutionProgress
-               -> IO (CSE.GenericExecutionFeature sym)
-setupProfiling mvar = do
+setupProfiling :: SCC.Chan (SCE.Events s st)
+               -> IO (CSP.Metrics I.Identity, CSE.GenericExecutionFeature sym)
+setupProfiling chan = do
   profTab <- CSP.newProfilingTable
   -- Send out the profiling event every 100ms
   let profConf = CSP.ProfilingOptions { CSP.periodicProfileInterval = 0.1
                                       , CSP.periodicProfileAction = profileAction
                                       }
-  CSP.profilingFeature profTab (Just profConf)
+  f <- CSP.profilingFeature profTab (Just profConf)
+  m0 <- CSP.readMetrics profTab
+  return (m0, f)
   where
     profileAction table = do
       metrics <- CSP.readMetrics table
-      MVar.modifyMVar_ mvar $ \dynData -> do
-        return dynData { executionMetrics = metrics }
+      SCC.writeChan chan (SCE.ReportSymbolicExecutionMetrics metrics)
 
 -- | This loop is copied from Crucible, but slightly modified to allow the GUI
 -- to interrupt the simulation cleanly (both to cancel and introspect)
