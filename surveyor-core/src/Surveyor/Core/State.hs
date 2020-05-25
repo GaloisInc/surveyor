@@ -29,6 +29,7 @@ module Surveyor.Core.State (
   lUIState,
   contextL,
   contextG,
+  symExStateL,
   irCacheL
   ) where
 
@@ -40,15 +41,16 @@ import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 
+import qualified Surveyor.Core.Architecture as A
+import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Context as CC
-import           Surveyor.Core.Keymap ( Keymap )
-import qualified Surveyor.Core.Arguments as AR
-import qualified Surveyor.Core.Architecture as A
+import qualified Surveyor.Core.Context.SymbolicExecution as SE
+import qualified Surveyor.Core.EchoArea as EA
 import           Surveyor.Core.Events ( Events(LogDiagnostic), LogLevel )
+import           Surveyor.Core.Keymap ( Keymap )
 import           Surveyor.Core.Loader ( AsyncLoader )
 import           Surveyor.Core.Mode
-import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.TranslationCache as TC
 
 -- | This is a wrapper around the state type suitable for the UI core.  It hides
@@ -168,6 +170,12 @@ data ArchState u arch s =
             -- each viewer will consult the most recent context to draw).
             -- Later, there will be context-manipulation commands to allow
             -- the user to explicitly manage the stack by popping things.
+            , sSymExState :: !(SE.SessionState arch s)
+            -- ^ Dynamically updated state for the symbolic execution engine
+            --
+            -- This is referenced from the context stack, but stored separately
+            -- because updates can be generated asynchronously and updating deep
+            -- into the context stack structure is difficult.
             , sIRCache :: !(TC.TranslationCache arch s)
             -- ^ A cache of blocks translated from the base architecture to
             -- alternative architectures.  We need a cache, as the
@@ -189,6 +197,9 @@ contextL = GL.field @"sContext"
 
 contextG :: L.Getter (ArchState u arch s) (CC.ContextStack arch s)
 contextG = L.to (L.^. contextL)
+
+symExStateL :: L.Lens' (ArchState u arch s) (SE.SessionState arch s)
+symExStateL = GL.field @"sSymExState"
 
 irCacheL :: L.Lens' (ArchState u arch s) (TC.TranslationCache arch s)
 irCacheL = GL.field @"sIRCache"

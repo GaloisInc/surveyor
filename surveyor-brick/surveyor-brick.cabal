@@ -60,7 +60,7 @@ library
                        surveyor-core
   hs-source-dirs:      src
   default-language:    Haskell2010
-  ghc-options: -Wall -Wcompat
+  ghc-options: -Wall -Wcompat -j
 
 executable surveyor-brick
   default-language: Haskell2010

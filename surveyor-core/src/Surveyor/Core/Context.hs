@@ -28,7 +28,7 @@ module Surveyor.Core.Context (
   contextBack,
   -- *  Lenses
   currentContext,
-  symExecStateL,
+  symExecSessionIDL,
   baseFunctionG,
   blockStateFor,
   blockStateList,
@@ -43,8 +43,8 @@ module Surveyor.Core.Context (
 import           GHC.Generics ( Generic )
 
 import           Control.DeepSeq ( NFData(rnf), deepseq )
-import qualified Control.Lens as L
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?) )
+import qualified Control.Lens as L
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
 import qualified Data.Generics.Product as GL
@@ -53,7 +53,7 @@ import qualified Data.Map as Map
 import           Data.Maybe ( catMaybes, fromMaybe, listToMaybe, mapMaybe, maybeToList )
 import           Data.Parameterized.Classes ( testEquality, (:~:)(Refl), atF )
 import qualified Data.Parameterized.Map as MapF
-import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.TraversableF as TF
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
@@ -91,7 +91,7 @@ data Context arch s =
           -- be updated all at once to ensure consistency.
           , cFunctionState :: MapF.MapF (IR.IRRepr arch) (FunctionState arch s)
           -- ^ State information for the currently-selected function (in each IR)
-          , cSymExecState :: Some (SE.SymbolicExecutionState arch s)
+          , cSymExecSessionID :: SE.SessionID s
           -- ^ State required for symbolic execution
           --
           -- We always have at least a default configuration. We lazily
@@ -116,8 +116,8 @@ data FunctionState arch s ir =
                 , fsWithConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
                 }
 
-symExecStateL :: L.Lens' (Context arch s) (Some (SE.SymbolicExecutionState arch s))
-symExecStateL = GL.field @"cSymExecState"
+symExecSessionIDL :: L.Lens' (Context arch s) (SE.SessionID s)
+symExecSessionIDL = GL.field @"cSymExecSessionID"
 
 functionStateL :: L.Lens' (Context arch s) (MapF.MapF (IR.IRRepr arch) (FunctionState arch s))
 functionStateL = GL.field @"cFunctionState"
@@ -172,13 +172,14 @@ data BlockState arch s ir =
 -- stuff (or extra block IRs)
 makeContext :: forall arch s ir
              . (CA.Architecture arch s, CA.ArchConstraints ir s)
-            => TC.TranslationCache arch s
+            => PN.NonceGenerator IO s
+            -> TC.TranslationCache arch s
             -> CA.AnalysisResult arch s
             -> CA.FunctionHandle arch s
             -> IR.IRRepr arch ir
             -> CA.Block ir s
-            -> IO (Context arch s)
-makeContext tcache ares fh irrepr b =
+            -> IO (Context arch s, SE.SessionState arch s)
+makeContext ng tcache ares fh irrepr b =
   case irrepr of
     IR.BaseRepr -> do
       let supportedIRs = CA.alternativeIRs (Proxy @(arch, s))
@@ -205,19 +206,23 @@ makeContext tcache ares fh irrepr b =
       let makeIRFunction (CA.SomeIRRepr rep) = fmap (MapF.Pair rep) <$> makeFunctionState tcache ares fh rep
       funcStates <- catMaybes <$> mapM makeIRFunction supportedIRs
 
-      return Context { cBlockState = MapF.fromList (MapF.Pair IR.BaseRepr baseState : blockStates)
-                     , cFunctionState = MapF.fromList (MapF.Pair IR.BaseRepr baseFunctionState : funcStates)
-                     , cBaseFunction = fh
-                     , cSymExecState = Some SE.initialSymbolicExecutionState
-                     }
+      ses0 <- SE.initialSymbolicExecutionState ng
+      let ctx = Context { cBlockState = MapF.fromList (MapF.Pair IR.BaseRepr baseState : blockStates)
+                        , cFunctionState = MapF.fromList (MapF.Pair IR.BaseRepr baseFunctionState : funcStates)
+                        , cBaseFunction = fh
+                        , cSymExecSessionID = SE.symbolicSessionID ses0
+                        }
+      return (ctx, SE.singleSessionState ses0)
     _ -> do
+      ses0 <- SE.initialSymbolicExecutionState ng
       bs <- makeAlternativeBlockState b irrepr
       mfs <- fmap (MapF.Pair irrepr) <$> makeFunctionState tcache ares fh irrepr
-      return Context { cBlockState = MapF.fromList [ MapF.Pair irrepr bs ]
-                     , cFunctionState = MapF.fromList (maybeToList mfs)
-                     , cBaseFunction = fh
-                     , cSymExecState = Some SE.initialSymbolicExecutionState
-                     }
+      let ctx = Context { cBlockState = MapF.fromList [ MapF.Pair irrepr bs ]
+                        , cFunctionState = MapF.fromList (maybeToList mfs)
+                        , cBaseFunction = fh
+                        , cSymExecSessionID = SE.symbolicSessionID ses0
+                        }
+      return (ctx, SE.singleSessionState ses0)
 
 makeFunctionState :: (CA.Architecture arch s, CA.ArchConstraints ir s)
                   => TC.TranslationCache arch s

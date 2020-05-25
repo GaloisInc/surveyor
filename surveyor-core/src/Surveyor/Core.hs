@@ -88,6 +88,9 @@ module Surveyor.Core (
   SymEx.SomeFloatModeRepr(..),
   SymEx.defaultSymbolicExecutionConfig,
   SymEx.SymbolicState(..),
+  SymEx.SessionState,
+  SymEx.lookupSessionState,
+  SymEx.singleSessionState,
   SymEx.SymbolicExecutionState(..),
   SymEx.Config,
   SymEx.SetupArgs,
@@ -112,7 +115,7 @@ module Surveyor.Core (
   CCX.contextBack,
   CCX.contextForward,
   -- ** Lenses
-  CCX.symExecStateL,
+  CCX.symExecSessionIDL,
   CCX.baseFunctionG,
   CCX.currentContext,
   CCX.blockStateFor,

@@ -5,6 +5,7 @@ module Surveyor.Core.Context.SymbolicExecution.State (
   ) where
 
 import qualified Data.Parameterized.Context as Ctx
+import qualified Data.Parameterized.Nonce as PN
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Backend.Online as CBO
 import qualified Lang.Crucible.CFG.Core as CCC
@@ -22,4 +23,5 @@ data SymbolicState arch s solver fm init reg =
                 , symbolicRegs :: Ctx.Assignment (CS.RegEntry (CBO.OnlineBackend s solver (WEB.Flags fm))) init
                 , symbolicGlobals :: CS.SymGlobalState (CBO.OnlineBackend s solver (WEB.Flags fm))
                 , withSymConstraints :: forall a . ((WPO.OnlineSolver s solver, CB.IsSymInterface (CBO.OnlineBackend s solver (WEB.Flags fm))) => a) -> a
+                , symNonce :: PN.Nonce s ()
                 }

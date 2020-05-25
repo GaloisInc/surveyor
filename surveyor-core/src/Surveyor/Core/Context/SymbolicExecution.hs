@@ -3,6 +3,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -20,6 +21,12 @@ module Surveyor.Core.Context.SymbolicExecution (
   configSolverL,
   configFloatReprL,
   solverInteractionFileL,
+  SessionID,
+  sessionID,
+  symbolicSessionID,
+  SessionState,
+  singleSessionState,
+  lookupSessionState,
   -- * The state of the symbolic execution automaton
   Config,
   SetupArgs,
@@ -38,10 +45,13 @@ module Surveyor.Core.Context.SymbolicExecution (
   cleanupSymbolicExecutionState
   ) where
 
+import           Control.DeepSeq ( NFData(..), deepseq )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Data.Functor.Identity as I
+import qualified Data.Map.Strict as Map
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
@@ -56,8 +66,8 @@ import qualified Lang.Crucible.Simulator.Profiling as CSP
 import qualified Lang.Crucible.Types as CT
 import qualified System.IO as IO
 import qualified System.Process as SP
-import qualified What4.Config as WC
 import qualified What4.Concrete as WCC
+import qualified What4.Config as WC
 import qualified What4.Expr.Builder as WEB
 import qualified What4.Interface as WI
 import qualified What4.InterpretedFloatingPoint as WIF
@@ -110,16 +120,67 @@ data SymbolicExecutionState arch s (k :: SymExK) where
                                 (CS.RegEntry sym reg)
              -> SymbolicExecutionState arch s Inspect
 
+instance NFData (SymbolicExecutionState arch s k) where
+  rnf s =
+    case s of
+      Configuring cfg -> cfg `deepseq` ()
+      Initializing symState ->
+        -- We can't really make a meaningful instance for this one
+        symState `seq` ()
+      Executing progress -> progress `deepseq` ()
+      Inspecting symState res -> symState `seq` res `seq` ()
+
 data ExecutionProgress s =
   ExecutionProgress { executionMetrics :: CSP.Metrics I.Identity
                     , executionOutputHandle :: IO.Handle
                     , executionConfig :: SymbolicExecutionConfig s
+                    , executionNonce :: PN.Nonce s ()
+                    -- ^ This nonce is the unique identifier for the session.
+                    -- It is copied to the 'SymbolicState' once symbolic execution is finished (or interrupted)
                     }
 
+instance NFData (ExecutionProgress s) where
+  rnf ep =
+    executionConfig ep `deepseq` ()
+
+-- | A wrapper around all of the dynamically updatable symbolic execution state
+--
+-- We need this because updating data dynamically updated in the context stack
+-- is fairly expensive, and we need to do it frequently in response to
+-- asynchronous symbolic execution events.
+--
+-- To handle this, the context stack only tracks the 'SessionID' of each
+-- symbolic execution job, while this structure holds all of the dynamically
+-- updated data in a format more amenable to rapid updates.
+newtype SessionState arch s =
+  SessionState { unSessionState :: Map.Map (SessionID s) (Some (SymbolicExecutionState arch s)) }
+  deriving (Monoid, Semigroup)
+
+instance NFData (SessionState arch s) where
+  rnf (SessionState m) =
+    let rnfSome :: Some (SymbolicExecutionState arch s) -> ()
+        rnfSome s =
+          case s of
+            Some st -> st `deepseq` ()
+    in fmap rnfSome m `deepseq` ()
+
+lookupSessionState :: SessionState arch s -> SessionID s -> Maybe (Some (SymbolicExecutionState arch s))
+lookupSessionState ss sid = Map.lookup sid (unSessionState ss)
+
+singleSessionState :: SymbolicExecutionState arch s k -> SessionState arch s
+singleSessionState s =
+  SessionState { unSessionState = Map.singleton sid (Some s) }
+  where
+    sid = symbolicSessionID s
 
 -- FIXME: Assign a unique nonce to each symbolic execution session so that we
 -- can associate metrics with the correct session as they come out of the
 -- symbolic execution engine.
+--
+-- Morally, we need a Map (Some (Nonce s)) (Some (SymbolicExecutionState arch
+-- s)) to track the current state of each session (named by a nonce).  We need
+-- this because updating the context stack with streaming updates to execution
+-- state would be way too expensive.
 
 symbolicExecutionConfig :: SymbolicExecutionState arch s k -> SymbolicExecutionConfig s
 symbolicExecutionConfig s =
@@ -129,10 +190,13 @@ symbolicExecutionConfig s =
     Executing s' -> executionConfig s'
     Inspecting s' _ -> symbolicConfig s'
 
+symbolicSessionID :: SymbolicExecutionState arch s k -> SessionID s
+symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID
+
 -- | Construct the default state of the symbolic execution automaton
 -- (initializing with the default symbolic execution configuration)
-initialSymbolicExecutionState :: SymbolicExecutionState arch s 'Config
-initialSymbolicExecutionState = Configuring defaultSymbolicExecutionConfig
+initialSymbolicExecutionState :: PN.NonceGenerator IO s -> IO (SymbolicExecutionState arch s 'Config)
+initialSymbolicExecutionState ng = Configuring <$> defaultSymbolicExecutionConfig ng
 
 -- | Construct an initial symbolic execution state with a user-provided
 -- configuration
@@ -147,7 +211,8 @@ initializingSymbolicExecution :: forall s arch init reg
                               -> SymbolicExecutionConfig s
                               -> CCC.SomeCFG (CA.CrucibleExt arch) init reg
                               -> IO (SymbolicExecutionState arch s 'SetupArgs)
-initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig solver floatRep solverFilePath) scfg@(CCC.SomeCFG cfg) = do
+initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solver floatRep solverFilePath) scfg@(CCC.SomeCFG cfg) = do
+  nonce <- PN.freshNonce gen
   withOnlineBackend gen solver floatRep $ \_proxy sym -> do
     sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
     let interactionFilePath = T.strip solverFilePath
@@ -168,6 +233,7 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig solver fl
                               , symbolicRegs = regs
                               , symbolicGlobals = globals
                               , withSymConstraints = \a -> a
+                              , symNonce = nonce
                               }
     return (Initializing state)
 
@@ -210,6 +276,7 @@ startSymbolicExecution eventChan ares st = do
       let progress = ExecutionProgress { executionMetrics = initialMetrics
                                        , executionOutputHandle = readH
                                        , executionConfig = symbolicConfig st
+                                       , executionNonce = symNonce st
                                        }
       return (Executing progress, startExec)
 

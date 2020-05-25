@@ -37,13 +37,12 @@ import           Control.Monad.IO.Class ( liftIO )
 import qualified Control.NF as NF
 import qualified Data.Foldable as F
 import qualified Data.Generics.Product as GL
-import           Data.Maybe ( fromMaybe )
 import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some(..) )
+import           Data.Parameterized.Some ( Some(..), viewSome )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -132,11 +131,8 @@ handleVtyEvent s0@(C.State s) evt
           let manager0 = archState ^. symbolicExecutionManagerL
           manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
           let st1 = SEM.symbolicExecutionManagerState manager1
-          -- FIXME: If we don't need any additional state in the SymExManager,
-          -- we can just pass in the state without the wrapper and won't need to
-          -- maintain both
-          let s' = s & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ st1
-                     & C.lArchState . _Just . symbolicExecutionManagerL .~ manager1
+          let s' = s & C.lArchState . _Just . symbolicExecutionManagerL .~ manager1
+                     & C.lArchState . _Just . C.symExStateL %~ (<> viewSome C.singleSessionState st1)
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
@@ -210,18 +206,20 @@ handleCustomEvent s0 evt =
         C.SomeUIMode mode -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer mode))
 
     C.InitializeSymbolicExecution archNonce mConfig mFuncHandle
-      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce)
+      , Just sessionID <- s0 ^? C.lArchState . _Just . C.contextL . C.currentContext . C.symExecSessionIDL
+      , Just symExSt <- s0 ^? C.lArchState . _Just . C.symExStateL -> do
           -- FIXME: Instead of the default, we could scan the context stack for
           -- the most recent configuration
-          let conf = fromMaybe C.defaultSymbolicExecutionConfig mConfig
-          let mCurCtx = s0 ^? C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL
-          case mCurCtx of
+          let ng = C.sNonceGenerator s0
+          conf <- liftIO $ maybe (C.defaultSymbolicExecutionConfig ng) return mConfig
+          case C.lookupSessionState symExSt sessionID of
             Just (Some oldState) -> liftIO $ C.cleanupSymbolicExecutionState oldState
             Nothing -> return ()
           let newState = C.configuringSymbolicExecution conf
           let manager = SEM.symbolicExecutionManager (Some newState)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                      & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some newState
+                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
                       & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
@@ -233,7 +231,7 @@ handleCustomEvent s0 evt =
           let manager = SEM.symbolicExecutionManager (Some symExSt)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
                       & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
-                      & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some symExSt
+                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState symExSt)
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
     C.StartSymbolicExecution archNonce ares symState
@@ -244,7 +242,7 @@ handleCustomEvent s0 evt =
           inspectState <- executionLoop
           let updateSymExecState _ st =
                 let manager = SEM.symbolicExecutionManager (Some inspectState)
-                in st & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some inspectState
+                in st & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
                       & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
                       & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
           -- We pass () as the value of the update state and capture the real
@@ -255,7 +253,7 @@ handleCustomEvent s0 evt =
         let manager = SEM.symbolicExecutionManager (Some newState)
         let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
                     & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
-                    & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecStateL .~ Some newState
+                    & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
         B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
 
@@ -391,8 +389,10 @@ handleCustomEvent s0 evt =
     C.PushContext archNonce fh irrepr b
       | Just archState <- s0 ^. C.lArchState
       , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          ctx <- liftIO $ C.makeContext (archState ^. C.irCacheL) (archState ^. C.lAnalysisResult) fh irrepr b
+          let ng = C.sNonceGenerator s0
+          (ctx, sessionState) <- liftIO $ C.makeContext ng (archState ^. C.irCacheL) (archState ^. C.lAnalysisResult) fh irrepr b
           let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.pushContext ctx
+                      & C.lArchState . _Just . C.symExStateL %~ (<> sessionState)
           liftIO $ C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Selecting block: " +| C.blockAddress b ||+ "")))
           liftIO $ C.logDiagnostic s0 C.LogDebug (Fmt.fmt ("from function " +| C.blockFunction b ||+ ""))
           B.continue (C.State s1)
@@ -485,11 +485,17 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
            case C.functions ares of
              [] -> return ()
              defFunc : _ -> do
-               let pushContext newVal oldState = oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newVal
+               let pushContext (newContext, sessState) oldState =
+                     oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newContext
+                              & C.lArchState . _Just . C.symExStateL %~ (<> sessState)
                C.asynchronously (C.archNonce ares) (C.sEmitEvent s0) pushContext $ do
                  case C.functionBlocks ares defFunc of
-                   b0 : _ -> C.makeContext tcache ares defFunc C.BaseRepr b0
+                   b0 : _ -> do
+                     let ng = C.sNonceGenerator s0
+                     C.makeContext ng tcache ares defFunc C.BaseRepr b0
                    _ -> error ("No blocks in function " ++ show defFunc)
+  let ng = C.sNonceGenerator s0
+  ses <- C.defaultSymbolicExecutionConfig ng
   return C.S { C.sDiagnosticLog = C.sDiagnosticLog s0 <> fmap (Nothing,) newDiags
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
              , C.sUIMode = uiMode
@@ -526,11 +532,12 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                                    , sFunctionViewer = MapF.fromList funcViewers
                                                    , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
                                                    , sSymbolicExecutionManager =
-                                                     SEM.symbolicExecutionManager (Some (C.Configuring C.defaultSymbolicExecutionConfig))
+                                                     SEM.symbolicExecutionManager (Some (C.Configuring ses))
                                                    }
                         return C.ArchState { C.sAnalysisResult = ares
                                            , C.sUIState = uiState
                                            , C.sContext = C.emptyContextStack
+                                           , C.sSymExState = mempty
                                            , C.sIRCache = tcache
                                            }
              }

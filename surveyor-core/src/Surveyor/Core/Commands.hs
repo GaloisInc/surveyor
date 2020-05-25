@@ -279,7 +279,8 @@ beginSymbolicExecutionSetupC =
       | nonce <- state ^. CS.lNonce
       , Just archState <- state ^. CS.lArchState
       , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
-      , Some symExecState <- curCtx ^. CCX.symExecStateL = do
+      , Just (Some symExecState) <- curSymExState state = do
+      -- , Some symExecState <- curCtx ^. CCX.symExecStateL = do
           let fh = curCtx ^. CCX.baseFunctionG
           mcfg <- CA.crucibleCFG (archState ^. CS.lAnalysisResult) fh
           case mcfg of
@@ -300,19 +301,27 @@ startSymbolicExecutionC =
     callback :: Callback s st '[]
     callback customEventChan (AR.SomeState state) PL.Nil
       | nonce <- state ^. CS.lNonce
-      , Just archState <- state ^. CS.lArchState
-      , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
-      , Some (SymEx.Initializing symExecState) <- curCtx ^. CCX.symExecStateL = do
+      , Just (Some (SymEx.Initializing symExecState)) <- curSymExState state
+      , Just archState <- state ^. CS.lArchState = do
+      -- , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
+      -- , Some (SymEx.Initializing symExecState) <- curCtx ^. CCX.symExecStateL = do
           let ares = archState ^. CS.lAnalysisResult
           C.writeChan customEventChan (StartSymbolicExecution nonce ares symExecState)
       | otherwise =
         -- If we weren't in an appropriate state, just don't do anything
         return ()
     isInitializingSymEx (AR.SomeState ss)
-      | Just archState <- ss ^. CS.lArchState
-      , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
-      , Some (SymEx.Initializing {}) <- curCtx ^. CCX.symExecStateL = True
+      | Just (Some (SymEx.Initializing {})) <- curSymExState ss = True
       | otherwise = False
+
+curSymExState :: CS.S e u arch s
+              -> Maybe (Some (SymEx.SymbolicExecutionState arch s))
+curSymExState st
+  | Just archState <- st ^. CS.lArchState
+  , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
+  , sid <- curCtx ^. CCX.symExecSessionIDL =
+      SymEx.lookupSessionState (archState ^. CS.symExStateL) sid
+  | otherwise = Nothing
 
 hasContext :: AR.SomeState (CS.S e u) s -> Bool
 hasContext (AR.SomeState ss)
