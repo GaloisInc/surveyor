@@ -27,6 +27,7 @@ module Surveyor.Core.Context.SymbolicExecution (
   SessionState,
   singleSessionState,
   lookupSessionState,
+  updateSessionMetrics,
   -- * The state of the symbolic execution automaton
   Config,
   SetupArgs,
@@ -130,19 +131,6 @@ instance NFData (SymbolicExecutionState arch s k) where
       Executing progress -> progress `deepseq` ()
       Inspecting symState res -> symState `seq` res `seq` ()
 
-data ExecutionProgress s =
-  ExecutionProgress { executionMetrics :: CSP.Metrics I.Identity
-                    , executionOutputHandle :: IO.Handle
-                    , executionConfig :: SymbolicExecutionConfig s
-                    , executionNonce :: PN.Nonce s ()
-                    -- ^ This nonce is the unique identifier for the session.
-                    -- It is copied to the 'SymbolicState' once symbolic execution is finished (or interrupted)
-                    }
-
-instance NFData (ExecutionProgress s) where
-  rnf ep =
-    executionConfig ep `deepseq` ()
-
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
 -- We need this because updating data dynamically updated in the context stack
@@ -172,6 +160,32 @@ singleSessionState s =
   SessionState { unSessionState = Map.singleton sid (Some s) }
   where
     sid = symbolicSessionID s
+
+-- | Updates the given session ID with additional metrics IFF that 'SessionID'
+-- corresponds to a session in the 'Executing' state.
+--
+-- Otherwise, has no effect
+updateSessionMetrics :: SessionID s
+                     -> CSP.Metrics I.Identity
+                     -> SessionState arch s
+                     -> SessionState arch s
+updateSessionMetrics sid metrics ss@(SessionState m) =
+  case Map.lookup sid m of
+    Just (Some (Executing progress)) ->
+      let ep' = progress { executionMetrics = metrics }
+      in SessionState $ Map.insert sid (Some (Executing ep')) m
+    _ -> ss
+
+data ExecutionProgress s =
+  ExecutionProgress { executionMetrics :: CSP.Metrics I.Identity
+                    , executionOutputHandle :: IO.Handle
+                    , executionConfig :: SymbolicExecutionConfig s
+                    }
+
+instance NFData (ExecutionProgress s) where
+  rnf ep =
+    executionConfig ep `deepseq` ()
+
 
 -- FIXME: Assign a unique nonce to each symbolic execution session so that we
 -- can associate metrics with the correct session as they come out of the
@@ -212,7 +226,6 @@ initializingSymbolicExecution :: forall s arch init reg
                               -> CCC.SomeCFG (CA.CrucibleExt arch) init reg
                               -> IO (SymbolicExecutionState arch s 'SetupArgs)
 initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solver floatRep solverFilePath) scfg@(CCC.SomeCFG cfg) = do
-  nonce <- PN.freshNonce gen
   withOnlineBackend gen solver floatRep $ \_proxy sym -> do
     sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
     let interactionFilePath = T.strip solverFilePath
@@ -233,7 +246,6 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solve
                               , symbolicRegs = regs
                               , symbolicGlobals = globals
                               , withSymConstraints = \a -> a
-                              , symNonce = nonce
                               }
     return (Initializing state)
 
@@ -266,7 +278,7 @@ startSymbolicExecution eventChan ares st = do
       let econt = CS.runOverrideSim retRep action
       let simulatorState0 = CS.InitialState ctx globals CS.defaultAbortHandler retRep econt
 
-      (initialMetrics, profilingFeature) <- setupProfiling eventChan
+      (initialMetrics, profilingFeature) <- setupProfiling eventChan (symbolicConfig st L.^. sessionID)
       let executionFeatures = [ CSE.genericToExecutionFeature profilingFeature
                               ]
 
@@ -276,15 +288,15 @@ startSymbolicExecution eventChan ares st = do
       let progress = ExecutionProgress { executionMetrics = initialMetrics
                                        , executionOutputHandle = readH
                                        , executionConfig = symbolicConfig st
-                                       , executionNonce = symNonce st
                                        }
       return (Executing progress, startExec)
 
 -- | Create a profiling execution feature that sends collected metrics out on
 -- the event channel every 100ms
 setupProfiling :: SCC.Chan (SCE.Events s st)
+               -> SessionID s
                -> IO (CSP.Metrics I.Identity, CSE.GenericExecutionFeature sym)
-setupProfiling chan = do
+setupProfiling chan sid = do
   profTab <- CSP.newProfilingTable
   -- Send out the profiling event every 100ms
   let profConf = CSP.ProfilingOptions { CSP.periodicProfileInterval = 0.1
@@ -296,7 +308,7 @@ setupProfiling chan = do
   where
     profileAction table = do
       metrics <- CSP.readMetrics table
-      SCC.writeChan chan (SCE.ReportSymbolicExecutionMetrics metrics)
+      SCC.writeChan chan (SCE.ReportSymbolicExecutionMetrics sid metrics)
 
 -- | This loop is copied from Crucible, but slightly modified to allow the GUI
 -- to interrupt the simulation cleanly (both to cancel and introspect)

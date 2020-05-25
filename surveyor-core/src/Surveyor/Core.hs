@@ -91,6 +91,7 @@ module Surveyor.Core (
   SymEx.SessionState,
   SymEx.lookupSessionState,
   SymEx.singleSessionState,
+  SymEx.updateSessionMetrics,
   SymEx.SymbolicExecutionState(..),
   SymEx.Config,
   SymEx.SetupArgs,

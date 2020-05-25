@@ -33,6 +33,7 @@ library
                        Surveyor.Core.Context
                        Surveyor.Core.Context.SymbolicExecution
                        Surveyor.Core.Context.SymbolicExecution.Config
+                       Surveyor.Core.Context.SymbolicExecution.Session
                        Surveyor.Core.Context.SymbolicExecution.State
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events

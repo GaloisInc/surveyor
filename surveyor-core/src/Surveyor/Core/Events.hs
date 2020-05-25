@@ -18,9 +18,10 @@ import qualified Renovate as R
 
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Command as C
-import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Context.SymbolicExecution.Config as SE
+import qualified Surveyor.Core.Context.SymbolicExecution.Session as CSS
 import qualified Surveyor.Core.Context.SymbolicExecution.State as SES
+import qualified Surveyor.Core.IRRepr as IR
 
 data LogLevel = LogDebug
               | LogInfo
@@ -67,7 +68,7 @@ data Events s st where
                          -> A.AnalysisResult arch s
                          -> SES.SymbolicState arch s solver fm init reg
                          -> Events s st
-  ReportSymbolicExecutionMetrics :: CSP.Metrics I.Identity -> Events s st
+  ReportSymbolicExecutionMetrics :: CSS.SessionID s -> CSP.Metrics I.Identity -> Events s st
 
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st

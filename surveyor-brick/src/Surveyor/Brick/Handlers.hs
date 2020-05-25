@@ -256,6 +256,9 @@ handleCustomEvent s0 evt =
                     & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
         B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
+    C.ReportSymbolicExecutionMetrics sid metrics -> do
+      let s1 = s0 & C.lArchState . _Just . C.symExStateL %~ C.updateSessionMetrics sid metrics
+      B.continue (C.State s1)
 
     C.ViewBlock archNonce rep
       | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
