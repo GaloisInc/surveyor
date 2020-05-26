@@ -14,6 +14,7 @@ import           Data.Parameterized.Some ( Some(..) )
 
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.SymbolicExecution.Configuration as SEC
+import qualified Surveyor.Brick.Widget.SymbolicExecution.Monitor as SEM
 import qualified Surveyor.Brick.Widget.SymbolicExecution.Setup as SES
 import qualified Surveyor.Core as C
 
@@ -36,6 +37,7 @@ renderSymbolicExecutionManager sem@(managerState -> Some st) =
   case st of
     C.Configuring {} -> SEC.renderSymbolicExecutionConfigurator (configForm sem)
     C.Initializing {} -> SES.renderSymbolicExecutionSetup st
+    C.Executing {} -> SEM.renderSymbolicExecutionMonitor st
 
 handleSymbolicExecutionManagerEvent :: B.BrickEvent Names e
                                     -> SymbolicExecutionManager e arch s
@@ -49,6 +51,9 @@ handleSymbolicExecutionManagerEvent evt sem@(managerState -> Some st) =
                                       }
     C.Initializing {} -> do
       st' <- SES.handleSymbolicExecutionSetupEvent evt st
+      return sem { managerState = Some st' }
+    C.Executing {} -> do
+      st' <- SEM.handleSymbolicExeuctionMonitorEvent evt st
       return sem { managerState = Some st' }
 
 symbolicExecutionManagerState :: SymbolicExecutionManager e arch s

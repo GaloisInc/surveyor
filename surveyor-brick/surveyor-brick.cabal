@@ -25,6 +25,7 @@ library
                        Surveyor.Brick.Widget.InstructionSemanticsViewer
                        Surveyor.Brick.Widget.SymbolicExecution
                        Surveyor.Brick.Widget.SymbolicExecution.Configuration
+                       Surveyor.Brick.Widget.SymbolicExecution.Monitor
                        Surveyor.Brick.Widget.SymbolicExecution.Setup
                        Brick.Match.Subword
                        Brick.Widget.FilterList

@@ -37,6 +37,8 @@ module Surveyor.Core.Context.SymbolicExecution (
   symbolicExecutionConfig,
   initialSymbolicExecutionState,
   startSymbolicExecution,
+  ExecutionProgress,
+  executionMetrics,
   -- * Exposed State
   SymbolicState(..),
   -- * State Constructors
@@ -50,6 +52,7 @@ import           Control.DeepSeq ( NFData(..), deepseq )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Data.Functor.Identity as I
+import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as Map
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
@@ -114,7 +117,8 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   -- | The state after symbolic execution has completed.  This has enough
   -- information to start examining and querying the solver about the result
   Inspecting :: (sym ~ CBO.OnlineBackend s solver (WEB.Flags fm))
-             => SymbolicState arch s solver fm init reg
+             => CSP.Metrics I.Identity
+             -> SymbolicState arch s solver fm init reg
              -> CSET.ExecResult (CA.CruciblePersonality arch sym)
                                 sym
                                 (CA.CrucibleExt arch)
@@ -129,7 +133,7 @@ instance NFData (SymbolicExecutionState arch s k) where
         -- We can't really make a meaningful instance for this one
         symState `seq` ()
       Executing progress -> progress `deepseq` ()
-      Inspecting symState res -> symState `seq` res `seq` ()
+      Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
 
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
@@ -202,7 +206,7 @@ symbolicExecutionConfig s =
     Configuring c -> c
     Initializing s' -> symbolicConfig s'
     Executing s' -> executionConfig s'
-    Inspecting s' _ -> symbolicConfig s'
+    Inspecting _ s' _ -> symbolicConfig s'
 
 symbolicSessionID :: SymbolicExecutionState arch s k -> SessionID s
 symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID
@@ -278,13 +282,21 @@ startSymbolicExecution eventChan ares st = do
       let econt = CS.runOverrideSim retRep action
       let simulatorState0 = CS.InitialState ctx globals CS.defaultAbortHandler retRep econt
 
-      (initialMetrics, profilingFeature) <- setupProfiling eventChan (symbolicConfig st L.^. sessionID)
+      -- This starts off with no value, but we update it with the initial
+      -- metrics before the error can be observed
+      --
+      -- We use an IORef here so that we can collect metrics when we switch to
+      -- 'Inspecting' mode, since we won't have access to the location where the
+      -- real metrics are stored when symbolic execution ends.
+      mref <- IOR.newIORef (error "Empty initial value for symbolic execution metrics")
+      (initialMetrics, profilingFeature) <- setupProfiling mref eventChan (symbolicConfig st L.^. sessionID)
       let executionFeatures = [ CSE.genericToExecutionFeature profilingFeature
                               ]
 
       let startExec = do
             res <- executeCrucible executionFeatures simulatorState0
-            return (Inspecting st res)
+            finalMetrics <- IOR.readIORef mref
+            return (Inspecting finalMetrics st res)
       let progress = ExecutionProgress { executionMetrics = initialMetrics
                                        , executionOutputHandle = readH
                                        , executionConfig = symbolicConfig st
@@ -293,10 +305,11 @@ startSymbolicExecution eventChan ares st = do
 
 -- | Create a profiling execution feature that sends collected metrics out on
 -- the event channel every 100ms
-setupProfiling :: SCC.Chan (SCE.Events s st)
+setupProfiling :: IOR.IORef (CSP.Metrics I.Identity)
+               -> SCC.Chan (SCE.Events s st)
                -> SessionID s
                -> IO (CSP.Metrics I.Identity, CSE.GenericExecutionFeature sym)
-setupProfiling chan sid = do
+setupProfiling ref chan sid = do
   profTab <- CSP.newProfilingTable
   -- Send out the profiling event every 100ms
   let profConf = CSP.ProfilingOptions { CSP.periodicProfileInterval = 0.1
@@ -308,6 +321,7 @@ setupProfiling chan sid = do
   where
     profileAction table = do
       metrics <- CSP.readMetrics table
+      IOR.writeIORef ref metrics
       SCC.writeChan chan (SCE.ReportSymbolicExecutionMetrics sid metrics)
 
 -- | This loop is copied from Crucible, but slightly modified to allow the GUI
