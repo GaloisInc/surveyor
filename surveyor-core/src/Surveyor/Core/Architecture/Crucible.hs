@@ -640,8 +640,6 @@ cruciblePrettyOpcode o =
         C.IsConcrete {} -> "is-concrete"
         C.ReferenceEq {} -> "reference-eq"
 
-        C.WithAssertion {} -> "with-assertion"
-
 data NonceCache s ctx where
   NonceCache :: forall s ctx (k :: C.CrucibleType -> Type) . (k ~ PN.Nonce s) => Ctx.Assignment k ctx -> NonceCache s ctx
 
@@ -1526,11 +1524,6 @@ crucibleAppOperands cache ng app =
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
-
-    C.WithAssertion trep pexpr -> do
-      n1 <- PN.freshNonce ng
-      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
-                        ]
 
     C.ExtensionApp exprExt -> OL.fromList <$> extensionExprOperands cache ng exprExt
 

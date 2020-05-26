@@ -5,31 +5,40 @@ packages: surveyor-core
           deps/elf-edit
           deps/dwarf
           deps/parameterized-utils
-          deps/crucible/what4
+          deps/what4/what4
+          deps/what4-serialize
           deps/crucible/crucible
           deps/crucible/crucible-llvm
           deps/crucible/crucible-jvm
           deps/crucible/crux
           deps/dismantle/dismantle-tablegen
           deps/dismantle/dismantle-ppc
-          deps/dismantle/dismantle-arm
-          deps/dismantle/dismantle-thumb
+          deps/dismantle/dismantle-arm-xml
           deps/semmc/semmc
           deps/semmc/semmc-ppc
-          deps/semmc/semmc-arm
+          deps/semmc/semmc-aarch32
+          deps/semmc/semmc-synthesis
+          deps/semmc/semmc-learning
           deps/flexdis86
           deps/flexdis86/binary-symbols
           deps/macaw/base
           deps/macaw/symbolic
           deps/macaw/x86
           deps/macaw/x86_symbolic
+          deps/macaw/refinement
           deps/macaw/macaw-semmc
           deps/macaw/macaw-ppc
           deps/macaw/macaw-ppc-symbolic
+          deps/macaw/macaw-aarch32
+          deps/macaw/macaw-aarch32-symbolic
           deps/macaw-loader/macaw-loader
           deps/macaw-loader/macaw-loader-ppc
           deps/macaw-loader/macaw-loader-x86
+          deps/macaw-loader/macaw-loader-aarch32
           deps/renovate/renovate
           deps/renovate/renovate-x86
           deps/renovate/renovate-ppc
+          deps/renovate/renovate-aarch32
+          deps/asl-translator
+          deps/arm-asl-parser
           deps/jvm-parser

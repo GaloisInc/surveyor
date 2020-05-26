@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -17,6 +18,7 @@ module Surveyor.Core.Architecture.MC (
   mkX86Result
   ) where
 
+import qualified Data.IORef as IOR
 import           GHC.TypeNats
 
 import           Control.DeepSeq ( NFData, rnf )
@@ -457,25 +459,29 @@ mcFunctionBlocks toBlock bar concAddr =
     bi = rBlockInfo bar
     fb = R.biFunctions bi
 
-toInstPPC32 :: (PPC.Instruction (), R.ConcreteAddress PPC.PPC32) -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
+toInstPPC32 :: (PPC.Instruction PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC32)
+            -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
 toInstPPC32 (i, addr) = (PPC32Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC32Instruction i)
 
 toBlockPPC32 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32 -> FunctionHandle PPC.PPC32 s -> R.ConcreteBlock PPC.PPC32 -> Block PPC.PPC32 s
 toBlockPPC32 bar fh cb =
-  Block { blockAddress = PPC32Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstPPC32 (R.instructionAddresses (rISA bar) cb)
+  Block { blockAddress = PPC32Address (MM.absoluteAddr (R.absoluteAddress (R.blockAddress cb)))
+        , blockInstructions = R.withInstructionAddresses (rISA bar) cb $ \PPC.PPCRepr insns ->
+            F.toList (fmap toInstPPC32 insns)
         , blockFunction = fh
         }
 
-toInstPPC64 :: (PPC.Instruction (), R.ConcreteAddress PPC.PPC64) -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
+toInstPPC64 :: (PPC.Instruction PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC64)
+            -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
 toInstPPC64 (i, addr) = (PPC64Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC64Instruction i)
 
 toBlockPPC64 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64 -> FunctionHandle PPC.PPC64 s -> R.ConcreteBlock PPC.PPC64 -> Block PPC.PPC64 s
 toBlockPPC64 bar fh cb =
-  Block { blockAddress = PPC64Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstPPC64 (R.instructionAddresses (rISA bar) cb)
+  Block { blockAddress = PPC64Address (MM.absoluteAddr (R.absoluteAddress (R.blockAddress cb)))
+        , blockInstructions = R.withInstructionAddresses (rISA bar) cb $ \PPC.PPCRepr insns ->
+            F.toList (fmap toInstPPC64 insns)
         , blockFunction = fh
         }
 
@@ -484,12 +490,14 @@ toBlockX86 :: BinaryAnalysisResult s (C.Const Void) X86.X86_64
            -> R.ConcreteBlock X86.X86_64
            -> Block X86.X86_64 s
 toBlockX86 bar fh cb =
-  Block { blockAddress = X86Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstX86 (R.instructionAddresses (rISA bar) cb)
+  Block { blockAddress = X86Address (MM.absoluteAddr (R.absoluteAddress (R.blockAddress cb)))
+        , blockInstructions = R.withInstructionAddresses (rISA bar) cb $ \X86.X86Repr insns ->
+            F.toList (fmap toInstX86 insns)
         , blockFunction = fh
         }
 
-toInstX86 :: (X86.Instruction (), R.ConcreteAddress X86.X86_64) -> (Address X86.X86_64 s, Instruction X86.X86_64 s)
+toInstX86 :: (X86.Instruction X86.OnlyEncoding (), R.ConcreteAddress X86.X86_64)
+          -> (Address X86.X86_64 s, Instruction X86.X86_64 s)
 toInstX86 (i, addr) = (X86Address (MM.absoluteAddr (R.absoluteAddress addr)),
                        X86Instruction i)
 
@@ -533,7 +541,7 @@ ppcPrettyOperand _addr op =
     DPPC.Vsrc vr -> T.pack (show (HPJ.pPrint vr))
 
 instance IR PPC.PPC32 s where
-  data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction ())
+  data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction PPC.OnlyEncoding ())
   data Operand PPC.PPC32 s = forall x . PPC32Operand !(DPPC.Operand x)
   data Opcode PPC.PPC32 s = forall x y . PPC32Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC32 s = PPC32Address !(MM.MemAddr 32)
@@ -699,7 +707,7 @@ instance NFData (Operand PPC.PPC32 s) where
   rnf (PPC32Operand _) = ()
 
 instance IR PPC.PPC64 s where
-  data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction ())
+  data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction PPC.OnlyEncoding ())
   data Operand PPC.PPC64 s = forall x . PPC64Operand !(DPPC.Operand x)
   data Opcode PPC.PPC64 s = forall x y . PPC64Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC64 s = PPC64Address !(MM.MemAddr 64)
@@ -792,7 +800,7 @@ instance NFData (Operand PPC.PPC64 s) where
   rnf (PPC64Operand _) = ()
 
 instance IR X86.X86_64 s where
-  data Instruction X86.X86_64 s = X86Instruction (X86.Instruction ())
+  data Instruction X86.X86_64 s = X86Instruction (X86.Instruction X86.OnlyEncoding ())
   data Operand X86.X86_64 s = X86Operand FD.Value FD.OperandType
   data Opcode X86.X86_64 s = X86Opcode String
   data Address X86.X86_64 s = X86Address (MM.MemAddr 64)
@@ -915,13 +923,16 @@ mcSymbolicInitializers _ares sym = do
   let intrinsics = CLLI.llvmIntrinsicTypes
   halloc <- CFH.newHandleAllocator
   let bindings = CFH.emptyHandleMap
+  badBehaviorMap <- IOR.newIORef mempty
+  let ?badBehaviorMap = badBehaviorMap
   MS.withArchEval archVals sym $ \archEvalFns -> do
     -- These values are not hard to get, but it will be easier after a branch is
     -- merged from macaw that redoes some of the details of memory access.
     let gv = error "Global var for macaw"
     let globalMap = error "Global map for macaw"
     let lfh = error "lfh for macaw"
-    let extImpl = MS.macawExtensions archEvalFns gv globalMap lfh
+    let mkPtrValidity = error "mkpointervalidity predicate"
+    let extImpl = MS.macawExtensions archEvalFns gv globalMap lfh mkPtrValidity
     return (intrinsics, halloc, bindings, extImpl, MS.MacawSimulatorState)
 
 instance Eq (Address X86.X86_64 s) where

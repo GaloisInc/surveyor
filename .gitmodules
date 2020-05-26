@@ -40,3 +40,15 @@
 [submodule "deps/macaw-loader"]
 	path = deps/macaw-loader
 	url = git@github.com:GaloisInc/macaw-loader.git
+[submodule "deps/what4"]
+	path = deps/what4
+	url = git@github.com:GaloisInc/what4.git
+[submodule "deps/what4-serialize"]
+	path = deps/what4-serialize
+	url = git@github.com:GaloisInc/what4-serialize.git
+[submodule "deps/asl-translator"]
+	path = deps/asl-translator
+	url = git@github.com:GaloisInc/asl-translator.git
+[submodule "deps/arm-asl-parser"]
+	path = deps/arm-asl-parser
+	url = git@github.com:GaloisInc/arm-asl-parser.git

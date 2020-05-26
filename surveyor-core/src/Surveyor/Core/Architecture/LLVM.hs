@@ -21,6 +21,7 @@ import qualified Control.Lens as L
 import           Control.Monad ( guard )
 import qualified Control.Once as O
 import qualified Data.Foldable as F
+import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as M
 import           Data.Maybe ( catMaybes, isJust, fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
@@ -38,8 +39,8 @@ import qualified Lang.Crucible.LLVM as LL
 import qualified Lang.Crucible.LLVM.Bytes as CLLB
 import qualified Lang.Crucible.LLVM.DataLayout as CLDL
 import qualified Lang.Crucible.LLVM.Extension as LE
-import qualified Lang.Crucible.LLVM.MemModel as LLM
 import qualified Lang.Crucible.LLVM.Intrinsics as LLI
+import qualified Lang.Crucible.LLVM.MemModel as LLM
 import qualified Lang.Crucible.LLVM.Translation as LT
 import qualified Lang.Crucible.LLVM.TypeContext as LTC
 import qualified Lang.Crucible.Simulator as CS
@@ -351,7 +352,7 @@ llvmCrucibleCFG (AnalysisResult (LLVMAnalysisResult llr) _) fh =
           case LT.llvmArch (mt ^. LT.transContext) of
             LE.X86Repr nr
               | Just Refl <- testEquality nr (C.knownNat @64) ->
-                return (M.lookup sym (LT.cfgMap mt))
+                return (fmap snd (M.lookup sym (LT.cfgMap mt)))
             _ -> return Nothing
     _ -> return Nothing
 
@@ -376,6 +377,8 @@ llvmSymbolicInitializers :: (CB.IsSymInterface sym)
                                , ()
                                )
 llvmSymbolicInitializers (AnalysisResult (LLVMAnalysisResult llr) _) _sym = do
+  badBehaviorMap <- IOR.newIORef mempty
+  let ?badBehaviorMap = badBehaviorMap
   let ?ptrWidth = WI.knownNat @64
   let intrinsics = LLI.llvmIntrinsicTypes
   let funcBindings = CFH.emptyHandleMap
@@ -598,7 +601,7 @@ crucibleForLLVMBlocks ng funcIndex fh (Some mt) =
     LLVMAddress fa@(FunctionAddr sym) ->
       case M.lookup sym (LT.cfgMap mt) of
         Nothing -> return Nothing
-        Just (C.AnyCFG cfg) -> do
+        Just (_, C.AnyCFG cfg) -> do
           case M.lookup sym funcIndex of
             Nothing -> X.throwIO (MissingIndexForFunction sym)
             Just (_, _, blockIndex) -> do
