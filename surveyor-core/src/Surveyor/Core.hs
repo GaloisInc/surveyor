@@ -30,6 +30,7 @@ module Surveyor.Core (
   CA.ParameterizedFormula(..),
   CA.prettyParameterizedFormula,
   CA.SomeResult(..),
+  CA.CruciblePersonality,
   -- ** Operand lists
   OL.OperandList,
   OL.OperandListItem(..),
