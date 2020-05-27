@@ -8,6 +8,7 @@
 module Surveyor.Core.Command (
   Command(..),
   SomeCommand(..),
+  ArgumentKind,
   CommandLike(..)
   ) where
 
@@ -42,9 +43,10 @@ data Command (b :: Type) (tps :: [ArgumentKind b]) =
           -- context (@const True@ is a reasonable default value)
           }
 
+type family ArgumentKind b :: k
+
 class CommandLike b where
   type EventType b
   type StateType b
-  type ArgumentType b :: k -> Type
-  type ArgumentRepr b :: k -> Type
-  type ArgumentKind b :: k
+  type ArgumentType b :: ArgumentKind b -> Type
+  type ArgumentRepr b :: ArgumentKind b -> Type

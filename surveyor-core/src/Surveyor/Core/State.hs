@@ -37,6 +37,7 @@ import           GHC.Generics ( Generic )
 
 import qualified Control.Lens as L
 import qualified Data.Generics.Product as GL
+import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -71,7 +72,7 @@ instance AR.HasNonce (S e u) where
 --       This is where most of the frontend-specific state will live.
 -- * @arch@ is the type of the architecture of the loaded binary.
 -- * @s@ is the state thread parameter that links all uses of nonces.
-data S e u (arch :: *) s =
+data S e u (arch :: Type) s =
   S { sInputFile :: Maybe FilePath
     , sLoader :: Maybe AsyncLoader
     , sDiagnosticLog :: !(Seq.Seq (Maybe LogLevel, T.Text))

@@ -56,6 +56,7 @@ module Surveyor.Core (
   AR.SurveyorCommand,
   CC.Command(..),
   CC.SomeCommand(..),
+  CC.ArgumentKind,
   CC.CommandLike(..),
   AR.Argument(..),
   AR.SomeAddress(..),
@@ -157,6 +158,7 @@ module Surveyor.Core (
   ) where
 
 import qualified Data.Foldable as F
+import           Data.Kind ( Type )
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core.Architecture as CA
@@ -178,7 +180,7 @@ import           Surveyor.Core.State
 import qualified Surveyor.Core.TranslationCache as TC
 
 -- | A default keymap with some reasonable keybindings
-defaultKeymap :: forall (s :: *) e u . K.Keymap (AR.SurveyorCommand s (S e u)) (M.SomeUIMode s)
+defaultKeymap :: forall (s :: Type) e u . K.Keymap (AR.SurveyorCommand s (S e u)) (M.SomeUIMode s)
 defaultKeymap = F.foldl' (\km (k, CC.SomeCommand cmd) -> K.addGlobalKey k cmd km) K.emptyKeymap globals
   where
     globals = [ (K.Key (V.KChar 'q') [V.MCtrl], CC.SomeCommand exitC)

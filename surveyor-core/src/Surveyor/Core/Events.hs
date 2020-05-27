@@ -73,7 +73,7 @@ data Events s st where
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st
   ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> Events s st
-  ViewFunction :: PN.Nonce s (arch :: *) -> IR.IRRepr arch ir -> Events s st
+  ViewFunction :: PN.Nonce s (arch :: Type) -> IR.IRRepr arch ir -> Events s st
 
 
   -- Block-related events
