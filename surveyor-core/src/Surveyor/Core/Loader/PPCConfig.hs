@@ -25,6 +25,7 @@ import           Data.Proxy ( Proxy(..) )
 import qualified Data.Parameterized.HasRepr as HR
 import qualified Lang.Crucible.Backend.Simple as SB
 import qualified SemMC.Architecture as SA
+import qualified SemMC.Architecture.PPC as SP
 import qualified SemMC.Formula as SF
 import qualified SemMC.Log as SL
 import qualified Dismantle.PPC as DPPC
@@ -39,8 +40,9 @@ import qualified Surveyor.Core.Chan as C
 import           Surveyor.Core.Events
 import qualified Surveyor.Core.Loader.RenovateAnalysis as RA
 
-ppcConfig :: forall sym w arch s fs st binFmt
+ppcConfig :: forall sym w arch s fs st binFmt v
            . ( w ~ MC.RegAddrWidth (MC.ArchReg arch)
+             , arch ~ SP.AnyPPC v
              , sym ~ SB.SimpleBackend s fs
              , R.InstructionAnnotation arch ~ RP.TargetAddress arch
              , R.Instruction arch ~ RP.Instruction

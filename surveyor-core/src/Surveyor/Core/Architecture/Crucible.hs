@@ -72,13 +72,13 @@ import qualified What4.Utils.StringLiteral as WSL
 
 import           Surveyor.Core.Architecture.Class
 import           Surveyor.Core.IRRepr ( Crucible )
+import qualified Surveyor.Core.OperandList as OL
 
 -- | The type of the crucible extension for this architecture
 --
 -- For machine code architectures, it will be the MacawExt.  It will be
 -- different for JVM and LLVM
 class CrucibleExtension arch where
-  type family CrucibleExt arch
   type family CrucibleExtensionOperand arch :: Type -> Type
   prettyExtensionStmt :: proxy arch -> C.StmtExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
   prettyExtensionApp :: proxy arch -> C.ExprExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
@@ -236,8 +236,8 @@ data Addr tp where
 
 instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible arch) s where
   data Instruction (Crucible arch) s =
-      forall ctx ctx' . CrucibleStmt (Ctx.Size ctx) (C.Stmt (CrucibleExt arch) ctx ctx') (Maybe (Operand (Crucible arch) s)) (OperandList (Operand (Crucible arch) s))
-    | forall blocks ret ctx . CrucibleTermStmt (C.TermStmt blocks ret ctx) (OperandList (Operand (Crucible arch) s))
+      forall ctx ctx' . CrucibleStmt (Ctx.Size ctx) (C.Stmt (CrucibleExt arch) ctx ctx') (Maybe (Operand (Crucible arch) s)) (OL.OperandList (Operand (Crucible arch) s))
+    | forall blocks ret ctx . CrucibleTermStmt (C.TermStmt blocks ret ctx) (OL.OperandList (Operand (Crucible arch) s))
   data Address (Crucible arch) s = forall tp . CrucibleAddress (Addr tp)
   data Operand (Crucible arch) s = forall tp . CrucibleOperand (PN.Nonce s tp) (CrucibleOperand arch s)
   data Opcode (Crucible arch) s = CrucibleOpcode (CrucibleOpcode arch s)
@@ -640,8 +640,6 @@ cruciblePrettyOpcode o =
         C.IsConcrete {} -> "is-concrete"
         C.ReferenceEq {} -> "reference-eq"
 
-        C.WithAssertion {} -> "with-assertion"
-
 data NonceCache s ctx where
   NonceCache :: forall s ctx (k :: C.CrucibleType -> Type) . (k ~ PN.Nonce s) => Ctx.Assignment k ctx -> NonceCache s ctx
 
@@ -677,67 +675,67 @@ initialCache ng cr = NonceCache <$> FC.traverseFC (\_ -> PN.freshNonce ng) cr
 crucibleTermStmtOperands :: NonceCache s ctx
                          -> PN.NonceGenerator IO s
                          -> C.TermStmt blocks ret ctx
-                         -> IO (OperandList (Operand (Crucible arch) s))
+                         -> IO (OL.OperandList (Operand (Crucible arch) s))
 crucibleTermStmtOperands cache ng stmt =
   case stmt of
     C.Jump (C.JumpTarget bid _ args) -> do
       n1 <- PN.freshNonce ng
-      return $ fromItemList [ Item (CrucibleOperand n1 (JumpTarget bid))
-                            , Delimited Parens (fromList (FC.toListFC (toRegisterOperand cache) args))
+      return $ OL.fromItemList [ OL.Item (CrucibleOperand n1 (JumpTarget bid))
+                            , OL.Delimited OL.Parens (OL.fromList (FC.toListFC (toRegisterOperand cache) args))
                             ]
     C.Br r (C.JumpTarget bid1 _ args1) (C.JumpTarget bid2 _ args2) -> do
       n1 <- PN.freshNonce ng
       n4 <- PN.freshNonce ng
-      return $ fromItemList [ Item (toRegisterOperand cache r)
-                            , Item (CrucibleOperand n1 (JumpTarget bid1))
-                            , Delimited Parens (fromList (FC.toListFC (toRegisterOperand cache) args1))
-                            , Item (CrucibleOperand n4 (JumpTarget bid2))
-                            , Delimited Parens (fromList (FC.toListFC (toRegisterOperand cache) args2))
+      return $ OL.fromItemList [ OL.Item (toRegisterOperand cache r)
+                            , OL.Item (CrucibleOperand n1 (JumpTarget bid1))
+                            , OL.Delimited OL.Parens (OL.fromList (FC.toListFC (toRegisterOperand cache) args1))
+                            , OL.Item (CrucibleOperand n4 (JumpTarget bid2))
+                            , OL.Delimited OL.Parens (OL.fromList (FC.toListFC (toRegisterOperand cache) args2))
                             ]
     C.MaybeBranch trep r (C.SwitchTarget bid1 _ args1) (C.JumpTarget bid2 _ args2) -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
-      return $ fromItemList [ Item (CrucibleOperand n1 (TypeRepr trep))
-                            , Item (toRegisterOperand cache r)
-                            , Item (CrucibleOperand n2 (JumpTarget bid1))
-                            , Delimited Parens (fromList (FC.toListFC (toRegisterOperand cache) args1))
-                            , Item (CrucibleOperand n3 (JumpTarget bid2))
-                            , Delimited Parens (fromList (FC.toListFC (toRegisterOperand cache) args2))
+      return $ OL.fromItemList [ OL.Item (CrucibleOperand n1 (TypeRepr trep))
+                            , OL.Item (toRegisterOperand cache r)
+                            , OL.Item (CrucibleOperand n2 (JumpTarget bid1))
+                            , OL.Delimited OL.Parens (OL.fromList (FC.toListFC (toRegisterOperand cache) args1))
+                            , OL.Item (CrucibleOperand n3 (JumpTarget bid2))
+                            , OL.Delimited OL.Parens (OL.fromList (FC.toListFC (toRegisterOperand cache) args2))
                             ]
-    C.VariantElim _ r targets -> return (fromList [toRegisterOperand cache r])
+    C.VariantElim _ r targets -> return (OL.fromList [toRegisterOperand cache r])
     C.TailCall r _ args -> do
-      return $ fromItemList [ Item (toRegisterOperand cache r)
-                            , Delimited Parens (fromList (FC.toListFC (toRegisterOperand cache) args))
+      return $ OL.fromItemList [ OL.Item (toRegisterOperand cache r)
+                            , OL.Delimited OL.Parens (OL.fromList (FC.toListFC (toRegisterOperand cache) args))
                             ]
-    C.Return r -> return (fromList [toRegisterOperand cache r])
-    C.ErrorStmt r -> return (fromList [toRegisterOperand cache r])
+    C.Return r -> return (OL.fromList [toRegisterOperand cache r])
+    C.ErrorStmt r -> return (OL.fromList [toRegisterOperand cache r])
 
 crucibleStmtOperands :: (CrucibleExtension arch)
                      => NonceCache s ctx
                      -> PN.NonceGenerator IO s
                      -> C.Stmt (CrucibleExt arch) ctx ctx'
-                     -> IO (NonceCache s ctx', Maybe (Operand (Crucible arch) s), OperandList (Operand (Crucible arch) s))
+                     -> IO (NonceCache s ctx', Maybe (Operand (Crucible arch) s), OL.OperandList (Operand (Crucible arch) s))
 crucibleStmtOperands cache ng stmt =
   case stmt of
     C.Print r ->
-      return (cache, Nothing, fromList [toRegisterOperand cache r])
+      return (cache, Nothing, OL.fromList [toRegisterOperand cache r])
     C.WriteGlobal gv r -> do
       n1 <- PN.freshNonce ng
-      return (cache, Nothing, fromList [ CrucibleOperand n1 (GlobalVar gv)
+      return (cache, Nothing, OL.fromList [ CrucibleOperand n1 (GlobalVar gv)
                                        , toRegisterOperand cache r
                                        ])
     C.ReadGlobal gv -> do
       n1 <- PN.freshNonce ng
       (nc', binder) <- allocateRegister cache ng Nothing
-      return (nc', Just binder, fromList [CrucibleOperand n1 (GlobalVar gv)])
+      return (nc', Just binder, OL.fromList [CrucibleOperand n1 (GlobalVar gv)])
     C.FreshConstant tp msym -> do
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
       (nc', binder) <- allocateRegister cache ng Nothing
       case msym of
-        Nothing -> return (nc', Just binder, fromList [CrucibleOperand n2 (BaseTypeRepr tp)])
-        Just sym -> return (nc', Just binder, fromList [ CrucibleOperand n2 (BaseTypeRepr tp)
+        Nothing -> return (nc', Just binder, OL.fromList [CrucibleOperand n2 (BaseTypeRepr tp)])
+        Just sym -> return (nc', Just binder, OL.fromList [ CrucibleOperand n2 (BaseTypeRepr tp)
                                               , CrucibleOperand n3 (StringLiteral (WSL.UnicodeLiteral (WS.solverSymbolAsText sym)))
                                               ])
     C.FreshFloat fi msym -> do
@@ -745,41 +743,41 @@ crucibleStmtOperands cache ng stmt =
       n2 <- PN.freshNonce ng
       (nc', binder) <- allocateRegister cache ng Nothing
       case msym of
-        Nothing -> return (nc', Just binder, fromList [CrucibleOperand n1 (FloatInfoRepr fi)])
-        Just sym -> return (nc', Just binder, fromList [ CrucibleOperand n1 (FloatInfoRepr fi)
+        Nothing -> return (nc', Just binder, OL.fromList [CrucibleOperand n1 (FloatInfoRepr fi)])
+        Just sym -> return (nc', Just binder, OL.fromList [ CrucibleOperand n1 (FloatInfoRepr fi)
                                                        , CrucibleOperand n2 (StringLiteral (WSL.UnicodeLiteral (WS.solverSymbolAsText sym)))
                                                        ])
     C.NewRefCell tp r -> do
       n1 <- PN.freshNonce ng
       (nc', binder) <- allocateRegister cache ng Nothing
-      return (nc', Just binder, fromList [ CrucibleOperand n1 (TypeRepr tp)
+      return (nc', Just binder, OL.fromList [ CrucibleOperand n1 (TypeRepr tp)
                                 , toRegisterOperand cache r
                                 ])
     C.NewEmptyRefCell tp -> do
       n1 <- PN.freshNonce ng
       (nc', binder) <- allocateRegister cache ng Nothing
-      return (nc', Just binder, fromList [CrucibleOperand n1 (TypeRepr tp)])
+      return (nc', Just binder, OL.fromList [CrucibleOperand n1 (TypeRepr tp)])
     C.ReadRefCell r -> do
       (nc', binder) <- allocateRegister cache ng Nothing
-      return (nc', Just binder, fromList [toRegisterOperand cache r])
+      return (nc', Just binder, OL.fromList [toRegisterOperand cache r])
     C.WriteRefCell rr r -> do
-      return (cache, Nothing, fromList [toRegisterOperand cache rr, toRegisterOperand cache r])
+      return (cache, Nothing, OL.fromList [toRegisterOperand cache rr, toRegisterOperand cache r])
     C.DropRefCell r ->
-      return (cache, Nothing, fromList [toRegisterOperand cache r])
+      return (cache, Nothing, OL.fromList [toRegisterOperand cache r])
     C.Assert r msg ->
-      return (cache, Nothing, fromList [toRegisterOperand cache r, toRegisterOperand cache msg])
+      return (cache, Nothing, OL.fromList [toRegisterOperand cache r, toRegisterOperand cache msg])
     C.Assume r msg ->
-      return (cache, Nothing, fromList [toRegisterOperand cache r, toRegisterOperand cache msg])
+      return (cache, Nothing, OL.fromList [toRegisterOperand cache r, toRegisterOperand cache msg])
     C.ExtendAssign ext -> do
       (nc', binder) <- allocateRegister cache ng Nothing
       ops <- extensionStmtOperands cache ng ext
-      return (nc', Just binder, fromList ops)
+      return (nc', Just binder, OL.fromList ops)
     C.CallHandle rep fh _reprs args -> do
       n1 <- PN.freshNonce ng
       (nc', binder) <- allocateRegister cache ng Nothing
-      let opl = fromItemList [ Item (CrucibleOperand n1 (TypeRepr rep))
-                             , Item (toRegisterOperand cache fh)
-                             , Delimited Parens (fromList (FC.toListFC (toRegisterOperand cache) args))
+      let opl = OL.fromItemList [ OL.Item (CrucibleOperand n1 (TypeRepr rep))
+                             , OL.Item (toRegisterOperand cache fh)
+                             , OL.Delimited OL.Parens (OL.fromList (FC.toListFC (toRegisterOperand cache) args))
                              ]
       return (nc', Just binder, opl)
     C.SetReg _tp (C.App app) -> do
@@ -792,125 +790,125 @@ crucibleAppOperands :: (CrucibleExtension arch)
                     => NonceCache s ctx
                     -> PN.NonceGenerator IO s
                     -> C.App (CrucibleExt arch) (C.Reg ctx) tp
-                    -> IO (OperandList (Operand (Crucible arch) s))
+                    -> IO (OL.OperandList (Operand (Crucible arch) s))
 crucibleAppOperands cache ng app =
   case app of
     C.BaseIsEq btp r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BaseTypeRepr btp)
+      return $ OL.fromList [ CrucibleOperand n1 (BaseTypeRepr btp)
                         , toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.BaseIte btp r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BaseTypeRepr btp)
+      return $ OL.fromList [ CrucibleOperand n1 (BaseTypeRepr btp)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              , toRegisterOperand cache r3
              ]
-    C.EmptyApp -> return $ fromList []
+    C.EmptyApp -> return $ OL.fromList []
 
     C.PackAny tp r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr tp)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr tp)
              , toRegisterOperand cache r
              ]
     C.UnpackAny tp r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr tp)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr tp)
              , toRegisterOperand cache r
              ]
 
     C.BoolLit b -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BoolLit b) ]
-    C.Not r -> return $ fromList [ toRegisterOperand cache r ]
-    C.And r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.Or r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.BoolXor r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+      return $ OL.fromList [ CrucibleOperand n1 (BoolLit b) ]
+    C.Not r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.And r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.Or r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.BoolXor r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
 
     C.NatLit nat -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatLit nat) ]
-    C.NatLt r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.NatLe r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.NatAdd r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.NatSub r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.NatMul r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.NatDiv r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.NatMod r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+      return $ OL.fromList [ CrucibleOperand n1 (NatLit nat) ]
+    C.NatLt r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.NatLe r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.NatAdd r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.NatSub r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.NatMul r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.NatDiv r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.NatMod r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
 
     C.IntLit i -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (IntegerLit i) ]
-    C.IntLt r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.IntLe r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.IntNeg r1 -> return $ fromList [ toRegisterOperand cache r1 ]
-    C.IntAdd r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.IntSub r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.IntMul r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.IntDiv r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.IntMod r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.IntAbs r1 -> return $ fromList [ toRegisterOperand cache r1 ]
+      return $ OL.fromList [ CrucibleOperand n1 (IntegerLit i) ]
+    C.IntLt r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.IntLe r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.IntNeg r1 -> return $ OL.fromList [ toRegisterOperand cache r1 ]
+    C.IntAdd r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.IntSub r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.IntMul r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.IntDiv r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.IntMod r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.IntAbs r1 -> return $ OL.fromList [ toRegisterOperand cache r1 ]
 
     C.RationalLit r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (RationalLit r) ]
-    C.RealLt r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealLe r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealNeg r -> return $ fromList [ toRegisterOperand cache r ]
-    C.RealAdd r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealSub r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealMul r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealDiv r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealMod r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealIsInteger r -> return $ fromList [ toRegisterOperand cache r ]
+      return $ OL.fromList [ CrucibleOperand n1 (RationalLit r) ]
+    C.RealLt r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealLe r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealNeg r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.RealAdd r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealSub r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealMul r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealDiv r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealMod r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealIsInteger r -> return $ OL.fromList [ toRegisterOperand cache r ]
 
     C.FloatLit f -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatLit f) ]
+      return $ OL.fromList [ CrucibleOperand n1 (FloatLit f) ]
     C.DoubleLit d -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (DoubleLit d) ]
+      return $ OL.fromList [ CrucibleOperand n1 (DoubleLit d) ]
     C.X86_80Lit l -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (X86_80Lit l) ]
+      return $ OL.fromList [ CrucibleOperand n1 (X86_80Lit l) ]
     C.FloatNaN frep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
     C.FloatPInf frep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
     C.FloatNInf frep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
     C.FloatPZero frep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
     C.FloatNZero frep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep) ]
     C.FloatNeg frep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r
              ]
     C.FloatAbs frep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r
              ]
     C.FloatSqrt frep rm r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r
              ]
     C.FloatAdd frep rm r1 r2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
@@ -918,7 +916,7 @@ crucibleAppOperands cache ng app =
     C.FloatSub frep rm r1 r2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
@@ -926,7 +924,7 @@ crucibleAppOperands cache ng app =
     C.FloatMul frep rm r1 r2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
@@ -934,49 +932,49 @@ crucibleAppOperands cache ng app =
     C.FloatDiv frep rm r1 r2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.FloatRem frep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.FloatMin frep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.FloatMax frep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.FloatFMA frep rm r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              , toRegisterOperand cache r3
              ]
-    C.FloatEq r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.FloatFpEq r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.FloatGt r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.FloatGe r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.FloatLt r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.FloatLe r1 r2 -> return $ fromList [ toRegisterOperand cache r1 , toRegisterOperand cache r2 ]
-    C.FloatNe r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.FloatFpNe r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.FloatEq r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.FloatFpEq r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.FloatGt r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.FloatGe r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.FloatLt r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.FloatLe r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1 , toRegisterOperand cache r2 ]
+    C.FloatNe r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.FloatFpNe r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
     C.FloatIte frep r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              , toRegisterOperand cache r3
@@ -984,75 +982,75 @@ crucibleAppOperands cache ng app =
     C.FloatCast frep rm r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r
              ]
     C.FloatFromBinary frep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r
              ]
     C.FloatToBinary frep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , toRegisterOperand cache r
              ]
     C.FloatFromBV frep rm r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r
              ]
     C.FloatFromSBV frep rm r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r
              ]
     C.FloatFromReal frep rm r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r
              ]
     C.FloatToBV nrep rm r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r
              ]
     C.FloatToSBV nrep rm r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , CrucibleOperand n2 (RoundingMode rm)
              , toRegisterOperand cache r
              ]
-    C.FloatToReal r -> return $ fromList [ toRegisterOperand cache r ]
-    C.FloatIsNaN r -> return $ fromList [ toRegisterOperand cache r ]
-    C.FloatIsInfinite r -> return $ fromList [ toRegisterOperand cache r ]
-    C.FloatIsZero r -> return $ fromList [ toRegisterOperand cache r ]
-    C.FloatIsPositive r -> return $ fromList [ toRegisterOperand cache r ]
-    C.FloatIsNegative r -> return $ fromList [ toRegisterOperand cache r ]
-    C.FloatIsSubnormal r -> return $ fromList [ toRegisterOperand cache r ]
-    C.FloatIsNormal r -> return $ fromList [ toRegisterOperand cache r ]
+    C.FloatToReal r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.FloatIsNaN r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.FloatIsInfinite r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.FloatIsZero r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.FloatIsPositive r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.FloatIsNegative r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.FloatIsSubnormal r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.FloatIsNormal r -> return $ OL.fromList [ toRegisterOperand cache r ]
 
     C.JustValue trep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r
              ]
     C.NothingValue trep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep) ]
     C.FromJustValue trep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
@@ -1060,14 +1058,14 @@ crucibleAppOperands cache ng app =
     C.RollRecursive sr cr r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (SymbolRepr sr)
+      return $ OL.fromList [ CrucibleOperand n1 (SymbolRepr sr)
              , CrucibleOperand n2 (CtxRepr cr)
              , toRegisterOperand cache r
              ]
     C.UnrollRecursive sr cr r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (SymbolRepr sr)
+      return $ OL.fromList [ CrucibleOperand n1 (SymbolRepr sr)
              , CrucibleOperand n2 (CtxRepr cr)
              , toRegisterOperand cache r
              ]
@@ -1075,81 +1073,81 @@ crucibleAppOperands cache ng app =
     C.VectorLit trep vrs -> do
       n1 <- PN.freshNonce ng
       -- FIXME: It might be nice to syntactically differentiate the type list elts
-      return $ fromItemList [ Item (CrucibleOperand n1 (TypeRepr trep))
-                            , Delimited Angles (fromList (map (toRegisterOperand cache) (F.toList vrs)))
+      return $ OL.fromItemList [ OL.Item (CrucibleOperand n1 (TypeRepr trep))
+                            , OL.Delimited OL.Angles (OL.fromList (map (toRegisterOperand cache) (F.toList vrs)))
                             ]
     C.VectorReplicate trep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
-    C.VectorIsEmpty r -> return $ fromList [ toRegisterOperand cache r ]
-    C.VectorSize r -> return $ fromList [ toRegisterOperand cache r ]
+    C.VectorIsEmpty r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.VectorSize r -> return $ OL.fromList [ toRegisterOperand cache r ]
     C.VectorGetEntry trep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.VectorSetEntry trep r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              , toRegisterOperand cache r3
              ]
     C.VectorCons trep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
 
     C.HandleLit hdl -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FnHandle hdl) ]
+      return $ OL.fromList [ CrucibleOperand n1 (FnHandle hdl) ]
 
     C.Closure crep trep1 r1 trep2 r2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (CtxRepr crep)
+      return $ OL.fromList [ CrucibleOperand n1 (CtxRepr crep)
              , CrucibleOperand n2 (TypeRepr trep1)
              , toRegisterOperand cache r1
              , CrucibleOperand n3 (TypeRepr trep2)
              , toRegisterOperand cache r2
              ]
 
-    C.NatToInteger r -> return $ fromList [ toRegisterOperand cache r ]
-    C.IntegerToReal r -> return $ fromList [ toRegisterOperand cache r ]
-    C.RealRound r -> return $ fromList [ toRegisterOperand cache r ]
-    C.RealFloor r -> return $ fromList [ toRegisterOperand cache r ]
-    C.RealCeil r -> return $ fromList [ toRegisterOperand cache r ]
+    C.NatToInteger r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.IntegerToReal r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.RealRound r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.RealFloor r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.RealCeil r -> return $ OL.fromList [ toRegisterOperand cache r ]
     C.IntegerToBV nrep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r
              ]
-    C.RealToNat r -> return $ fromList [ toRegisterOperand cache r ]
+    C.RealToNat r -> return $ OL.fromList [ toRegisterOperand cache r ]
 
-    C.Complex r1 r2 -> return $ fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
-    C.RealPart r -> return $ fromList [ toRegisterOperand cache r ]
-    C.ImagPart r -> return $ fromList [ toRegisterOperand cache r ]
+    C.Complex r1 r2 -> return $ OL.fromList [ toRegisterOperand cache r1, toRegisterOperand cache r2 ]
+    C.RealPart r -> return $ OL.fromList [ toRegisterOperand cache r ]
+    C.ImagPart r -> return $ OL.fromList [ toRegisterOperand cache r ]
 
     C.BVUndef nrep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep) ]
     C.BVLit nr i -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , CrucibleOperand n2 (IntegerLit i)
              ]
     C.BVConcat nrep1 nrep2 r1 r2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep1)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep1)
              , CrucibleOperand n2 (NatRepr nrep2)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
@@ -1158,7 +1156,7 @@ crucibleAppOperands cache ng app =
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
       n3 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep1)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep1)
              , CrucibleOperand n2 (NatRepr nrep2)
              , CrucibleOperand n3 (NatRepr nrep3)
              , toRegisterOperand cache r
@@ -1166,200 +1164,200 @@ crucibleAppOperands cache ng app =
     C.BVTrunc nrep1 nrep2 r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep1)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep1)
              , CrucibleOperand n2 (NatRepr nrep2)
              , toRegisterOperand cache r
              ]
     C.BVZext nrep1 nrep2 r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep1)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep1)
              , CrucibleOperand n2 (NatRepr nrep2)
              , toRegisterOperand cache r
              ]
     C.BVSext nrep1 nrep2 r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep1)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep1)
              , CrucibleOperand n2 (NatRepr nrep2)
              , toRegisterOperand cache r
              ]
     C.BVNot nrep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r
              ]
     C.BVAnd nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVOr nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVXor nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVNeg nrep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r
              ]
     C.BVAdd nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVSub nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVMul nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVUdiv nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVSdiv nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVUrem nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVSrem nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVUle nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVUlt nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVSle nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVSlt nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVCarry nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVSCarry nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVSBorrow nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVShl nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVLshr nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BVAshr nrep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nrep)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.BoolToBV nr r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , toRegisterOperand cache r
              ]
     C.BvToInteger nr r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , toRegisterOperand cache r
              ]
     C.SbvToInteger nr r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , toRegisterOperand cache r
              ]
     C.BvToNat nr r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , toRegisterOperand cache r
              ]
     C.BVNonzero nr r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , toRegisterOperand cache r
              ]
     C.BVUMin nr r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
                         , toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.BVUMax nr r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
                         , toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.BVSMin nr r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
                         , toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.BVSMax nr r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
                         , toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
@@ -1367,13 +1365,13 @@ crucibleAppOperands cache ng app =
     C.EmptyWordMap nr btr -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , CrucibleOperand n2 (BaseTypeRepr btr)
              ]
     C.InsertWordMap nr btr r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (NatRepr nr)
+      return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
              , CrucibleOperand n2 (BaseTypeRepr btr)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
@@ -1381,13 +1379,13 @@ crucibleAppOperands cache ng app =
              ]
     C.LookupWordMap btr r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BaseTypeRepr btr)
+      return $ OL.fromList [ CrucibleOperand n1 (BaseTypeRepr btr)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.LookupWordMapWithDefault btr r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BaseTypeRepr btr)
+      return $ OL.fromList [ CrucibleOperand n1 (BaseTypeRepr btr)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              , toRegisterOperand cache r3
@@ -1396,34 +1394,34 @@ crucibleAppOperands cache ng app =
     C.InjectVariant crepr idx r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (CtxRepr crepr)
+      return $ OL.fromList [ CrucibleOperand n1 (CtxRepr crepr)
              , CrucibleOperand n2 (Index idx)
              , toRegisterOperand cache r
              ]
     C.ProjectVariant crepr idx r -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (CtxRepr crepr)
+      return $ OL.fromList [ CrucibleOperand n1 (CtxRepr crepr)
              , CrucibleOperand n2 (Index idx)
              , toRegisterOperand cache r
              ]
 
     C.MkStruct crep regs -> do
       n1 <- PN.freshNonce ng
-      return $ fromItemList [ Item (CrucibleOperand n1 (CtxRepr crep))
-                            , Delimited Brackets (fromList (FC.toListFC (toRegisterOperand cache) regs))
+      return $ OL.fromItemList [ OL.Item (CrucibleOperand n1 (CtxRepr crep))
+                            , OL.Delimited OL.Brackets (OL.fromList (FC.toListFC (toRegisterOperand cache) regs))
                             ]
     C.GetStruct r idx trep -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ toRegisterOperand cache r
+      return $ OL.fromList [ toRegisterOperand cache r
              , CrucibleOperand n1 (Index idx)
              , CrucibleOperand n2 (TypeRepr trep)
              ]
     C.SetStruct crep r1 idx r2 -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (CtxRepr crep)
+      return $ OL.fromList [ CrucibleOperand n1 (CtxRepr crep)
              , toRegisterOperand cache r1
              , CrucibleOperand n2 (Index idx)
              , toRegisterOperand cache r2
@@ -1431,16 +1429,16 @@ crucibleAppOperands cache ng app =
 
     C.EmptyStringMap trep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep) ]
     C.LookupStringMapEntry trep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
     C.InsertStringMapEntry trep r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              , toRegisterOperand cache r3
@@ -1448,50 +1446,50 @@ crucibleAppOperands cache ng app =
 
     C.StringLit sl -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (StringLiteral sl) ]
+      return $ OL.fromList [ CrucibleOperand n1 (StringLiteral sl) ]
     C.StringEmpty srep -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (StringInfoRepr srep) ]
+      return $ OL.fromList [ CrucibleOperand n1 (StringInfoRepr srep) ]
     C.StringConcat srep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (StringInfoRepr srep)
+      return $ OL.fromList [ CrucibleOperand n1 (StringInfoRepr srep)
                         , toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.StringLength r1 -> do
-      return $ fromList [ toRegisterOperand cache r1 ]
+      return $ OL.fromList [ toRegisterOperand cache r1 ]
     C.StringContains r1 r2 -> do
-      return $ fromList [ toRegisterOperand cache r1
+      return $ OL.fromList [ toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.StringIsPrefixOf r1 r2 -> do
-      return $ fromList [ toRegisterOperand cache r1
+      return $ OL.fromList [ toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.StringIsSuffixOf r1 r2 -> do
-      return $ fromList [ toRegisterOperand cache r1
+      return $ OL.fromList [ toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         ]
     C.StringIndexOf r1 r2 r3 -> do
-      return $ fromList [ toRegisterOperand cache r1
+      return $ OL.fromList [ toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         , toRegisterOperand cache r3
                         ]
     C.StringSubstring srep r1 r2 r3 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (StringInfoRepr srep)
+      return $ OL.fromList [ CrucibleOperand n1 (StringInfoRepr srep)
                         , toRegisterOperand cache r1
                         , toRegisterOperand cache r2
                         , toRegisterOperand cache r3
                         ]
     C.ShowValue btrep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BaseTypeRepr btrep)
+      return $ OL.fromList [ CrucibleOperand n1 (BaseTypeRepr btrep)
              , toRegisterOperand cache r
              ]
     C.ShowFloat frep r1 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
+      return $ OL.fromList [ CrucibleOperand n1 (FloatInfoRepr frep)
                         , toRegisterOperand cache r1
                         ]
 
@@ -1501,38 +1499,33 @@ crucibleAppOperands cache ng app =
       bts' <- sequence $ FC.toListFC (\bt -> do
                       n <- PN.freshNonce ng
                       return (CrucibleOperand n (BaseTerm bt))) bts
-      return $ fromItemList [ Item (CrucibleOperand n1 (BaseTypeRepr btr))
-                            , Item (toRegisterOperand cache r)
-                            , Delimited Brackets (fromList bts')
+      return $ OL.fromItemList [ OL.Item (CrucibleOperand n1 (BaseTypeRepr btr))
+                            , OL.Item (toRegisterOperand cache r)
+                            , OL.Delimited OL.Brackets (OL.fromList bts')
                             ]
     C.SymArrayUpdate btr r1 bts r2 -> do
       n1 <- PN.freshNonce ng
       bts' <- sequence $ FC.toListFC (\bt -> do
                       n <- PN.freshNonce ng
                       return (CrucibleOperand n (BaseTerm bt))) bts
-      return $ fromItemList [ Item (CrucibleOperand n1 (BaseTypeRepr btr))
-                            , Item (toRegisterOperand cache r1)
-                            , Delimited Brackets (fromList bts')
-                            , Item (toRegisterOperand cache r2)
+      return $ OL.fromItemList [ OL.Item (CrucibleOperand n1 (BaseTypeRepr btr))
+                            , OL.Item (toRegisterOperand cache r1)
+                            , OL.Delimited OL.Brackets (OL.fromList bts')
+                            , OL.Item (toRegisterOperand cache r2)
                             ]
     C.IsConcrete btrep r -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (BaseTypeRepr btrep)
+      return $ OL.fromList [ CrucibleOperand n1 (BaseTypeRepr btrep)
              , toRegisterOperand cache r
              ]
     C.ReferenceEq trep r1 r2 -> do
       n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
+      return $ OL.fromList [ CrucibleOperand n1 (TypeRepr trep)
              , toRegisterOperand cache r1
              , toRegisterOperand cache r2
              ]
 
-    C.WithAssertion trep pexpr -> do
-      n1 <- PN.freshNonce ng
-      return $ fromList [ CrucibleOperand n1 (TypeRepr trep)
-                        ]
-
-    C.ExtensionApp exprExt -> fromList <$> extensionExprOperands cache ng exprExt
+    C.ExtensionApp exprExt -> OL.fromList <$> extensionExprOperands cache ng exprExt
 
 
 instance NFData (Address (Crucible arch) s) where

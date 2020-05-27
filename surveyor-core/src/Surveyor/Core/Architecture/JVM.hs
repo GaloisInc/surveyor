@@ -10,10 +10,14 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Surveyor.Core.Architecture.JVM ( mkJVMResult ) where
+module Surveyor.Core.Architecture.JVM (
+  mkInitialJVMResult
+  , extendJVMResult
+  ) where
 
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Monad ( guard )
+import qualified Control.Monad.State.Strict as St
 import qualified Control.Once as O
 import qualified Data.Foldable as F
 import           Data.Int ( Int16, Int32 )
@@ -23,41 +27,59 @@ import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
 import           Data.Word ( Word8, Word16 )
+import qualified Lang.Crucible.Backend as CB
+import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Lang.Crucible.JVM as CJ
+import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.Simulator as CS
 import qualified Language.JVM.CFG as J
 import qualified Language.JVM.Common as J
-import qualified Language.JVM.JarReader as J
 import qualified Language.JVM.Parser as J
 import           Text.Printf ( printf )
 
 import           Surveyor.Core.Architecture.Class
+import qualified Surveyor.Core.OperandList as OL
 
 data JVM
 
 data JVMResult s =
   JVMResult { jvmNonce :: NG.Nonce s JVM
-            , jvmJarReader :: J.JarReader
             , jvmClassIndex :: M.Map J.ClassName (J.Class, M.Map J.MethodKey J.Method)
+            , jvmHandleAllocator :: CFH.HandleAllocator
+            , jvmContext :: CJ.JVMContext
             }
 
-mkJVMResult :: NG.Nonce s JVM
-            -- ^ The nonce for this analysis run
-            -> J.JarReader
-            -- ^ The underlying JAR reader
-            -> Maybe (AnalysisResult JVM s)
-            -- ^ The previous analysis result (if any)
-            -> [J.Class]
-            -- ^ Newly-discovered classes to add to the old result
-            -> AnalysisResult JVM s
-mkJVMResult nonce jr oldRes newClasses =
-  AnalysisResult { archResult = JVMAnalysisResult r1
-                 , resultIndex = indexResult r1
-                 }
+-- | Construct an empty JVMResult that can be filled in incrementally
+mkInitialJVMResult :: NG.Nonce s JVM
+                   -> IO (AnalysisResult JVM s)
+mkInitialJVMResult nonce = do
+  halloc <- CFH.newHandleAllocator
+  ctx0 <- CJ.mkInitialJVMContext halloc
+  let r0 = JVMResult { jvmNonce = nonce
+                     , jvmClassIndex = M.empty
+                     , jvmHandleAllocator = halloc
+                     , jvmContext = ctx0
+                     }
+  return AnalysisResult { archResult = JVMAnalysisResult r0
+                        , resultIndex = indexResult r0
+                        }
+
+-- | Extend a JVMResult with a list of additional classes
+extendJVMResult :: AnalysisResult JVM s
+                -- ^ The previous analysis result (if any)
+                -> [J.Class]
+                -- ^ Newly-discovered classes to add to the old result
+                -> IO (AnalysisResult JVM s)
+extendJVMResult ar0 newClasses = do
+  let JVMAnalysisResult r0 = archResult ar0
+  let halloc = jvmHandleAllocator r0
+  ctx1 <- St.execStateT (mapM_ (CJ.extendJVMContext halloc) newClasses) (jvmContext r0)
+  let r1 = r0 { jvmContext = ctx1 }
+  let r2 = F.foldl' indexClass r1 newClasses
+  return AnalysisResult { archResult = JVMAnalysisResult r2
+                        , resultIndex = indexResult r2
+                        }
   where
-    r0 = JVMResult { jvmNonce = nonce
-                   , jvmJarReader = jr
-                   , jvmClassIndex = M.empty
-                   }
-    r1 = F.foldl' indexClass (maybe r0 unwrapAnalysis oldRes) newClasses
     indexClass r k =
       let midx = F.foldl' indexMethods M.empty (J.classMethods k)
       in r { jvmClassIndex = M.insert (J.className k) (k, midx) (jvmClassIndex r)
@@ -70,9 +92,6 @@ indexResult r = O.once ri
     ri = ResultIndex { riFunctions = jvmFunctions r
                      , riSummary = jvmSummarize r
                      }
-
-unwrapAnalysis :: AnalysisResult JVM s -> JVMResult s
-unwrapAnalysis (AnalysisResult (JVMAnalysisResult r) _) = r
 
 data AddrType = ClassK | MethodK | BlockK | InsnK
 
@@ -148,8 +167,11 @@ instance IR JVM s where
       W8 {} -> False
       W16 {} -> False
 
+type instance CruciblePersonality JVM sym = ()
+
 instance Architecture JVM s where
   data ArchResult JVM s = JVMAnalysisResult (JVMResult s)
+  type CrucibleExt JVM = CJ.JVM
 
   archNonce (AnalysisResult (JVMAnalysisResult r) _) = jvmNonce r
   functions (AnalysisResult _ idx) = riFunctions (O.runOnce idx)
@@ -172,6 +194,45 @@ instance Architecture JVM s where
   genericSemantics _ _ = Nothing
   alternativeIRs _ = []
   asAlternativeIR _ _ _ = return Nothing
+  crucibleCFG = jvmCrucibleCFG
+  freshSymbolicEntry _ _ _ = Nothing
+  symbolicInitializers = jvmSymbolicInitializers
+
+jvmCrucibleCFG :: AnalysisResult JVM s
+               -> FunctionHandle JVM s
+               -> IO (Maybe (CCC.AnyCFG (CrucibleExt JVM)))
+jvmCrucibleCFG (AnalysisResult (JVMAnalysisResult jr) _) fh =
+  case fhAddress fh of
+    JVMAddress (MethodAddr (ClassAddr kls) mk) -> do
+      let mmethod = do
+            (_, methodMap) <- M.lookup kls (jvmClassIndex jr)
+            M.lookup mk methodMap
+      case mmethod of
+        Nothing -> return Nothing
+        Just method -> do
+          let verbosity = 0
+          let key = (kls, mk)
+          case M.lookup key (CJ.methodHandles (jvmContext jr)) of
+            Just (CJ.JVMHandleInfo _ hdl) -> do
+              CCC.SomeCFG cfg <- CJ.translateMethod (jvmContext jr) verbosity kls method hdl
+              return (Just (CCC.AnyCFG cfg))
+            _ -> return Nothing
+    _ -> return Nothing
+
+jvmSymbolicInitializers :: (CB.IsSymInterface sym)
+                        => AnalysisResult JVM s
+                        -> sym
+                        -> IO ( CS.IntrinsicTypes sym
+                              , CFH.HandleAllocator
+                              , CS.FunctionBindings () sym (CrucibleExt JVM)
+                              , CS.ExtensionImpl () sym (CrucibleExt JVM)
+                              , ()
+                              )
+jvmSymbolicInitializers (AnalysisResult (JVMAnalysisResult jr) _) _sym = do
+  let intrinsics = CJ.jvmIntrinsicTypes
+  let funcBindings = CFH.emptyHandleMap
+  let extImpl = CJ.jvmExtensionImpl
+  return (intrinsics, jvmHandleAllocator jr, funcBindings, extImpl, ())
 
 jvmFunctions :: JVMResult s -> [FunctionHandle JVM s]
 jvmFunctions r =
@@ -191,153 +252,153 @@ jvmSummarize jr =
   where
     t = T.pack . show
 
-jvmOperands :: J.Instruction -> OperandList (Operand JVM s)
+jvmOperands :: J.Instruction -> OL.OperandList (Operand JVM s)
 jvmOperands i =
   case i of
-    J.Aaload -> fromList []
-    J.Aastore -> fromList []
-    J.Aconst_null -> fromList []
-    J.Aload ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Areturn -> fromList []
-    J.Arraylength -> fromList []
-    J.Astore ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Athrow -> fromList []
-    J.Baload -> fromList []
-    J.Bastore -> fromList []
-    J.Caload -> fromList []
-    J.Castore -> fromList []
-    J.Checkcast t -> fromList [JVMOperand (Type t)]
-    J.D2f -> fromList []
-    J.D2i -> fromList []
-    J.D2l -> fromList []
-    J.Dadd -> fromList []
-    J.Daload -> fromList []
-    J.Dastore -> fromList []
-    J.Dcmpg -> fromList []
-    J.Dcmpl -> fromList []
-    J.Ddiv -> fromList []
-    J.Dload ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Dmul -> fromList []
-    J.Dneg -> fromList []
-    J.Drem -> fromList []
-    J.Dreturn -> fromList []
-    J.Dstore ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Dsub -> fromList []
-    J.Dup -> fromList []
-    J.Dup_x1 -> fromList []
-    J.Dup_x2 -> fromList []
-    J.Dup2 -> fromList []
-    J.Dup2_x1 -> fromList []
-    J.Dup2_x2 -> fromList []
-    J.F2d -> fromList []
-    J.F2i -> fromList []
-    J.F2l -> fromList []
-    J.Fadd -> fromList []
-    J.Faload -> fromList []
-    J.Fastore -> fromList []
-    J.Fcmpg -> fromList []
-    J.Fcmpl -> fromList []
-    J.Fdiv -> fromList []
-    J.Fload ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Fmul -> fromList []
-    J.Fneg -> fromList []
-    J.Frem -> fromList []
-    J.Freturn -> fromList []
-    J.Fstore ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Fsub -> fromList []
-    J.Getfield fid -> fromList [JVMOperand (FieldId fid)]
-    J.Getstatic fid -> fromList [JVMOperand (FieldId fid)]
-    J.Goto pc -> fromList [JVMOperand (PC pc)]
-    J.I2b -> fromList []
-    J.I2c -> fromList []
-    J.I2d -> fromList []
-    J.I2f -> fromList []
-    J.I2l -> fromList []
-    J.I2s -> fromList []
-    J.Iadd -> fromList []
-    J.Iaload -> fromList []
-    J.Iand -> fromList []
-    J.Iastore -> fromList []
-    J.Idiv -> fromList []
-    J.If_acmpeq pc -> fromList [JVMOperand (PC pc)]
-    J.If_acmpne pc -> fromList [JVMOperand (PC pc)]
-    J.If_icmpeq pc -> fromList [JVMOperand (PC pc)]
-    J.If_icmpne pc -> fromList [JVMOperand (PC pc)]
-    J.If_icmplt pc -> fromList [JVMOperand (PC pc)]
-    J.If_icmpge pc -> fromList [JVMOperand (PC pc)]
-    J.If_icmpgt pc -> fromList [JVMOperand (PC pc)]
-    J.If_icmple pc -> fromList [JVMOperand (PC pc)]
-    J.Ifeq pc -> fromList [JVMOperand (PC pc)]
-    J.Ifne pc -> fromList [JVMOperand (PC pc)]
-    J.Iflt pc -> fromList [JVMOperand (PC pc)]
-    J.Ifge pc -> fromList [JVMOperand (PC pc)]
-    J.Ifgt pc -> fromList [JVMOperand (PC pc)]
-    J.Ifle pc -> fromList [JVMOperand (PC pc)]
-    J.Ifnonnull pc -> fromList [JVMOperand (PC pc)]
-    J.Ifnull pc -> fromList [JVMOperand (PC pc)]
-    J.Iinc ix i16 -> fromList [JVMOperand (LocalVariableIndex ix), JVMOperand (I16 i16)]
-    J.Iload ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Imul -> fromList []
-    J.Ineg -> fromList []
-    J.Instanceof t -> fromList [JVMOperand (Type t)]
-    J.Invokeinterface s mk -> fromList [JVMOperand (StringOp (J.unClassName s)), JVMOperand (MethodKey mk)]
-    J.Invokespecial t mk -> fromList [JVMOperand (Type t), JVMOperand (MethodKey mk)]
-    J.Invokestatic s mk -> fromList [JVMOperand (StringOp (J.unClassName s)), JVMOperand (MethodKey mk)]
-    J.Invokevirtual t mk -> fromList [JVMOperand (Type t), JVMOperand (MethodKey mk)]
-    J.Invokedynamic w16 -> fromList [JVMOperand (W16 w16)]
-    J.Ior -> fromList []
-    J.Irem -> fromList []
-    J.Ireturn -> fromList []
-    J.Ishl -> fromList []
-    J.Ishr -> fromList []
-    J.Istore ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Isub -> fromList []
-    J.Iushr -> fromList []
-    J.Ixor -> fromList []
-    J.Jsr pc -> fromList [JVMOperand (PC pc)]
-    J.L2d -> fromList []
-    J.L2f -> fromList []
-    J.L2i -> fromList []
-    J.Ladd -> fromList []
-    J.Laload -> fromList []
-    J.Land -> fromList []
-    J.Lastore -> fromList []
-    J.Lcmp -> fromList []
-    J.Ldc cpv -> fromList [JVMOperand (ConstantPoolValue cpv)]
-    J.Ldiv -> fromList []
-    J.Lload ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Lmul -> fromList []
-    J.Lneg -> fromList []
-    J.Lookupswitch pc tbl -> fromList [JVMOperand (PC pc), JVMOperand (SwitchTable tbl)]
-    J.Lor -> fromList []
-    J.Lrem -> fromList []
-    J.Lreturn -> fromList []
-    J.Lshl -> fromList []
-    J.Lshr -> fromList []
-    J.Lstore ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Lsub -> fromList []
-    J.Lushr -> fromList []
-    J.Lxor -> fromList []
-    J.Monitorenter -> fromList []
-    J.Monitorexit -> fromList []
-    J.Multianewarray t w8 -> fromList [JVMOperand (Type t), JVMOperand (W8 w8)]
-    J.New s -> fromList [JVMOperand (StringOp (J.unClassName s))]
-    J.Newarray t -> fromList [JVMOperand (Type t)]
-    J.Nop -> fromList []
-    J.Pop -> fromList []
-    J.Pop2 -> fromList []
-    J.Putfield fid -> fromList [JVMOperand (FieldId fid)]
-    J.Putstatic fid -> fromList [JVMOperand (FieldId fid)]
-    J.Ret ix -> fromList [JVMOperand (LocalVariableIndex ix)]
-    J.Return -> fromList []
-    J.Saload -> fromList []
-    J.Sastore -> fromList []
-    J.Swap -> fromList []
+    J.Aaload -> OL.fromList []
+    J.Aastore -> OL.fromList []
+    J.Aconst_null -> OL.fromList []
+    J.Aload ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Areturn -> OL.fromList []
+    J.Arraylength -> OL.fromList []
+    J.Astore ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Athrow -> OL.fromList []
+    J.Baload -> OL.fromList []
+    J.Bastore -> OL.fromList []
+    J.Caload -> OL.fromList []
+    J.Castore -> OL.fromList []
+    J.Checkcast t -> OL.fromList [JVMOperand (Type t)]
+    J.D2f -> OL.fromList []
+    J.D2i -> OL.fromList []
+    J.D2l -> OL.fromList []
+    J.Dadd -> OL.fromList []
+    J.Daload -> OL.fromList []
+    J.Dastore -> OL.fromList []
+    J.Dcmpg -> OL.fromList []
+    J.Dcmpl -> OL.fromList []
+    J.Ddiv -> OL.fromList []
+    J.Dload ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Dmul -> OL.fromList []
+    J.Dneg -> OL.fromList []
+    J.Drem -> OL.fromList []
+    J.Dreturn -> OL.fromList []
+    J.Dstore ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Dsub -> OL.fromList []
+    J.Dup -> OL.fromList []
+    J.Dup_x1 -> OL.fromList []
+    J.Dup_x2 -> OL.fromList []
+    J.Dup2 -> OL.fromList []
+    J.Dup2_x1 -> OL.fromList []
+    J.Dup2_x2 -> OL.fromList []
+    J.F2d -> OL.fromList []
+    J.F2i -> OL.fromList []
+    J.F2l -> OL.fromList []
+    J.Fadd -> OL.fromList []
+    J.Faload -> OL.fromList []
+    J.Fastore -> OL.fromList []
+    J.Fcmpg -> OL.fromList []
+    J.Fcmpl -> OL.fromList []
+    J.Fdiv -> OL.fromList []
+    J.Fload ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Fmul -> OL.fromList []
+    J.Fneg -> OL.fromList []
+    J.Frem -> OL.fromList []
+    J.Freturn -> OL.fromList []
+    J.Fstore ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Fsub -> OL.fromList []
+    J.Getfield fid -> OL.fromList [JVMOperand (FieldId fid)]
+    J.Getstatic fid -> OL.fromList [JVMOperand (FieldId fid)]
+    J.Goto pc -> OL.fromList [JVMOperand (PC pc)]
+    J.I2b -> OL.fromList []
+    J.I2c -> OL.fromList []
+    J.I2d -> OL.fromList []
+    J.I2f -> OL.fromList []
+    J.I2l -> OL.fromList []
+    J.I2s -> OL.fromList []
+    J.Iadd -> OL.fromList []
+    J.Iaload -> OL.fromList []
+    J.Iand -> OL.fromList []
+    J.Iastore -> OL.fromList []
+    J.Idiv -> OL.fromList []
+    J.If_acmpeq pc -> OL.fromList [JVMOperand (PC pc)]
+    J.If_acmpne pc -> OL.fromList [JVMOperand (PC pc)]
+    J.If_icmpeq pc -> OL.fromList [JVMOperand (PC pc)]
+    J.If_icmpne pc -> OL.fromList [JVMOperand (PC pc)]
+    J.If_icmplt pc -> OL.fromList [JVMOperand (PC pc)]
+    J.If_icmpge pc -> OL.fromList [JVMOperand (PC pc)]
+    J.If_icmpgt pc -> OL.fromList [JVMOperand (PC pc)]
+    J.If_icmple pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Ifeq pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Ifne pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Iflt pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Ifge pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Ifgt pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Ifle pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Ifnonnull pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Ifnull pc -> OL.fromList [JVMOperand (PC pc)]
+    J.Iinc ix i16 -> OL.fromList [JVMOperand (LocalVariableIndex ix), JVMOperand (I16 i16)]
+    J.Iload ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Imul -> OL.fromList []
+    J.Ineg -> OL.fromList []
+    J.Instanceof t -> OL.fromList [JVMOperand (Type t)]
+    J.Invokeinterface s mk -> OL.fromList [JVMOperand (StringOp (J.unClassName s)), JVMOperand (MethodKey mk)]
+    J.Invokespecial t mk -> OL.fromList [JVMOperand (Type t), JVMOperand (MethodKey mk)]
+    J.Invokestatic s mk -> OL.fromList [JVMOperand (StringOp (J.unClassName s)), JVMOperand (MethodKey mk)]
+    J.Invokevirtual t mk -> OL.fromList [JVMOperand (Type t), JVMOperand (MethodKey mk)]
+    J.Invokedynamic w16 -> OL.fromList [JVMOperand (W16 w16)]
+    J.Ior -> OL.fromList []
+    J.Irem -> OL.fromList []
+    J.Ireturn -> OL.fromList []
+    J.Ishl -> OL.fromList []
+    J.Ishr -> OL.fromList []
+    J.Istore ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Isub -> OL.fromList []
+    J.Iushr -> OL.fromList []
+    J.Ixor -> OL.fromList []
+    J.Jsr pc -> OL.fromList [JVMOperand (PC pc)]
+    J.L2d -> OL.fromList []
+    J.L2f -> OL.fromList []
+    J.L2i -> OL.fromList []
+    J.Ladd -> OL.fromList []
+    J.Laload -> OL.fromList []
+    J.Land -> OL.fromList []
+    J.Lastore -> OL.fromList []
+    J.Lcmp -> OL.fromList []
+    J.Ldc cpv -> OL.fromList [JVMOperand (ConstantPoolValue cpv)]
+    J.Ldiv -> OL.fromList []
+    J.Lload ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Lmul -> OL.fromList []
+    J.Lneg -> OL.fromList []
+    J.Lookupswitch pc tbl -> OL.fromList [JVMOperand (PC pc), JVMOperand (SwitchTable tbl)]
+    J.Lor -> OL.fromList []
+    J.Lrem -> OL.fromList []
+    J.Lreturn -> OL.fromList []
+    J.Lshl -> OL.fromList []
+    J.Lshr -> OL.fromList []
+    J.Lstore ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Lsub -> OL.fromList []
+    J.Lushr -> OL.fromList []
+    J.Lxor -> OL.fromList []
+    J.Monitorenter -> OL.fromList []
+    J.Monitorexit -> OL.fromList []
+    J.Multianewarray t w8 -> OL.fromList [JVMOperand (Type t), JVMOperand (W8 w8)]
+    J.New s -> OL.fromList [JVMOperand (StringOp (J.unClassName s))]
+    J.Newarray t -> OL.fromList [JVMOperand (Type t)]
+    J.Nop -> OL.fromList []
+    J.Pop -> OL.fromList []
+    J.Pop2 -> OL.fromList []
+    J.Putfield fid -> OL.fromList [JVMOperand (FieldId fid)]
+    J.Putstatic fid -> OL.fromList [JVMOperand (FieldId fid)]
+    J.Ret ix -> OL.fromList [JVMOperand (LocalVariableIndex ix)]
+    J.Return -> OL.fromList []
+    J.Saload -> OL.fromList []
+    J.Sastore -> OL.fromList []
+    J.Swap -> OL.fromList []
     J.Tableswitch pc i32_1 i32_2 pcs ->
-      fromItemList [ Item (JVMOperand (PC pc))
-                   , Item (JVMOperand (I32 i32_1))
-                   , Item (JVMOperand (I32 i32_2))
-                   , Delimited Parens (fromList (map (JVMOperand . PC) pcs))
+      OL.fromItemList [ OL.Item (JVMOperand (PC pc))
+                   , OL.Item (JVMOperand (I32 i32_1))
+                   , OL.Item (JVMOperand (I32 i32_2))
+                   , OL.Delimited OL.Parens (OL.fromList (map (JVMOperand . PC) pcs))
                    ]
 
 toBlock :: Addr 'MethodK -> J.Method -> J.BasicBlock -> Block JVM s

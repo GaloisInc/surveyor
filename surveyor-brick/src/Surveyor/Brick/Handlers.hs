@@ -23,12 +23,14 @@ module Surveyor.Brick.Handlers (
   blockViewerG,
   functionSelectorG,
   functionViewerG,
-  minibufferG
+  minibufferG,
+  symbolicExecutionManagerG
   ) where
 
 import           GHC.Generics ( Generic )
 
 import qualified Brick as B
+import qualified Control.Concurrent.Async as A
 import qualified Control.Lens as L
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
 import           Control.Monad.IO.Class ( liftIO )
@@ -40,6 +42,7 @@ import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..), viewSome )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -62,6 +65,7 @@ import qualified Surveyor.Brick.Widget.BlockViewer as BV
 import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
+import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
 
 appHandleEvent :: C.State BrickUIExtension BrickUIState s -> B.BrickEvent Names (C.Events s (C.S BrickUIExtension BrickUIState)) -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
 appHandleEvent (C.State s0) evt =
@@ -121,6 +125,14 @@ handleVtyEvent s0@(C.State s) evt
       , Just cstk <- s ^? C.lArchState . _Just . C.contextL -> do
           cstk' <- FV.handleFunctionViewerEvent evt fview cstk
           let s' = s & C.lArchState . _Just . C.contextL .~ cstk'
+          B.continue $! C.State s'
+    C.SomeUIMode C.SymbolicExecutionManager
+      | Just archState <- s ^. C.lArchState -> do
+          let manager0 = archState ^. symbolicExecutionManagerL
+          manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
+          let st1 = SEM.symbolicExecutionManagerState manager1
+          let s' = s & C.lArchState . _Just . symbolicExecutionManagerL .~ manager1
+                     & C.lArchState . _Just . C.symExStateL %~ (<> viewSome C.singleSessionState st1)
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
@@ -192,6 +204,61 @@ handleCustomEvent s0 evt =
       case C.sUIMode s0 of
         C.SomeMiniBuffer _ -> B.continue (C.State s0)
         C.SomeUIMode mode -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer mode))
+
+    C.InitializeSymbolicExecution archNonce mConfig mFuncHandle
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce)
+      , Just sessionID <- s0 ^? C.lArchState . _Just . C.contextL . C.currentContext . C.symExecSessionIDL
+      , Just symExSt <- s0 ^? C.lArchState . _Just . C.symExStateL -> do
+          -- FIXME: Instead of the default, we could scan the context stack for
+          -- the most recent configuration
+          let ng = C.sNonceGenerator s0
+          conf <- liftIO $ maybe (C.defaultSymbolicExecutionConfig ng) return mConfig
+          case C.lookupSessionState symExSt sessionID of
+            Just (Some oldState) -> liftIO $ C.cleanupSymbolicExecutionState oldState
+            Nothing -> return ()
+          let newState = C.configuringSymbolicExecution conf
+          let manager = SEM.symbolicExecutionManager (Some newState)
+          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
+                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
+                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
+          B.continue (C.State s1)
+      | otherwise -> B.continue (C.State s0)
+
+    C.BeginSymbolicExecutionSetup archNonce symExConfig cfg
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
+          let ng = C.sNonceGenerator s0
+          symExSt <- liftIO $ C.initializingSymbolicExecution ng symExConfig cfg
+          let manager = SEM.symbolicExecutionManager (Some symExSt)
+          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
+                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
+                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState symExSt)
+          B.continue (C.State s1)
+      | otherwise -> B.continue (C.State s0)
+    C.StartSymbolicExecution archNonce ares symState
+      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
+        let eventChan = s0 ^. C.lEventChannel
+        (newState, executionLoop) <- liftIO $ C.startSymbolicExecution eventChan ares symState
+        task <- liftIO $ A.async $ do
+          inspectState <- executionLoop
+          let updateSymExecState _ st =
+                let manager = SEM.symbolicExecutionManager (Some inspectState)
+                in st & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
+                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
+                      & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
+          -- We pass () as the value of the update state and capture the real
+          -- value (the new state) because there isn't an easy way to get an
+          -- NFData instance for states.  That is okay, though, because they are
+          -- evaluated enough.
+          C.writeChan eventChan (C.AsyncStateUpdate archNonce (NF.nf ()) updateSymExecState)
+        let manager = SEM.symbolicExecutionManager (Some newState)
+        let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
+                    & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
+                    & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
+        B.continue (C.State s1)
+      | otherwise -> B.continue (C.State s0)
+    C.ReportSymbolicExecutionMetrics sid metrics -> do
+      let s1 = s0 & C.lArchState . _Just . C.symExStateL %~ C.updateSessionMetrics sid metrics
+      B.continue (C.State s1)
 
     C.ViewBlock archNonce rep
       | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
@@ -325,8 +392,10 @@ handleCustomEvent s0 evt =
     C.PushContext archNonce fh irrepr b
       | Just archState <- s0 ^. C.lArchState
       , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          ctx <- liftIO $ C.makeContext (archState ^. C.irCacheL) (archState ^. C.lAnalysisResult) fh irrepr b
+          let ng = C.sNonceGenerator s0
+          (ctx, sessionState) <- liftIO $ C.makeContext ng (archState ^. C.irCacheL) (archState ^. C.lAnalysisResult) fh irrepr b
           let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.pushContext ctx
+                      & C.lArchState . _Just . C.symExStateL %~ (<> sessionState)
           liftIO $ C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Selecting block: " +| C.blockAddress b ||+ "")))
           liftIO $ C.logDiagnostic s0 C.LogDebug (Fmt.fmt ("from function " +| C.blockFunction b ||+ ""))
           B.continue (C.State s1)
@@ -419,11 +488,17 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
            case C.functions ares of
              [] -> return ()
              defFunc : _ -> do
-               let pushContext newVal oldState = oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newVal
+               let pushContext (newContext, sessState) oldState =
+                     oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newContext
+                              & C.lArchState . _Just . C.symExStateL %~ (<> sessState)
                C.asynchronously (C.archNonce ares) (C.sEmitEvent s0) pushContext $ do
                  case C.functionBlocks ares defFunc of
-                   b0 : _ -> C.makeContext tcache ares defFunc C.BaseRepr b0
+                   b0 : _ -> do
+                     let ng = C.sNonceGenerator s0
+                     C.makeContext ng tcache ares defFunc C.BaseRepr b0
                    _ -> error ("No blocks in function " ++ show defFunc)
+  let ng = C.sNonceGenerator s0
+  ses <- C.defaultSymbolicExecutionConfig ng
   return C.S { C.sDiagnosticLog = C.sDiagnosticLog s0 <> fmap (Nothing,) newDiags
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
              , C.sUIMode = uiMode
@@ -459,10 +534,13 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                                    , sBlockViewers = MapF.fromList blockViewers
                                                    , sFunctionViewer = MapF.fromList funcViewers
                                                    , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                                   , sSymbolicExecutionManager =
+                                                     SEM.symbolicExecutionManager (Some (C.Configuring ses))
                                                    }
                         return C.ArchState { C.sAnalysisResult = ares
                                            , C.sUIState = uiState
                                            , C.sContext = C.emptyContextStack
+                                           , C.sSymExState = mempty
                                            , C.sIRCache = tcache
                                            }
              }
@@ -477,6 +555,10 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                , functionViewerKeys (C.archNonce ares) C.BaseRepr
                , functionViewerKeys (C.archNonce ares) C.MacawRepr
                , functionViewerKeys (C.archNonce ares) C.CrucibleRepr
+               , (C.SomeUIMode C.SymbolicExecutionManager,
+                  [ (C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)
+                  , (C.Key (V.KChar 's') [], C.SomeCommand C.startSymbolicExecutionC)
+                  ])
                ]
     addModeKeys (mode, keys) modeKeymap =
       foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
@@ -500,6 +582,7 @@ functionViewerKeys nonce rep = ( C.SomeUIMode (C.FunctionViewer nonce rep)
                                , [ (C.Key (V.KChar 'm') [], C.SomeCommand BC.showMacawFunctionC)
                                  , (C.Key (V.KChar 'c') [], C.SomeCommand BC.showCrucibleFunctionC)
                                  , (C.Key (V.KChar 'b') [], C.SomeCommand BC.showBaseFunctionC)
+                                 , (C.Key (V.KChar 's') [], C.SomeCommand C.initializeSymbolicExecutionC)
                                  ]
                                )
 
@@ -528,6 +611,7 @@ data BrickUIState arch s =
                , sBlockSelector :: !(BS.BlockSelector arch s)
                , sBlockViewers :: !(MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
                , sFunctionViewer :: !(MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
+               , sSymbolicExecutionManager :: !(SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
                }
   deriving (Generic)
 
@@ -581,3 +665,9 @@ functionViewersL = C.lUIState . GL.field @"sFunctionViewer"
 
 functionViewerG :: C.IRRepr arch ir -> L.Getter (C.ArchState BrickUIState arch s) (Maybe (FV.FunctionViewer arch s ir))
 functionViewerG rep = L.to (\as -> MapF.lookup rep (as ^. functionViewersL))
+
+symbolicExecutionManagerL :: L.Lens' (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
+symbolicExecutionManagerL = C.lUIState . GL.field @"sSymbolicExecutionManager"
+
+symbolicExecutionManagerG :: L.Getter (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
+symbolicExecutionManagerG = L.to (^. symbolicExecutionManagerL)

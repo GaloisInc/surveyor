@@ -35,6 +35,7 @@ import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.InstructionSemanticsViewer as ISV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
+import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
 
 drawSummary :: (C.Architecture arch s) => FilePath -> C.AnalysisResult arch s -> B.Widget Names
 drawSummary binFileName ares =
@@ -160,6 +161,8 @@ drawUIMode binFileName archState s uim =
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing function view for IR: " ++ show repr)))
     C.SemanticsViewer ->
       drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. C.contextG) ISV.instructionSemanticsViewer)
+    C.SymbolicExecutionManager -> do
+      drawAppShell s (SEM.renderSymbolicExecutionManager (archState ^. BH.symbolicExecutionManagerG))
   where
     binfo = C.sAnalysisResult archState
 

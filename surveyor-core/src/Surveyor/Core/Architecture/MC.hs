@@ -3,10 +3,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | Instantiations of the 'Architecture' class for machine code architectures
 module Surveyor.Core.Architecture.MC (
@@ -14,6 +17,9 @@ module Surveyor.Core.Architecture.MC (
   mkPPC64Result,
   mkX86Result
   ) where
+
+import qualified Data.IORef as IOR
+import           GHC.TypeNats
 
 import           Control.DeepSeq ( NFData, rnf )
 import qualified Control.Once as O
@@ -28,6 +34,7 @@ import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
+import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -44,27 +51,35 @@ import           Text.Read ( readMaybe )
 import qualified Data.Macaw.BinaryLoader as MBL
 import qualified Data.Macaw.CFG as MM
 import qualified Data.Macaw.Discovery as MD
+import           Data.Macaw.PPC.Symbolic ()
 import qualified Data.Macaw.Symbolic as MS
 import qualified Data.Macaw.Types as MT
 import           Data.Macaw.X86.Symbolic ()
-import           Data.Macaw.PPC.Symbolic ()
+import qualified Data.Parameterized.HasRepr as HR
 import qualified Dismantle.PPC as DPPC
 import qualified Flexdis86 as FD
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Extension as CE
+import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.LLVM.Intrinsics as CLLI
+import qualified Lang.Crucible.LLVM.MemModel as LLM
+import qualified Lang.Crucible.Simulator as CS
+import qualified Lang.Crucible.Types as CT
 import qualified Renovate as R
 import qualified Renovate.Arch.PPC as PPC
 import qualified Renovate.Arch.X86_64 as X86
-import qualified Data.Parameterized.HasRepr as HR
+import qualified What4.Interface as WI
+import qualified What4.Symbol as WS
 
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Macaw as AM
 import qualified Surveyor.Core.Architecture.Crucible as AC
 import           Surveyor.Core.BinaryAnalysisResult
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr) )
+import qualified Surveyor.Core.OperandList as OL
 
 instance AC.CrucibleExtension PPC.PPC32 where
-  type CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
   type CrucibleExtensionOperand PPC.PPC32 = MacawOperand PPC.PPC32
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
@@ -74,7 +89,6 @@ instance AC.CrucibleExtension PPC.PPC32 where
   extensionOperandSelectable _ = macawExtensionOperandSelectable
 
 instance AC.CrucibleExtension PPC.PPC64 where
-  type CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
   type CrucibleExtensionOperand PPC.PPC64 = MacawOperand PPC.PPC64
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
@@ -84,7 +98,6 @@ instance AC.CrucibleExtension PPC.PPC64 where
   extensionOperandSelectable _ = macawExtensionOperandSelectable
 
 instance AC.CrucibleExtension X86.X86_64 where
-  type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
   type CrucibleExtensionOperand X86.X86_64 = MacawOperand X86.X86_64
   prettyExtensionStmt _ = prettyMacawExtensionStmt
   prettyExtensionApp _ = prettyMacawExtensionApp
@@ -309,7 +322,7 @@ macawExtensionStmtOperands cache ng ext =
              , AC.toRegisterOperand cache r3
              ]
 
-indexCrucibleMCBlocks :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (AC.CrucibleExt arch)
+indexCrucibleMCBlocks :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (CrucibleExt arch)
                          , MM.MemWidth (MM.ArchAddrWidth arch)
                          , Ord (Address arch s)
                          )
@@ -322,7 +335,7 @@ indexCrucibleMCBlocks toArchAddr blks =
       (_, idx) = F.foldl' (buildCrucibleInstIndex toArchAddr) s0 instrs
   in idx
 
-buildCrucibleInstIndex :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (AC.CrucibleExt arch)
+buildCrucibleInstIndex :: ( MS.MacawStmtExtension arch ~ CE.StmtExtension (CrucibleExt arch)
                           , MM.MemWidth (MM.ArchAddrWidth arch)
                           , Ord (Address arch s)
                           )
@@ -446,25 +459,29 @@ mcFunctionBlocks toBlock bar concAddr =
     bi = rBlockInfo bar
     fb = R.biFunctions bi
 
-toInstPPC32 :: (PPC.Instruction (), R.ConcreteAddress PPC.PPC32) -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
+toInstPPC32 :: (PPC.Instruction PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC32)
+            -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
 toInstPPC32 (i, addr) = (PPC32Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC32Instruction i)
 
 toBlockPPC32 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32 -> FunctionHandle PPC.PPC32 s -> R.ConcreteBlock PPC.PPC32 -> Block PPC.PPC32 s
 toBlockPPC32 bar fh cb =
-  Block { blockAddress = PPC32Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstPPC32 (R.instructionAddresses (rISA bar) cb)
+  Block { blockAddress = PPC32Address (MM.absoluteAddr (R.absoluteAddress (R.blockAddress cb)))
+        , blockInstructions = R.withInstructionAddresses (rISA bar) cb $ \PPC.PPCRepr insns ->
+            F.toList (fmap toInstPPC32 insns)
         , blockFunction = fh
         }
 
-toInstPPC64 :: (PPC.Instruction (), R.ConcreteAddress PPC.PPC64) -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
+toInstPPC64 :: (PPC.Instruction PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC64)
+            -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
 toInstPPC64 (i, addr) = (PPC64Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC64Instruction i)
 
 toBlockPPC64 :: BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64 -> FunctionHandle PPC.PPC64 s -> R.ConcreteBlock PPC.PPC64 -> Block PPC.PPC64 s
 toBlockPPC64 bar fh cb =
-  Block { blockAddress = PPC64Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstPPC64 (R.instructionAddresses (rISA bar) cb)
+  Block { blockAddress = PPC64Address (MM.absoluteAddr (R.absoluteAddress (R.blockAddress cb)))
+        , blockInstructions = R.withInstructionAddresses (rISA bar) cb $ \PPC.PPCRepr insns ->
+            F.toList (fmap toInstPPC64 insns)
         , blockFunction = fh
         }
 
@@ -473,12 +490,14 @@ toBlockX86 :: BinaryAnalysisResult s (C.Const Void) X86.X86_64
            -> R.ConcreteBlock X86.X86_64
            -> Block X86.X86_64 s
 toBlockX86 bar fh cb =
-  Block { blockAddress = X86Address (MM.absoluteAddr (R.absoluteAddress (R.basicBlockAddress cb)))
-        , blockInstructions = map toInstX86 (R.instructionAddresses (rISA bar) cb)
+  Block { blockAddress = X86Address (MM.absoluteAddr (R.absoluteAddress (R.blockAddress cb)))
+        , blockInstructions = R.withInstructionAddresses (rISA bar) cb $ \X86.X86Repr insns ->
+            F.toList (fmap toInstX86 insns)
         , blockFunction = fh
         }
 
-toInstX86 :: (X86.Instruction (), R.ConcreteAddress X86.X86_64) -> (Address X86.X86_64 s, Instruction X86.X86_64 s)
+toInstX86 :: (X86.Instruction X86.OnlyEncoding (), R.ConcreteAddress X86.X86_64)
+          -> (Address X86.X86_64 s, Instruction X86.X86_64 s)
 toInstX86 (i, addr) = (X86Address (MM.absoluteAddr (R.absoluteAddress addr)),
                        X86Instruction i)
 
@@ -522,7 +541,7 @@ ppcPrettyOperand _addr op =
     DPPC.Vsrc vr -> T.pack (show (HPJ.pPrint vr))
 
 instance IR PPC.PPC32 s where
-  data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction ())
+  data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction PPC.OnlyEncoding ())
   data Operand PPC.PPC32 s = forall x . PPC32Operand !(DPPC.Operand x)
   data Opcode PPC.PPC32 s = forall x y . PPC32Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC32 s = PPC32Address !(MM.MemAddr 32)
@@ -534,7 +553,7 @@ instance IR PPC.PPC32 s where
       DPPC.Instruction opc _ -> PPC32Opcode opc
   operands (PPC32Instruction i) =
     case R.toGenericInstruction @PPC.PPC32 i of
-      DPPC.Instruction _ ops -> fromList (FC.toListFC PPC32Operand ops)
+      DPPC.Instruction _ ops -> OL.fromList (FC.toListFC PPC32Operand ops)
   boundValue _ = Nothing
   prettyOperand (PPC32Address addr) (PPC32Operand op) =
     ppcPrettyOperand addr op
@@ -585,9 +604,12 @@ ppcOperandSelectable o =
     DPPC.U16imm {} -> False
     DPPC.U16imm64 {} -> False
 
+type instance CruciblePersonality PPC.PPC32 sym = MS.MacawSimulatorState sym
+
 instance Architecture PPC.PPC32 s where
   data ArchResult PPC.PPC32 s =
     PPC32AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC32)
+  type CrucibleExt PPC.PPC32 = MS.MacawExt PPC.PPC32
 
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   archNonce (AnalysisResult (PPC32AnalysisResult bar) _) = mcNonce bar
@@ -631,6 +653,40 @@ instance Architecture PPC.PPC32 s where
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC32Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  crucibleCFG (AnalysisResult (PPC32AnalysisResult bar) _) = mcCrucibleCFG ppcaddr32ToConcrete bar
+  freshSymbolicEntry _ = mcFreshSymbolicEntry
+  symbolicInitializers = mcSymbolicInitializers
+
+ppcaddr32ToConcrete :: Address PPC.PPC32 s -> R.ConcreteAddress PPC.PPC32
+ppcaddr32ToConcrete (PPC32Address ma32) =
+  case MM.asAbsoluteAddr ma32 of
+    Just absAddr -> R.concreteFromAbsolute absAddr
+    Nothing -> error ("Unsupported address translation: " ++ show ma32)
+
+ppcaddr64ToConcrete :: Address PPC.PPC64 s -> R.ConcreteAddress PPC.PPC64
+ppcaddr64ToConcrete (PPC64Address ma64) =
+  case MM.asAbsoluteAddr ma64 of
+    Just absAddr -> R.concreteFromAbsolute absAddr
+    Nothing -> error ("Unsupported address translation: " ++ show ma64)
+
+x86addr64ToConcrete :: Address X86.X86_64 s -> R.ConcreteAddress X86.X86_64
+x86addr64ToConcrete (X86Address addr) =
+  case MM.asAbsoluteAddr addr of
+    Just absAddr -> R.concreteFromAbsolute absAddr
+    Nothing -> error ("Unsupported address translation: " ++ show addr)
+
+mcCrucibleCFG :: (Address arch s -> R.ConcreteAddress arch)
+              -> BinaryAnalysisResult s o arch
+              -> FunctionHandle arch s
+              -> IO (Maybe (C.AnyCFG (MS.MacawExt arch)))
+mcCrucibleCFG addrToConcrete bar fh =
+  case M.lookup (addrToConcrete (fhAddress fh)) cfgs of
+    Nothing -> return Nothing
+    Just scfg -> do
+      C.SomeCFG cfg <- R.getSymbolicCFG scfg
+      return (Just (C.AnyCFG cfg))
+  where
+    cfgs = R.biCFG (rBlockInfo bar)
 
 instance Eq (Address PPC.PPC32 s) where
   PPC32Address a1 == PPC32Address a2 = a1 == a2
@@ -651,7 +707,7 @@ instance NFData (Operand PPC.PPC32 s) where
   rnf (PPC32Operand _) = ()
 
 instance IR PPC.PPC64 s where
-  data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction ())
+  data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction PPC.OnlyEncoding ())
   data Operand PPC.PPC64 s = forall x . PPC64Operand !(DPPC.Operand x)
   data Opcode PPC.PPC64 s = forall x y . PPC64Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC64 s = PPC64Address !(MM.MemAddr 64)
@@ -662,7 +718,7 @@ instance IR PPC.PPC64 s where
       DPPC.Instruction opc _ -> PPC64Opcode opc
   operands (PPC64Instruction i) =
     case R.toGenericInstruction @PPC.PPC64 i of
-      DPPC.Instruction _ ops -> fromList (FC.toListFC PPC64Operand ops)
+      DPPC.Instruction _ ops -> OL.fromList (FC.toListFC PPC64Operand ops)
   boundValue _ = Nothing
   prettyOperand (PPC64Address addr) (PPC64Operand op) =
     ppcPrettyOperand addr op
@@ -672,9 +728,12 @@ instance IR PPC.PPC64 s where
   showInstructionAddresses _ = True
   operandSelectable (PPC64Operand o) = ppcOperandSelectable o
 
+type instance CruciblePersonality PPC.PPC64 sym = MS.MacawSimulatorState sym
+
 instance Architecture PPC.PPC64 s where
   data ArchResult PPC.PPC64 s =
     PPC64AnalysisResult !(BinaryAnalysisResult s (DPPC.Opcode DPPC.Operand) PPC.PPC64)
+  type CrucibleExt PPC.PPC64 = MS.MacawExt PPC.PPC64
 
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   archNonce (AnalysisResult (PPC64AnalysisResult bar) _) = mcNonce bar
@@ -717,6 +776,9 @@ instance Architecture PPC.PPC64 s where
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC64Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  crucibleCFG (AnalysisResult (PPC64AnalysisResult bar) _) = mcCrucibleCFG ppcaddr64ToConcrete bar
+  freshSymbolicEntry _ = mcFreshSymbolicEntry
+  symbolicInitializers = mcSymbolicInitializers
 
 
 instance Eq (Address PPC.PPC64 s) where
@@ -738,13 +800,13 @@ instance NFData (Operand PPC.PPC64 s) where
   rnf (PPC64Operand _) = ()
 
 instance IR X86.X86_64 s where
-  data Instruction X86.X86_64 s = X86Instruction (X86.Instruction ())
+  data Instruction X86.X86_64 s = X86Instruction (X86.Instruction X86.OnlyEncoding ())
   data Operand X86.X86_64 s = X86Operand FD.Value FD.OperandType
   data Opcode X86.X86_64 s = X86Opcode String
   data Address X86.X86_64 s = X86Address (MM.MemAddr 64)
   prettyAddress (X86Address addr) = mcPrettyAddress addr
   opcode (X86Instruction i) = X86Opcode (X86.instrOpcode i)
-  operands (X86Instruction i) = fromList (map (uncurry X86Operand) (X86.instrOperands i))
+  operands (X86Instruction i) = OL.fromList (map (uncurry X86Operand) (X86.instrOperands i))
   boundValue _ = Nothing
   prettyOpcode (X86Opcode s) = T.pack s
   prettyOperand (X86Address addr) (X86Operand v _) =
@@ -790,9 +852,13 @@ instance IR X86.X86_64 s where
 
       FD.SegmentValue {} -> False
 
+type instance CruciblePersonality X86.X86_64 sym = MS.MacawSimulatorState sym
+
 instance Architecture X86.X86_64 s where
   data ArchResult X86.X86_64 s =
     X86AnalysisResult (BinaryAnalysisResult s (C.Const Void) X86.X86_64)
+  type CrucibleExt X86.X86_64 = MS.MacawExt X86.X86_64
+--  type CruciblePersonality X86.X86_64 = forall sym . MS.MacawSimulatorState sym
 
   summarizeResult (AnalysisResult _ idx) = riSummary (O.runOnce idx)
   archNonce (AnalysisResult (X86AnalysisResult bar) _) = mcNonce bar
@@ -831,8 +897,43 @@ instance Architecture X86.X86_64 s where
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks X86Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
           Nothing -> error ("Invalid address for function: " ++ show memAddr)
+  crucibleCFG (AnalysisResult (X86AnalysisResult bar) _) = mcCrucibleCFG x86addr64ToConcrete bar
+  freshSymbolicEntry _ = mcFreshSymbolicEntry
+  symbolicInitializers = mcSymbolicInitializers
 
-
+-- FIXME: This needs to be completed once the memory model rewrite for
+-- macaw-symbolic is merged to master macaw.
+mcSymbolicInitializers :: forall arch s sym
+                        . ( CB.IsSymInterface sym
+                          , MS.ArchInfo arch
+                          , 1 <= MM.ArchAddrWidth arch
+                          , CruciblePersonality arch sym ~ MS.MacawSimulatorState sym
+                          , CrucibleExt arch ~ MS.MacawExt arch
+                          )
+                       => AnalysisResult arch s
+                       -> sym
+                       -> IO ( CS.IntrinsicTypes sym
+                             , CFH.HandleAllocator
+                             , CS.FunctionBindings (MS.MacawSimulatorState sym) sym (CrucibleExt arch)
+                             , CS.ExtensionImpl (MS.MacawSimulatorState sym) sym (CrucibleExt arch)
+                             , CruciblePersonality arch sym
+                             )
+mcSymbolicInitializers _ares sym = do
+  let Just archVals = MS.archVals (Proxy @arch)
+  let intrinsics = CLLI.llvmIntrinsicTypes
+  halloc <- CFH.newHandleAllocator
+  let bindings = CFH.emptyHandleMap
+  badBehaviorMap <- IOR.newIORef mempty
+  let ?badBehaviorMap = badBehaviorMap
+  MS.withArchEval archVals sym $ \archEvalFns -> do
+    -- These values are not hard to get, but it will be easier after a branch is
+    -- merged from macaw that redoes some of the details of memory access.
+    let gv = error "Global var for macaw"
+    let globalMap = error "Global map for macaw"
+    let lfh = error "lfh for macaw"
+    let mkPtrValidity = error "mkpointervalidity predicate"
+    let extImpl = MS.macawExtensions archEvalFns gv globalMap lfh mkPtrValidity
+    return (intrinsics, halloc, bindings, extImpl, MS.MacawSimulatorState)
 
 instance Eq (Address X86.X86_64 s) where
   X86Address a1 == X86Address a2 = a1 == a2
@@ -976,3 +1077,16 @@ prettyDisplacement (FD.Disp8 x) =
     HPJ.text ("0x" ++ showHex x "")
    else
     HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int16)) "")
+
+-- Symbolic execution support
+
+mcFreshSymbolicEntry :: (CB.IsSymInterface sym) => sym -> CT.TypeRepr tp -> Maybe (IO (CS.RegValue sym tp))
+mcFreshSymbolicEntry sym rep =
+  case rep of
+    LLM.LLVMPointerRepr w -> return $ do
+      -- We allocate just plain bitvectors for LLVMPointer, as fully symbolic
+      -- pointers aren't useful and users have to provide more interesting
+      -- pointer relations manually.
+      bv <- WI.freshConstant sym (WS.safeSymbol "bv") (WI.BaseBVRepr w)
+      LLM.llvmPointer_bv sym bv
+    _ -> Nothing

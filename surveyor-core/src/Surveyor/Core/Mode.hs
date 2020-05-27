@@ -47,6 +47,10 @@ data UIMode s k where
   FunctionViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
   -- | View the semantics for an individual selected base IR instruction
   SemanticsViewer :: UIMode s NormalK
+  -- | A UI for setting up the basic configuration of the symbolic execution
+  -- engine (includes solver selection and float mode selection), running the
+  -- symbolic execution engine, and inspecting results.
+  SymbolicExecutionManager :: UIMode s NormalK
   -- | An interactive widget that takes focus and accepts all
   -- keystrokes except for C-g
   MiniBuffer :: UIMode s NormalK -> UIMode s MiniBufferK
@@ -61,6 +65,7 @@ prettyMode m =
     BlockViewer _nonce repr -> Fmt.fmt ("Block Viewer[" +| repr ||+ "]")
     FunctionViewer _nonce repr -> Fmt.fmt ("Function Viewer[" +| repr ||+ "]")
     SemanticsViewer -> "Semantics Viewer"
+    SymbolicExecutionManager -> "Symbolic Execution Manager"
 
 data SomeUIMode s where
   SomeMiniBuffer :: UIMode s MiniBufferK -> SomeUIMode s

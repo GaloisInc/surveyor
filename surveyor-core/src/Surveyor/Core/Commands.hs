@@ -25,17 +25,28 @@ module Surveyor.Core.Commands (
   resetInstructionSelectionC,
   contextBackC,
   contextForwardC,
+  initializeSymbolicExecutionC,
+  beginSymbolicExecutionSetupC,
+  startSymbolicExecutionC,
   allCommands
   ) where
 
+import           Control.Lens ( (^.), (^?) )
 import qualified Data.Functor.Const as C
+import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
+import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Text as T
+import qualified Lang.Crucible.CFG.Core as CCC
 
+import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
+import qualified Surveyor.Core.Context as CCX
+import qualified Surveyor.Core.Context.SymbolicExecution as SymEx
 import           Surveyor.Core.Events ( Events(..) )
-
+import qualified Surveyor.Core.State as CS
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
 type Callback s st tps = C.Chan (Events s st)
@@ -43,7 +54,7 @@ type Callback s st tps = C.Chan (Events s st)
                       -> PL.List (C.ArgumentType (AR.SurveyorCommand s st)) tps
                       -> IO ()
 
-allCommands :: (AR.HasNonce st) => [C.SomeCommand (AR.SurveyorCommand s st)]
+allCommands :: (AR.HasNonce st, st ~ CS.S e u) => [C.SomeCommand (AR.SurveyorCommand s st)]
 allCommands =
   [ C.SomeCommand showSummaryC
   , C.SomeCommand exitC
@@ -63,6 +74,9 @@ allCommands =
   , C.SomeCommand resetInstructionSelectionC
   , C.SomeCommand contextBackC
   , C.SomeCommand contextForwardC
+  , C.SomeCommand initializeSymbolicExecutionC
+  , C.SomeCommand beginSymbolicExecutionSetupC
+  , C.SomeCommand startSymbolicExecutionC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -245,3 +259,72 @@ loadJARC =
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
       C.writeChan customEventChan (LoadJAR filepath)
+
+initializeSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+initializeSymbolicExecutionC =
+  C.Command "initialize-symbolic-execution" doc PL.Nil PL.Nil callback hasContext
+  where
+    doc = "Initialize symbolic execution for the currently-selected function"
+    callback :: Callback s st '[]
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
+      C.writeChan customEventChan (InitializeSymbolicExecution archNonce Nothing Nothing)
+
+beginSymbolicExecutionSetupC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+beginSymbolicExecutionSetupC =
+  C.Command "begin-symbolic-execution-setup" doc PL.Nil PL.Nil callback hasContext
+  where
+    doc = "Allocate an initial symbolic execution state and prepare it for user customization"
+    callback :: Callback s st '[]
+    callback customEventChan (AR.SomeState state) PL.Nil
+      | nonce <- state ^. CS.lNonce
+      , Just archState <- state ^. CS.lArchState
+      , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
+      , Just (Some symExecState) <- curSymExState state = do
+      -- , Some symExecState <- curCtx ^. CCX.symExecStateL = do
+          let fh = curCtx ^. CCX.baseFunctionG
+          mcfg <- CA.crucibleCFG (archState ^. CS.lAnalysisResult) fh
+          case mcfg of
+            Just (CCC.AnyCFG cfg) -> do
+              let conf = SymEx.symbolicExecutionConfig symExecState
+              C.writeChan customEventChan (BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
+            Nothing -> do
+              let msg = T.pack ("Missing CFG for function: " ++ show fh)
+              C.writeChan customEventChan (LogDiagnostic Nothing msg)
+      | otherwise =
+        C.writeChan customEventChan (LogDiagnostic Nothing "Missing context for symbolic execution")
+
+startSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+startSymbolicExecutionC =
+  C.Command "start-symbolic-execution" doc PL.Nil PL.Nil callback isInitializingSymEx
+  where
+    doc = "Start symbolic execution with the current setup state"
+    callback :: Callback s st '[]
+    callback customEventChan (AR.SomeState state) PL.Nil
+      | nonce <- state ^. CS.lNonce
+      , Just (Some (SymEx.Initializing symExecState)) <- curSymExState state
+      , Just archState <- state ^. CS.lArchState = do
+      -- , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
+      -- , Some (SymEx.Initializing symExecState) <- curCtx ^. CCX.symExecStateL = do
+          let ares = archState ^. CS.lAnalysisResult
+          C.writeChan customEventChan (StartSymbolicExecution nonce ares symExecState)
+      | otherwise =
+        -- If we weren't in an appropriate state, just don't do anything
+        return ()
+    isInitializingSymEx (AR.SomeState ss)
+      | Just (Some (SymEx.Initializing {})) <- curSymExState ss = True
+      | otherwise = False
+
+curSymExState :: CS.S e u arch s
+              -> Maybe (Some (SymEx.SymbolicExecutionState arch s))
+curSymExState st
+  | Just archState <- st ^. CS.lArchState
+  , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
+  , sid <- curCtx ^. CCX.symExecSessionIDL =
+      SymEx.lookupSessionState (archState ^. CS.symExStateL) sid
+  | otherwise = Nothing
+
+hasContext :: AR.SomeState (CS.S e u) s -> Bool
+hasContext (AR.SomeState ss)
+  | Just archState <- ss ^. CS.lArchState =
+      isJust (archState ^? CS.contextL . CCX.currentContext)
+  | otherwise = False

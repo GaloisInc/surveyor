@@ -6,15 +6,21 @@ module Surveyor.Core.Events ( Events(..), LogLevel(..) ) where
 import qualified Control.Exception as X
 import qualified Control.NF as NF
 import qualified Data.ElfEdit as E
+import qualified Data.Functor.Identity as I
 import           Data.Int ( Int64 )
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
+import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Lang.Crucible.Simulator.Profiling as CSP
 
 import qualified Renovate as R
 
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Command as C
+import qualified Surveyor.Core.Context.SymbolicExecution.Config as SE
+import qualified Surveyor.Core.Context.SymbolicExecution.Session as CSS
+import qualified Surveyor.Core.Context.SymbolicExecution.State as SES
 import qualified Surveyor.Core.IRRepr as IR
 
 data LogLevel = LogDebug
@@ -44,10 +50,30 @@ data Events s st where
   ContextBack :: Events s st
   ContextForward :: Events s st
 
+  -- Symbolic execution events
+  -- | Begin setting up symbolic execution for the provided function.
+  --
+  -- If the function handle argument is not provided, set up symbolic execution
+  -- for the current function.  Entering this state discards any previous
+  -- symbolic execution state in the current context.
+  InitializeSymbolicExecution :: PN.Nonce s arch
+                              -> Maybe (SE.SymbolicExecutionConfig s)
+                              -> Maybe (A.FunctionHandle arch s)
+                              -> Events s st
+  BeginSymbolicExecutionSetup :: PN.Nonce s arch
+                              -> SE.SymbolicExecutionConfig s
+                              -> CCC.SomeCFG (A.CrucibleExt arch) init reg
+                              -> Events s st
+  StartSymbolicExecution :: PN.Nonce s arch
+                         -> A.AnalysisResult arch s
+                         -> SES.SymbolicState arch s solver fm init reg
+                         -> Events s st
+  ReportSymbolicExecutionMetrics :: CSS.SessionID s -> CSP.Metrics I.Identity -> Events s st
+
   -- Function-related events
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st
   ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> Events s st
-  ViewFunction :: PN.Nonce s (arch :: *) -> IR.IRRepr arch ir -> Events s st
+  ViewFunction :: PN.Nonce s (arch :: Type) -> IR.IRRepr arch ir -> Events s st
 
 
   -- Block-related events

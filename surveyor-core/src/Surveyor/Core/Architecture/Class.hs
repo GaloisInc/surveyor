@@ -9,13 +9,16 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeInType #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Surveyor.Core.Architecture.Class (
   IR(..),
   SomeIRRepr(..),
   Architecture(..),
+  CruciblePersonality,
   SomeResult(..),
   ResultIndex(..),
   AnalysisResult(..),
@@ -24,25 +27,12 @@ module Surveyor.Core.Architecture.Class (
   prettyParameterizedFormula,
   Block(..),
   FunctionHandle(..),
-  -- * Operand Lists
-  OperandList(..),
-  OperandListItem(..),
-  Delimiter(..),
-  fromList,
-  fromItemList,
-  indexOperandList,
-  Zipper,
-  zipper,
-  zipperNext,
-  zipperPrev,
-  zipperFocused,
   -- * Constraints
   ArchConstraints
   ) where
 
 import           GHC.Generics ( Generic )
 
-import           Control.Applicative ( (<|>) )
 import           Control.DeepSeq ( NFData, rnf, deepseq )
 import qualified Control.Once as O
 import qualified Data.ByteString as BS
@@ -50,16 +40,21 @@ import qualified Data.Map as M
 import           Data.Maybe ( isJust )
 import           Data.Parameterized.Classes ( testEquality )
 import qualified Data.Parameterized.Nonce as NG
-import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import qualified Data.Text as T
-import qualified Data.Traversable as TR
 
 import qualified SemMC.Architecture as SA
 import qualified SemMC.Formula as F
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Backend.Simple as SB
+import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Lang.Crucible.CFG.Extension as CCE
+import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.Simulator as CS
+import qualified Lang.Crucible.Types as CT
 
 import           Surveyor.Core.IRRepr ( IRRepr )
+import qualified Surveyor.Core.OperandList as OL
 
 data SomeResult s arch where
   SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s arch
@@ -96,9 +91,15 @@ type ArchConstraints arch s = (Eq (Address arch s),
                                NFData (Operand arch s),
                                NFData (Instruction arch s))
 
+-- | The type of the personality for each simulator
+--
+-- This is a standalone type family because it needs access to a parameter (sym)
+-- that isn't a class method.
+type family CruciblePersonality arch sym :: *
 
-class (IR arch s) => Architecture (arch :: *) (s :: *) where
+class (IR arch s, CCE.IsSyntaxExtension (CrucibleExt arch)) => Architecture (arch :: *) (s :: *) where
   data ArchResult arch s :: *
+  type CrucibleExt arch :: *
 
   -- | Extract the nonce for the analysis result
   archNonce :: AnalysisResult arch s -> NG.Nonce s arch
@@ -126,115 +127,30 @@ class (IR arch s) => Architecture (arch :: *) (s :: *) where
   -- 2. A mapping from base block addresses to their corresponding alternative
   -- blocks; this mapping is not guaranteed to be complete.
   asAlternativeIR :: IRRepr arch ir -> AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe ([Block ir s], BlockMapping arch ir s))
+  -- | Get the Crucible CFG (if available) for the given function
+  crucibleCFG :: AnalysisResult arch s -> FunctionHandle arch s -> IO (Maybe (CCC.AnyCFG (CrucibleExt arch)))
+  -- | Allocate a fresh symbolic value of the given type; this is provided so
+  -- that architecture-specific symbolic values can be allocated (e.g., for new
+  -- intrinsic types).  This function is expected to return Nothing if it cannot
+  -- allocate a value for the given type representative.
+  freshSymbolicEntry :: (CB.IsSymInterface sym) => proxy (arch, s) -> sym -> CT.TypeRepr tp -> Maybe (IO (CS.RegValue sym tp))
+  -- | Collect and return the architecture-specific information required to run
+  -- the symbolic execution engine
+  symbolicInitializers :: (CB.IsSymInterface sym)
+                       => AnalysisResult arch s
+                       -> sym
+                       -> IO ( CS.IntrinsicTypes sym
+                             , CFH.HandleAllocator
+                             , CS.FunctionBindings (CruciblePersonality arch sym) sym (CrucibleExt arch)
+                             , CS.ExtensionImpl (CruciblePersonality arch sym) sym (CrucibleExt arch)
+                             , CruciblePersonality arch sym
+                             )
 
 data BlockMapping arch ir s =
   BlockMapping { blockMapping :: M.Map (Address arch s) (Block arch s, Block ir s)
                , baseToIRAddrs :: M.Map (Address arch s) (S.Set (Address ir s))
                , irToBaseAddrs :: M.Map (Address ir s) (S.Set (Address arch s))
                }
-
-data OperandList e = OperandList (Seq.Seq (OperandListItem e))
-  deriving (Functor, Foldable, Traversable)
-
-instance (NFData e) => NFData (OperandList e) where
-  rnf (OperandList s) = s `deepseq` ()
-
-data Delimiter = Parens | Brackets | Braces | Angles
-
-instance NFData Delimiter where
-  rnf !_d = ()
-
-data OperandListItem e where
-  Item :: e -> OperandListItem e
-  Delimited :: Delimiter -> OperandList e -> OperandListItem e
-
-deriving instance Functor OperandListItem
-deriving instance Foldable OperandListItem
-deriving instance Traversable OperandListItem
-
-instance (NFData e) => NFData (OperandListItem e) where
-  rnf i =
-    case i of
-      Item e -> e `deepseq` ()
-      Delimited !_d l -> l `deepseq` ()
-
-fromList :: [Operand arch s] -> OperandList (Operand arch s)
-fromList = OperandList . Seq.fromList . map Item
-
-fromItemList :: [OperandListItem e] -> OperandList e
-fromItemList = OperandList . Seq.fromList
-
-indexOperandList :: OperandList e -> OperandList (Int, e)
-indexOperandList = snd . TR.mapAccumL tagElt 0
-  where
-    tagElt i elt = (i + 1, (i, elt))
-
-data Zipper e = Zipper (OperandList e) Int e [(Int, OperandList e)]
-
-instance (NFData e) => NFData (Zipper e) where
-  rnf (Zipper ol i e ctx) =
-    ol `deepseq`
-    i `deepseq`
-    e `deepseq`
-    ctx `deepseq` ()
-
-zipper :: OperandList e -> Maybe (Zipper e)
-zipper = go []
-  where
-    go trail ol@(OperandList s) =
-      case Seq.viewl s of
-        Seq.EmptyL -> Nothing
-        item Seq.:< _ ->
-          case item of
-            Item i -> Just (Zipper ol 0 i trail)
-            Delimited _ s' -> go ((0, OperandList s) : trail) s'
-
-zipperFocused :: Zipper e -> e
-zipperFocused (Zipper _ _ e _) = e
-
-zipperNext :: Zipper e -> Maybe (Zipper e)
-zipperNext (Zipper ol idx _ trail) = zNextWork ol idx trail
-
-zipperPrev :: Zipper e -> Maybe (Zipper e)
-zipperPrev (Zipper ol idx _ trail) = zPrevWork ol idx trail
-
-zPrevWork :: OperandList e -> Int -> [(Int, OperandList e)] -> Maybe (Zipper e)
-zPrevWork ol idx trail =
-  prevLeftOrUp ol idx trail <|> prevDown trail
-
-prevDown :: [(Int, OperandList e)] -> Maybe (Zipper e)
-prevDown trail =
-  case trail of
-    [] -> Nothing
-    (prevIdx, prevList) : rest -> zPrevWork prevList prevIdx rest
-
-prevLeftOrUp :: OperandList e -> Int -> [(Int, OperandList e)] -> Maybe (Zipper e)
-prevLeftOrUp ol@(OperandList s) idx trail = do
-  let prevIdx = idx - 1
-  itm <- s Seq.!? prevIdx
-  case itm of
-    Item e -> return (Zipper ol prevIdx e trail)
-    Delimited _ ol'@(OperandList s') -> prevLeftOrUp ol' (Seq.length s' - 1) ((prevIdx, ol) : trail)
-
-zNextWork :: OperandList e -> Int -> [(Int, OperandList e)] -> Maybe (Zipper e)
-zNextWork ol idx trail =
-  nextRightOrDown ol idx trail <|> nextUp trail
-
-nextRightOrDown :: OperandList e -> Int -> [(Int, OperandList e)] -> Maybe (Zipper e)
-nextRightOrDown ol@(OperandList s) idx trail = do
-  let nextIdx = idx + 1
-  itm <- s Seq.!? nextIdx
-  -- If this is an actual item, advance.  If it is another nested list, descend
-  -- and grab the first element.
-  case itm of
-    Item e -> return (Zipper ol nextIdx e trail)
-    Delimited _ ol' -> nextRightOrDown ol' 0 ((nextIdx, ol) : trail)
-
-nextUp :: [(Int, OperandList e)] -> Maybe (Zipper e)
-nextUp trail =
-  case trail of
-    [] -> Nothing
-    (prevIdx, prevList) : rest -> zNextWork prevList prevIdx rest
 
 -- | An abstraction over intermediate representations for display in a UI
 --
@@ -248,7 +164,7 @@ class (ArchConstraints arch s) => IR (arch :: *) (s :: *) where
   data Opcode arch s :: *
   data Address arch s :: *
   opcode :: Instruction arch s -> Opcode arch s
-  operands :: Instruction arch s -> OperandList (Operand arch s)
+  operands :: Instruction arch s -> OL.OperandList (Operand arch s)
   boundValue :: Instruction arch s -> Maybe (Operand arch s)
   -- | Parse a string into an architecture-specific 'Address'
   parseAddress :: String -> Maybe (Address arch s)

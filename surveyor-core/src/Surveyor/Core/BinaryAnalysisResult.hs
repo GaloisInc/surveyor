@@ -66,9 +66,12 @@ indexAddresses isa bi =
     indexBlock faddr brng block =
       -- Note: blocks can be shared by multiple functions, so we have to be
       -- prepared to do a merge if we encounter a block more than once.
-      let iaddrs = fmap (MM.absoluteAddr . R.absoluteAddress . snd) (R.instructionAddresses isa block)
-          mergeFunctionSets (b, s1) (_, s2) = (b, s1 <> s2)
-      in IM.insertWith mergeFunctionSets (IM.ClosedInterval (minimum iaddrs) (maximum iaddrs)) (block, NES.singleton faddr) brng
+      R.withInstructionAddresses isa block $ \_repr insnAddrs ->
+        let iaddrs = fmap (MM.absoluteAddr . R.absoluteAddress . snd) insnAddrs
+            mergeFunctionSets (b, s1) (_, s2) = (b, s1 <> s2)
+        in IM.insertWith mergeFunctionSets (IM.ClosedInterval (minimum iaddrs) (maximum iaddrs)) (block, NES.singleton faddr) brng
+      -- let iaddrs = fmap (MM.absoluteAddr . R.absoluteAddress . snd) (R.instructionAddresses isa block)
+
 
 -- | Look up the basic block containing the given address.
 --

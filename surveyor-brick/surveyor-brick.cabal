@@ -23,6 +23,11 @@ library
                        Surveyor.Brick.Widget.FunctionViewer
                        Surveyor.Brick.Widget.Minibuffer
                        Surveyor.Brick.Widget.InstructionSemanticsViewer
+                       Surveyor.Brick.Widget.SymbolicExecution
+                       Surveyor.Brick.Widget.SymbolicExecution.Configuration
+                       Surveyor.Brick.Widget.SymbolicExecution.Inspect
+                       Surveyor.Brick.Widget.SymbolicExecution.Monitor
+                       Surveyor.Brick.Widget.SymbolicExecution.Setup
                        Brick.Match.Subword
                        Brick.Widget.FilterList
                        Brick.Widget.Graph
@@ -52,10 +57,12 @@ library
                        brick >= 0.47 && < 1,
                        vty,
                        haggle,
+                       what4,
+                       crucible,
                        surveyor-core
   hs-source-dirs:      src
   default-language:    Haskell2010
-  ghc-options: -Wall -Wcompat
+  ghc-options: -Wall -Wcompat -j
 
 executable surveyor-brick
   default-language: Haskell2010

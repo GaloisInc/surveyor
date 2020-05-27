@@ -27,6 +27,7 @@ module Surveyor.Core.Arguments (
   ) where
 
 import qualified Data.Foldable as F
+import qualified Data.Kind as K
 import qualified Data.Map.Strict as M
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as PN
@@ -39,7 +40,7 @@ import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Events as E
 import qualified Surveyor.Core.Command as C
 
-data SurveyorCommand (s :: *) (st :: * -> * -> *)
+data SurveyorCommand (s :: K.Type ) (st :: K.Type  -> K.Type  -> K.Type )
 
 class HasNonce st where
   getNonce :: SomeState st s -> SomeNonce s
@@ -47,17 +48,18 @@ class HasNonce st where
 data SomeState st s where
   SomeState :: (A.Architecture arch s) => st arch s -> SomeState st s
 
+type instance C.ArgumentKind (SurveyorCommand s st) = Type
+
 instance C.CommandLike (SurveyorCommand s st) where
   type EventType (SurveyorCommand s st) = E.Events s st
   type StateType (SurveyorCommand s st) = SomeState st s
   type ArgumentType (SurveyorCommand s st) = Argument s
   type ArgumentRepr (SurveyorCommand s st) = TypeRepr
-  type ArgumentKind (SurveyorCommand s st) = Type
 
 -- | This is a separate wrapper (instead of the Some from parameterized-utils)
 -- because we want to constrain it with a kind signature.
 data SomeNonce s where
-  SomeNonce :: forall (arch :: *) s . PN.Nonce s arch -> SomeNonce s
+  SomeNonce :: forall (arch :: K.Type ) s . PN.Nonce s arch -> SomeNonce s
 
 data Type where
   StringType :: Type
