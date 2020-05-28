@@ -63,7 +63,7 @@ import qualified Data.Vector as V
 import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.TranslationCache as TC
-import qualified Surveyor.Core.Context.SymbolicExecution as SE
+import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.OperandList as OL
 
 -- | A context focused (at some point) by the user, and used to inform drawing

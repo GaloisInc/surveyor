@@ -23,7 +23,7 @@ import qualified Control.Once as O
 import qualified Data.Foldable as F
 import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as M
-import           Data.Maybe ( catMaybes, isJust, fromMaybe, mapMaybe )
+import           Data.Maybe ( catMaybes, fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as NG

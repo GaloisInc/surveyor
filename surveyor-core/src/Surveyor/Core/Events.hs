@@ -18,9 +18,9 @@ import qualified Renovate as R
 
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Command as C
-import qualified Surveyor.Core.Context.SymbolicExecution.Config as SE
-import qualified Surveyor.Core.Context.SymbolicExecution.Session as CSS
-import qualified Surveyor.Core.Context.SymbolicExecution.State as SES
+import qualified Surveyor.Core.SymbolicExecution.Config as SE
+import qualified Surveyor.Core.SymbolicExecution.Session as CSS
+import qualified Surveyor.Core.SymbolicExecution.State as SES
 import qualified Surveyor.Core.IRRepr as IR
 
 data LogLevel = LogDebug

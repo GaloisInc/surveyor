@@ -27,7 +27,6 @@ import qualified Data.Foldable as F
 import qualified Data.Functor.Const as C
 import           Data.Int ( Int16, Int64 )
 import qualified Data.Map as M
-import           Data.Monoid ( (<>) )
 import           Data.Parameterized.Classes ( ShowF(showF) )
 import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Parameterized.Map as MapF

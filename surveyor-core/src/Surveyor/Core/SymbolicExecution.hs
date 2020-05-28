@@ -12,7 +12,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
-module Surveyor.Core.Context.SymbolicExecution (
+module Surveyor.Core.SymbolicExecution (
   -- * Configuration
   SymbolicExecutionConfig,
   SomeFloatModeRepr(..),
@@ -88,8 +88,8 @@ import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.Chan as SCC
 import qualified Surveyor.Core.Events as SCE
 
-import           Surveyor.Core.Context.SymbolicExecution.Config
-import           Surveyor.Core.Context.SymbolicExecution.State
+import           Surveyor.Core.SymbolicExecution.Config
+import           Surveyor.Core.SymbolicExecution.State
 
 -- Setup of the symbolic execution engine (parameters and globals)
 

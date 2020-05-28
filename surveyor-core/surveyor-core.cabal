@@ -31,10 +31,10 @@ library
                        Surveyor.Core.Command
                        Surveyor.Core.Commands
                        Surveyor.Core.Context
-                       Surveyor.Core.Context.SymbolicExecution
-                       Surveyor.Core.Context.SymbolicExecution.Config
-                       Surveyor.Core.Context.SymbolicExecution.Session
-                       Surveyor.Core.Context.SymbolicExecution.State
+                       Surveyor.Core.SymbolicExecution
+                       Surveyor.Core.SymbolicExecution.Config
+                       Surveyor.Core.SymbolicExecution.Session
+                       Surveyor.Core.SymbolicExecution.State
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events
                        Surveyor.Core.IRRepr

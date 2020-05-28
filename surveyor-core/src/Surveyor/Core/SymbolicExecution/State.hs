@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
-module Surveyor.Core.Context.SymbolicExecution.State (
+module Surveyor.Core.SymbolicExecution.State (
   SymbolicState(..)
   ) where
 
@@ -13,7 +13,7 @@ import qualified What4.Expr.Builder as WEB
 import qualified What4.Protocol.Online as WPO
 
 import qualified Surveyor.Core.Architecture as CA
-import           Surveyor.Core.Context.SymbolicExecution.Config
+import           Surveyor.Core.SymbolicExecution.Config
 
 data SymbolicState arch s solver fm init reg =
   SymbolicState { symbolicConfig :: SymbolicExecutionConfig s

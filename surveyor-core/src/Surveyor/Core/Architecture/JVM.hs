@@ -22,7 +22,7 @@ import qualified Control.Once as O
 import qualified Data.Foldable as F
 import           Data.Int ( Int16, Int32 )
 import qualified Data.Map.Strict as M
-import           Data.Maybe ( fromMaybe, isJust )
+import           Data.Maybe ( fromMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Text as T
