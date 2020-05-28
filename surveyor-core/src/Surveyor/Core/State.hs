@@ -46,7 +46,7 @@ import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Context as CC
-import qualified Surveyor.Core.Context.SymbolicExecution as SE
+import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.EchoArea as EA
 import           Surveyor.Core.Events ( Events(LogDiagnostic), LogLevel )
 import           Surveyor.Core.Keymap ( Keymap )

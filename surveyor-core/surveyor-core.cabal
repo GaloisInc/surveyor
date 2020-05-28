@@ -5,7 +5,7 @@ description:         This includes core functionality reused among several UIs
 license:             BSD3
 license-file:        LICENSE
 author:              Tristan Ravitch
-maintainer:          tristan@nochair.net
+maintainer:          tristan@galois.com
 -- copyright:           
 category:            Reverse-Engineering
 build-type:          Simple
@@ -31,10 +31,10 @@ library
                        Surveyor.Core.Command
                        Surveyor.Core.Commands
                        Surveyor.Core.Context
-                       Surveyor.Core.Context.SymbolicExecution
-                       Surveyor.Core.Context.SymbolicExecution.Config
-                       Surveyor.Core.Context.SymbolicExecution.Session
-                       Surveyor.Core.Context.SymbolicExecution.State
+                       Surveyor.Core.SymbolicExecution
+                       Surveyor.Core.SymbolicExecution.Config
+                       Surveyor.Core.SymbolicExecution.Session
+                       Surveyor.Core.SymbolicExecution.State
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events
                        Surveyor.Core.IRRepr
@@ -67,7 +67,7 @@ library
                        generic-lens >= 0.5.1.0 && < 1.3,
                        parameterized-utils >= 1 && < 3,
                        text-zipper,
-                       megaparsec >= 7 && < 8,
+                       megaparsec >= 7 && < 9,
                        IntervalMap >= 0.6 && < 0.7,
                        regex-tdfa >= 1 && < 2,
                        vty,

@@ -36,6 +36,7 @@ import           GHC.Generics ( Generic )
 import           Control.DeepSeq ( NFData, rnf, deepseq )
 import qualified Control.Once as O
 import qualified Data.ByteString as BS
+import           Data.Kind ( Type )
 import qualified Data.Map as M
 import           Data.Maybe ( isJust )
 import           Data.Parameterized.Classes ( testEquality )
@@ -95,11 +96,11 @@ type ArchConstraints arch s = (Eq (Address arch s),
 --
 -- This is a standalone type family because it needs access to a parameter (sym)
 -- that isn't a class method.
-type family CruciblePersonality arch sym :: *
+type family CruciblePersonality arch sym :: Type
 
-class (IR arch s, CCE.IsSyntaxExtension (CrucibleExt arch)) => Architecture (arch :: *) (s :: *) where
-  data ArchResult arch s :: *
-  type CrucibleExt arch :: *
+class (IR arch s, CCE.IsSyntaxExtension (CrucibleExt arch)) => Architecture (arch :: Type) (s :: Type) where
+  data ArchResult arch s :: Type
+  type CrucibleExt arch :: Type
 
   -- | Extract the nonce for the analysis result
   archNonce :: AnalysisResult arch s -> NG.Nonce s arch
@@ -158,11 +159,11 @@ data BlockMapping arch ir s =
 -- is weaker than 'Architecture', as we can't implement 'Architecture' for some
 -- of our IRs (like macaw and crucible).  The split lets us render those
 -- architectures without requiring partial instances of 'Architecture'
-class (ArchConstraints arch s) => IR (arch :: *) (s :: *) where
-  data Instruction arch s :: *
-  data Operand arch s :: *
-  data Opcode arch s :: *
-  data Address arch s :: *
+class (ArchConstraints arch s) => IR (arch :: Type) (s :: Type) where
+  data Instruction arch s :: Type
+  data Operand arch s :: Type
+  data Opcode arch s :: Type
+  data Address arch s :: Type
   opcode :: Instruction arch s -> Opcode arch s
   operands :: Instruction arch s -> OL.OperandList (Operand arch s)
   boundValue :: Instruction arch s -> Maybe (Operand arch s)

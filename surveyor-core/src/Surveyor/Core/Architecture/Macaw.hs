@@ -21,10 +21,11 @@ module Surveyor.Core.Architecture.Macaw (
   ) where
 
 import           Control.DeepSeq ( NFData(rnf), deepseq )
-import           Control.Lens ( (^.) )
 import qualified Control.Exception as X
+import           Control.Lens ( (^.) )
 import qualified Data.Foldable as F
 import qualified Data.IORef as IOR
+import           Data.Kind ( Type )
 import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Discovery.State as MC
 import qualified Data.Macaw.Types as MT
@@ -40,8 +41,8 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import           Data.Word ( Word64 )
-import qualified Fmt as Fmt
 import           Fmt ( (||+), (+|), (|+) )
+import qualified Fmt as Fmt
 import qualified Renovate as R
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
 import           Text.Printf ( printf )
@@ -149,7 +150,7 @@ toMacawBlock nonceGen dfi fh (baddr, b) = do
                 return ((InstructionNumber insnIdx, MacawStmt s mbv ops) : rest)
 
 data NonceCache ids s where
-  NonceCache :: forall (oldNonce :: MT.Type -> *) (newNonce :: MT.Type -> *) ids s
+  NonceCache :: forall (oldNonce :: MT.Type -> Type) (newNonce :: MT.Type -> Type) ids s
               . ( oldNonce ~ PN.Nonce ids
                 , newNonce ~ PN.Nonce s
                 )

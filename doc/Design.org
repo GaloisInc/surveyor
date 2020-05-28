@@ -1,0 +1,81 @@
+* Overview
+
+Surveyor is a tool for interactively exploring and visualizing programs and program executions.  It supports a number of program formats including:
+- LLVM
+- JVM
+- Binaries (x86_64, PowerPC, and soon ARM)
+
+Its primary function is to explore the functions in programs in a uniform interactive fashion.  It also supports symbolic execution and can act as a symbolic debugger.  Surveyor separates its core functionality and data model (surveyor-core) from the various GUI frontends.  The intent is that all interesting logic lives in surveyor-core, while the user interfaces implement only display logic.  The interaction model of surveyor is loosely inspired by emacs and gdb.  The currently supported interface is a TUI based on the brick library.  There is a bitrotted QML interface.  A web UI is planned.
+
+This document describes the design and general architecture of Surveyor.
+
+
+* Design
+
+** General Components
+
+There are a number of components that are not specific to Surveyor (but are not yet standalone libraries).  The common functionality is largely focused on an emacs-inspired command system.  Commands are actions triggerable by users and also usable programmatically.
+
+*** Commands
+
+Commands are actions that can be triggered by users or invoked programmatically.  Commands can have arguments.  When invoked by a user, commands can prompt for their arguments or take them from the current contextual environment.  It is desired that as much functionality as possible should be exposed as commands.  Commands are strongly typed, in that their number and types of arguments are part of their specifications.  The type-level embedding ensures that commands can only be invoked on well-typed argument lists.
+
+*** Minibuffer
+
+The minibuffer in the TUI is the interface by which users can invoke commands and be prompted for arguments.  It supports completion and a mechanism for prompting for and typechecking arguments.
+
+*** Keymaps
+
+Keymaps map keybindings to commands.  They can vary by context and have an overlay-like behavior, much like emacs keymaps.
+
+*** Asynchronous Computation
+
+Surveyor performs all of its expensive computations in worker threads asynchronously and reports results via message queues to the main thread in order to avoid blocking the UI.  This is difficult in Haskell, as it is easy to accidentally construct a thunk in a worker thread and pass it back to the UI unevaluated.  Surveyor works hard to prevent this.  Some of the relevant modules include:
+- Control.NF (enforced normal form evaluation)
+- Control.Once (ensure that structures aren't traversed multiple times during normal form evaluation)
+
+These efforts are often hindered by a lack of ~NFData~ instances for many types.  We mostly just ignore those cases and hope for the best.  One day adding the missing instances will be systematically tackled based on profiling.
+
+** Surveyor Services
+
+The intended design of surveyor is that all interesting logic should live in surveyor-core.  It exposes a single module to clients: Surveyor.Core.
+
+*** Context
+
+Surveyor(-core) maintains a notion of the current context within an interactive session.  It is essentially a stack of basic blocks that records the history of a user's navigation.  This allows for easy back/forward navigation, which is implemented as maintaining a pointer into the stack.
+
+The context stack provides a way for commands that need a function, block, or instruction as an argument to get one: by inspecting the current context and choosing the active item of the correct type.
+
+*** Uniform IR Visualization
+
+Surveyor provides a uniform view (in terms of functions, blocks, and instructions) for a number of different intermediate representations.  This includes the raw format of an input program (e.g., LLVM IR, JVM bytecode, or machine code), as well as derived IRs (macaw IR as a product of machine code discovery and crucible IR, which is the input to symbolic execution).
+
+*** Symbolic Execution
+
+Surveyor supports managing multiple concurrent symbolic execution tasks.  The current interface is that the function in the current context can be symbolically executed with fully symbolic inputs.  This needs to be augmented to allow for memory states to be specified (currently, only formal input parameters are accounted for).
+
+Symbolic execution is provided by the Crucible library, which is both an intermediate representation for imperative programs and a symbolic execution engine.
+
+* Coding Standards
+
+There are no hard rules, but general principles to strive for include:
+
+- Prefer qualified imports
+
+  The goal is to make it obvious what modules names come from at a glance.  Explicit imports are fine for short import lists.  Additionally, there could be some good arguments for exceptions for some modules in Base.
+
+- Try to avoid re-exports
+
+  Re-exports tend to make it difficult to find the original definition of a type or function.  Reasonable exceptions include types that need to be split into separate modules to break import cycles.
+
+- Prefer newtypes to type aliases
+
+  Type aliases do not provide any abstraction and often require the reader to understand the definition of the alias in order to effectively work with them.
+
+- Wrap monad transformer stacks in newtypes
+
+  It helps maintain abstraction boundaries and avoids updating call sites if the definition of the stack needs to change.  Deriving the ~Monad*~ classes from mtl (where sensible) additionally helps with compatibility.
+
+- Optimize code for reading rather than writing
+
+  Clarity is more helpful than brevity, especially when code will have a long life.

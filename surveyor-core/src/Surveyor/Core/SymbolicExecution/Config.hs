@@ -8,7 +8,7 @@
 -- | Configuration for the symbolic execution engine
 --
 -- This is a separate module to break an import cycle with the Events module.
-module Surveyor.Core.Context.SymbolicExecution.Config (
+module Surveyor.Core.SymbolicExecution.Config (
   -- * Session Identifiers
   SessionID,
   newSessionID,
@@ -34,7 +34,7 @@ import qualified Data.Text as T
 import qualified What4.Expr.Builder as WEB
 import qualified What4.InterpretedFloatingPoint as WIF
 
-import           Surveyor.Core.Context.SymbolicExecution.Session ( SessionID, newSessionID )
+import           Surveyor.Core.SymbolicExecution.Session ( SessionID, newSessionID )
 
 data Solver = CVC4 | Yices | Z3
   deriving (Eq, Ord, Show)

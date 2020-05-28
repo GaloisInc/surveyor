@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Surveyor.Core.Context.SymbolicExecution.Session (
+module Surveyor.Core.SymbolicExecution.Session (
   SessionID,
   newSessionID
   ) where

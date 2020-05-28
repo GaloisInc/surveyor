@@ -44,7 +44,7 @@ import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Core.Context as CCX
-import qualified Surveyor.Core.Context.SymbolicExecution as SymEx
+import qualified Surveyor.Core.SymbolicExecution as SymEx
 import           Surveyor.Core.Events ( Events(..) )
 import qualified Surveyor.Core.State as CS
 

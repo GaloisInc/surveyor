@@ -14,13 +14,14 @@ module Surveyor.Core.Mode (
   prettyMode
   ) where
 
+import           Data.Kind ( Type )
 import           Data.Maybe ( isJust )
-import           Data.Parameterized.Classes
+import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.TH.GADT as PT
 import qualified Data.Text as T
-import qualified Fmt as Fmt
 import           Fmt ( (+|), (||+) )
+import qualified Fmt as Fmt
 
 import           Surveyor.Core.IRRepr ( IRRepr )
 
@@ -42,9 +43,9 @@ data UIMode s k where
   -- sBlockList in the State)
   BlockSelector :: UIMode s NormalK
   -- | View a block
-  BlockViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
+  BlockViewer :: PN.Nonce s (arch :: Type) -> IRRepr arch ir -> UIMode s NormalK
   -- | View a function
-  FunctionViewer :: PN.Nonce s (arch :: *) -> IRRepr arch ir -> UIMode s NormalK
+  FunctionViewer :: PN.Nonce s (arch :: Type) -> IRRepr arch ir -> UIMode s NormalK
   -- | View the semantics for an individual selected base IR instruction
   SemanticsViewer :: UIMode s NormalK
   -- | A UI for setting up the basic configuration of the symbolic execution
@@ -73,25 +74,25 @@ data SomeUIMode s where
 
 $(return [])
 
-instance TestEquality (UIMode s) where
+instance PC.TestEquality (UIMode s) where
   testEquality = $(PT.structuralTypeEquality [t| UIMode |]
-                   [ (PT.TypeApp (PT.TypeApp (PT.ConType [t|PN.Nonce |]) PT.AnyType) PT.AnyType, [|testEquality|])
-                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| UIMode |]) PT.AnyType) PT.AnyType, [|testEquality|])
-                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| IRRepr |]) PT.AnyType) PT.AnyType, [|testEquality|])
+                   [ (PT.TypeApp (PT.TypeApp (PT.ConType [t|PN.Nonce |]) PT.AnyType) PT.AnyType, [|PC.testEquality|])
+                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| UIMode |]) PT.AnyType) PT.AnyType, [|PC.testEquality|])
+                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| IRRepr |]) PT.AnyType) PT.AnyType, [|PC.testEquality|])
                    ])
 
-instance OrdF (UIMode s) where
+instance PC.OrdF (UIMode s) where
   compareF = $(PT.structuralTypeOrd [t| UIMode |]
-                   [ (PT.TypeApp (PT.TypeApp (PT.ConType [t|PN.Nonce |]) PT.AnyType) PT.AnyType, [|compareF|])
-                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| UIMode |]) PT.AnyType) PT.AnyType, [|compareF|])
-                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| IRRepr |]) PT.AnyType) PT.AnyType, [|compareF|])
+                   [ (PT.TypeApp (PT.TypeApp (PT.ConType [t|PN.Nonce |]) PT.AnyType) PT.AnyType, [|PC.compareF|])
+                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| UIMode |]) PT.AnyType) PT.AnyType, [|PC.compareF|])
+                   , (PT.TypeApp (PT.TypeApp (PT.ConType [t| IRRepr |]) PT.AnyType) PT.AnyType, [|PC.compareF|])
                    ])
 
 deriving instance Eq (SomeUIMode s)
 deriving instance Ord (SomeUIMode s)
 
 instance Eq (UIMode s k) where
-  u1 == u2 = isJust (testEquality u1 u2)
+  u1 == u2 = isJust (PC.testEquality u1 u2)
 
 instance Ord (UIMode s k) where
-  compare u1 u2 = toOrdering (compareF u1 u2)
+  compare u1 u2 = PC.toOrdering (PC.compareF u1 u2)
