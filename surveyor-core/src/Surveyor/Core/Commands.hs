@@ -36,7 +36,8 @@ import qualified Data.Functor.Const as C
 import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
-import qualified Data.Text as T
+import           Fmt ( (+||), (||+) )
+import qualified Fmt as Fmt
 import qualified Lang.Crucible.CFG.Core as CCC
 
 import qualified Surveyor.Core.Architecture as CA
@@ -44,9 +45,10 @@ import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Core.Context as CCX
-import qualified Surveyor.Core.SymbolicExecution as SymEx
 import           Surveyor.Core.Events ( Events(..) )
+import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.State as CS
+import qualified Surveyor.Core.SymbolicExecution as SymEx
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
 type Callback s st tps = C.Chan (Events s st)
@@ -288,10 +290,15 @@ beginSymbolicExecutionSetupC =
               let conf = SymEx.symbolicExecutionConfig symExecState
               C.writeChan customEventChan (BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
             Nothing -> do
-              let msg = T.pack ("Missing CFG for function: " ++ show fh)
-              C.writeChan customEventChan (LogDiagnostic Nothing msg)
+              CS.logMessage state (SCL.msgWith { SCL.logText = [Fmt.fmt ("Missing CFG for function "+||fh||+"")]
+                                               , SCL.logLevel = SCL.Warn
+                                               , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
+                                               })
       | otherwise =
-        C.writeChan customEventChan (LogDiagnostic Nothing "Missing context for symbolic execution")
+        CS.logMessage state (SCL.msgWith { SCL.logText = ["Missing context for symbolic execution"]
+                                         , SCL.logLevel = SCL.Warn
+                                         , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
+                                         })
 
 startSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 startSymbolicExecutionC =

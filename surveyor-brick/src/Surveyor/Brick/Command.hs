@@ -44,9 +44,13 @@ showMacawBlockC =
   where
     doc = "Show the macaw IR of the currently-selected block"
     callback :: Callback s st '[]
-    callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->do
-      C.writeChan eventChan (C.LogDiagnostic (Just C.LogDebug) "Showing macaw IR")
-      C.writeChan eventChan (C.ViewBlock archNonce C.MacawRepr)
+    callback = \eventChan sst@(C.SomeState st) PL.Nil -> do
+      case C.getNonce sst of
+        C.SomeNonce archNonce -> do
+          C.logMessage st (C.msgWith { C.logText = ["Showing Macaw IR"]
+                                     , C.logLevel = C.Debug
+                                     })
+          C.writeChan eventChan (C.ViewBlock archNonce C.MacawRepr)
 
 
 showCrucibleBlockC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
@@ -55,9 +59,13 @@ showCrucibleBlockC =
   where
     doc = "Show the crucible IR of the currently-selected block"
     callback :: Callback s st '[]
-    callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil -> do
-      C.writeChan eventChan (C.LogDiagnostic (Just C.LogDebug) "Showing crucible IR")
-      C.writeChan eventChan (C.ViewBlock archNonce C.CrucibleRepr)
+    callback = \eventChan sst@(C.SomeState st) PL.Nil -> do
+      case C.getNonce sst of
+        C.SomeNonce archNonce -> do
+          C.logMessage st (C.msgWith { C.logText = ["Showing Crucible IR"]
+                                     , C.logLevel = C.Debug
+                                     })
+          C.writeChan eventChan (C.ViewBlock archNonce C.CrucibleRepr)
 
 showBaseBlockC :: forall s st . (C.HasNonce st) => Command s st '[]
 showBaseBlockC =
