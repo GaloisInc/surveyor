@@ -37,7 +37,7 @@ import qualified What4.Expr as WE
 import qualified Surveyor.Core.Architecture as A
 import           Surveyor.Core.BinaryAnalysisResult
 import qualified Surveyor.Core.Chan as C
-import           Surveyor.Core.Events
+import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.Loader.RenovateAnalysis as RA
 
 ppcConfig :: forall sym w arch s fs st binFmt v
@@ -58,7 +58,7 @@ ppcConfig :: forall sym w arch s fs st binFmt v
              )
           => sym
           -> MBL.BinaryRepr binFmt
-          -> C.Chan (Events s st)
+          -> C.Chan (SCE.Events s st)
           -> NG.NonceGenerator IO s
           -> [(String, BS.ByteString)]
           -> [(Some (DPPC.Opcode DPPC.Operand), BS.ByteString)]
@@ -87,18 +87,18 @@ ppcConfig sym binRep customEventChan ng library semantics mkCfg0 mkRes = do
                                            }
             let sr = mkRes res
             void $ X.evaluate (DS.force sr)
-            C.writeChan customEventChan (AnalysisProgress sr)
+            SCE.emitEvent customEventChan (SCE.AnalysisProgress sr)
   let cfg = cfg0 { R.rcFunctionCallback = Just (10, callback) }
   return (R.SomeConfig NR.knownNat binRep cfg)
 
-mkLogCfg :: C.Chan (Events s st) -> IO SL.LogCfg
+mkLogCfg :: C.Chan (SCE.Events s st) -> IO SL.LogCfg
 mkLogCfg customEventChan = do
   lcfg <- SL.mkLogCfg "loader"
   _ <- CA.async (SL.consumeUntilEnd (const True) (translateMessage customEventChan) lcfg)
   return lcfg
 
 -- | Drop the log messages from semmc
-translateMessage :: C.Chan (Events s st) -> SL.LogEvent -> IO ()
+translateMessage :: C.Chan (SCE.Events s st) -> SL.LogEvent -> IO ()
 translateMessage _customEventChan _evt =
   return ()
 

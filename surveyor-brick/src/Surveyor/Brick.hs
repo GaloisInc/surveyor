@@ -214,7 +214,7 @@ appStartEvent s0 = return s0
 
 resetEchoArea :: C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState)) -> IO ()
 resetEchoArea customEventChan =
-  C.writeChan customEventChan C.ResetEchoArea
+  C.emitEvent customEventChan C.ResetEchoArea
 
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
@@ -256,7 +256,6 @@ emptyState mfp mloader ng customEventChan = do
              , C.sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
              , C.sUIMode = C.SomeUIMode C.Diags
              , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
-             , C.sEmitEvent = C.writeChan customEventChan
              , C.sEventChannel = customEventChan
              , C.sNonceGenerator = ng
              , C.sKeymap = C.defaultKeymap

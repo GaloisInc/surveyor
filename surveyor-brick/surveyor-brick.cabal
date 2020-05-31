@@ -5,7 +5,7 @@ synopsis:            An interactive binary explorer
 license:             BSD3
 license-file:        LICENSE
 author:              Tristan Ravitch
-maintainer:          tristan@nochair.net
+maintainer:          tristan@ravit.ch, tristan@galois.com
 -- copyright:           
 category:            Reverse-Engineering
 build-type:          Simple
@@ -15,6 +15,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Surveyor.Brick
                        Surveyor.Brick.Attributes
+                       Surveyor.Brick.Extension
                        Surveyor.Brick.Handlers
                        Surveyor.Brick.Names
                        Surveyor.Brick.Widget.BlockSelector
@@ -33,6 +34,11 @@ library
                        Brick.Widget.Graph
                        Brick.Widget.Minibuffer
   other-modules:       Surveyor.Brick.Command
+                       Surveyor.Brick.Handlers.Context
+                       Surveyor.Brick.Handlers.Info
+                       Surveyor.Brick.Handlers.Load
+                       Surveyor.Brick.Handlers.Logging
+                       Surveyor.Brick.Handlers.SymbolicExecution
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
                        deepseq,

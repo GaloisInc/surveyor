@@ -1,7 +1,16 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
-module Surveyor.Core.Events ( Events(..) ) where
+module Surveyor.Core.Events (
+  Events(..),
+  LoadEvent(..),
+  LoggingEvent(..),
+  InfoEvent(..),
+  SymbolicExecutionEvent(..),
+  ContextEvent(..),
+  ToEvent(..),
+  emitEvent
+  ) where
 
 import qualified Control.Exception as X
 import qualified Control.NF as NF
@@ -17,34 +26,58 @@ import qualified Lang.Crucible.Simulator.Profiling as CSP
 import qualified Renovate as R
 
 import qualified Surveyor.Core.Architecture as A
+import qualified Surveyor.Core.Chan as SCC
 import qualified Surveyor.Core.Command as C
+import qualified Surveyor.Core.IRRepr as IR
+import qualified Surveyor.Core.Logging.Message as CLM
 import qualified Surveyor.Core.SymbolicExecution.Config as SE
 import qualified Surveyor.Core.SymbolicExecution.Session as CSS
 import qualified Surveyor.Core.SymbolicExecution.State as SES
-import qualified Surveyor.Core.IRRepr as IR
-import qualified Surveyor.Core.Logging.Message as CLM
 
-data Events s st where
-  -- Loading events
-  ErrorLoadingELFHeader :: Int64 -> String -> Events s st
-  ErrorLoadingELF :: [E.ElfParseError] -> Events s st
-  ErrorLoadingLLVM :: String -> Events s st
-  AnalysisFailure :: X.SomeException -> Events s st
-  AnalysisFinished :: A.SomeResult s arch -> [R.Diagnostic] -> Events s st
-  AnalysisProgress :: A.SomeResult s arch -> Events s st
+data LoadEvent s st where
+  ErrorLoadingELFHeader :: Int64 -> String -> LoadEvent s st
+  ErrorLoadingELF :: [E.ElfParseError] -> LoadEvent s st
+  ErrorLoadingLLVM :: String -> LoadEvent s st
+  AnalysisFailure :: X.SomeException -> LoadEvent s st
+  AnalysisFinished :: A.SomeResult s arch -> [R.Diagnostic] -> LoadEvent s st
+  AnalysisProgress :: A.SomeResult s arch -> LoadEvent s st
 
-  LoadELF :: FilePath -> Events s st
-  LoadLLVM :: FilePath -> Events s st
-  LoadJAR :: FilePath -> Events s st
+  LoadELF :: FilePath -> LoadEvent s st
+  LoadLLVM :: FilePath -> LoadEvent s st
+  LoadJAR :: FilePath -> LoadEvent s st
   -- | Attempt to load a file by detecting its type automatically
-  LoadFile :: FilePath -> Events s st
+  LoadFile :: FilePath -> LoadEvent s st
 
-  -- Context manipulation
-  PushContext :: (A.ArchConstraints ir s) => PN.Nonce s arch -> A.FunctionHandle arch s -> IR.IRRepr arch ir -> A.Block ir s -> Events s st
-  ContextBack :: Events s st
-  ContextForward :: Events s st
+data LoggingEvent s st where
+  -- | Send a log message to the system
+  --
+  -- It will be accumulated in an internal buffer, which can be viewed in a
+  -- UI-specific manner
+  LogDiagnostic :: !(CLM.Timestamped CLM.LogMessage) -> LoggingEvent s st
+  -- | Set the logger (i.e., 'LogDiagnostic') to log to a file as well as the
+  -- internal buffer; if there was already a log file, the handler for this
+  -- event should close the existing file and replace the file logger with a new
+  -- one.
+  SetLogFile :: FilePath -> LoggingEvent s st
+  -- | Turn off logging to a file, performing any necessary cleanup
+  DisableFileLogging :: LoggingEvent s st
 
-  -- Symbolic execution events
+-- | Events allowing the user to request information
+data InfoEvent s st where
+  -- | Show a description (help text and expected arguments) of a command in a
+  -- manner suitable for the UI
+  DescribeCommand :: (C.CommandLike cmd) => C.SomeCommand cmd -> InfoEvent s st
+  -- | Display a transient message to the user
+  EchoText :: !T.Text -> InfoEvent s st
+  -- | A message sent by the system (after a time delay) to reset the transient
+  -- message area
+  ResetEchoArea :: InfoEvent s st
+  -- | Display a description of the keybindings active in the current context in
+  -- a manner suitable for the UI
+  DescribeKeys :: InfoEvent s st
+
+-- | Events related to controlling the symbolic execution engine/state
+data SymbolicExecutionEvent s st where
   -- | Begin setting up symbolic execution for the provided function.
   --
   -- If the function handle argument is not provided, set up symbolic execution
@@ -53,52 +86,88 @@ data Events s st where
   InitializeSymbolicExecution :: PN.Nonce s arch
                               -> Maybe (SE.SymbolicExecutionConfig s)
                               -> Maybe (A.FunctionHandle arch s)
-                              -> Events s st
+                              -> SymbolicExecutionEvent s st
   BeginSymbolicExecutionSetup :: PN.Nonce s arch
                               -> SE.SymbolicExecutionConfig s
                               -> CCC.SomeCFG (A.CrucibleExt arch) init reg
-                              -> Events s st
+                              -> SymbolicExecutionEvent s st
   StartSymbolicExecution :: PN.Nonce s arch
                          -> A.AnalysisResult arch s
                          -> SES.SymbolicState arch s solver fm init reg
-                         -> Events s st
-  ReportSymbolicExecutionMetrics :: CSS.SessionID s -> CSP.Metrics I.Identity -> Events s st
+                         -> SymbolicExecutionEvent s st
+  ReportSymbolicExecutionMetrics :: CSS.SessionID s -> CSP.Metrics I.Identity -> SymbolicExecutionEvent s st
+
+-- | Events that manipulate the current context or context stack
+data ContextEvent s st where
+  -- Context manipulation
+  PushContext :: (A.ArchConstraints ir s) => PN.Nonce s arch -> A.FunctionHandle arch s -> IR.IRRepr arch ir -> A.Block ir s -> ContextEvent s st
+  ContextBack :: ContextEvent s st
+  ContextForward :: ContextEvent s st
+
 
   -- Function-related events
-  FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> Events s st
-  ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> Events s st
-  ViewFunction :: PN.Nonce s (arch :: Type) -> IR.IRRepr arch ir -> Events s st
+  FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> ContextEvent s st
+  ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> ContextEvent s st
+  ViewFunction :: PN.Nonce s (arch :: Type) -> IR.IRRepr arch ir -> ContextEvent s st
 
 
   -- Block-related events
-  FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> Events s st
-  ListBlocks :: PN.Nonce s arch -> [A.Block arch s] -> Events s st
-  ViewBlock :: PN.Nonce s arch -> IR.IRRepr arch ir -> Events s st
-  ViewInstructionSemantics :: PN.Nonce s arch -> Events s st
-  SelectNextInstruction :: PN.Nonce s (arch :: Type) -> Events s st
-  SelectPreviousInstruction :: PN.Nonce s (arch :: Type) -> Events s st
-  SelectNextOperand :: PN.Nonce s (arch :: Type) -> Events s st
-  SelectPreviousOperand :: PN.Nonce s (arch :: Type) -> Events s st
-  ResetInstructionSelection :: PN.Nonce s (arch :: Type) -> Events s st
+  FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> ContextEvent s st
+  ListBlocks :: PN.Nonce s arch -> [A.Block arch s] -> ContextEvent s st
+  ViewBlock :: PN.Nonce s arch -> IR.IRRepr arch ir -> ContextEvent s st
+  ViewInstructionSemantics :: PN.Nonce s arch -> ContextEvent s st
+  SelectNextInstruction :: PN.Nonce s (arch :: Type) -> ContextEvent s st
+  SelectPreviousInstruction :: PN.Nonce s (arch :: Type) -> ContextEvent s st
+  SelectNextOperand :: PN.Nonce s (arch :: Type) -> ContextEvent s st
+  SelectPreviousOperand :: PN.Nonce s (arch :: Type) -> ContextEvent s st
+  ResetInstructionSelection :: PN.Nonce s (arch :: Type) -> ContextEvent s st
 
-  -- Informational messages
-  DescribeCommand :: (C.CommandLike cmd) => C.SomeCommand cmd -> Events s st
-  EchoText :: !T.Text -> Events s st
-  ResetEchoArea :: Events s st
-  LogDiagnostic :: !(CLM.Timestamped CLM.LogMessage) -> Events s st
-  SetLogFile :: FilePath -> Events s st
-  DisableFileLogging :: Events s st
-  DescribeKeys :: Events s st
+-- | All of the events supported by Surveyor (with extensions for UI-specific events)
+data Events s st where
+  LoadEvent :: LoadEvent s st -> Events s st
+  LoggingEvent :: LoggingEvent s st -> Events s st
+  SymbolicExecutionEvent :: SymbolicExecutionEvent s st -> Events s st
+  InfoEvent :: InfoEvent s st -> Events s st
+  ContextEvent :: ContextEvent s st -> Events s st
+
+  -- | Apply an arbitrary state update based on some value that has been computed
+  -- asynchronously (to avoid blocking the event loop with an expensive
+  -- computation).
+  AsyncStateUpdate :: PN.Nonce s arch -> !(NF.NF a) -> (a -> st arch s -> st arch s) -> Events s st
+
+  -- | Exit surveyor
+  Exit :: Events s st
+
+  -- FIXME: These should be in a UI-specific event extension
 
   -- UI Modes
   ShowSummary :: Events s st
   ShowDiagnostics :: Events s st
   OpenMinibuffer :: Events s st
 
-  -- Apply an arbitrary state update based on some value that has been computed
-  -- asynchronously (to avoid blocking the event loop with an expensive
-  -- computation).
-  AsyncStateUpdate :: PN.Nonce s arch -> !(NF.NF a) -> (a -> st arch s -> st arch s) -> Events s st
+-- | This is an ugly ad-hoc class to provide sugar to transparently lift the
+-- various sub-event types into 'Events'
+class ToEvent e where
+  toEvent :: e s st -> Events s st
 
-  -- Exit
-  Exit :: Events s st
+instance ToEvent Events where
+  toEvent = id
+
+instance ToEvent ContextEvent where
+  toEvent = ContextEvent
+
+instance ToEvent LoggingEvent where
+  toEvent = LoggingEvent
+
+instance ToEvent InfoEvent where
+  toEvent = InfoEvent
+
+instance ToEvent LoadEvent where
+  toEvent = LoadEvent
+
+instance ToEvent SymbolicExecutionEvent where
+  toEvent = SymbolicExecutionEvent
+
+-- | A wrapper around 'SCC.writeChan' that lifts sub-events into the full 'Events' type
+emitEvent :: (ToEvent e) => SCC.Chan (Events s st) -> e s st -> IO ()
+emitEvent c e = SCC.writeChan c (toEvent e)

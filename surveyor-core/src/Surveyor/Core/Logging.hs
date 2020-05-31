@@ -76,7 +76,7 @@ logToState :: SCC.Chan (SCE.Events s st) -> LogAction
 logToState chan =
   LogAction (CLM.addTimestamp logAction)
   where
-    logAction = L.LogAction (\msg -> SCC.writeChan chan (SCE.LogDiagnostic msg))
+    logAction = L.LogAction (\msg -> SCE.emitEvent chan (SCE.LogDiagnostic msg))
 
 -- | Create a 'LogAction' that logs to the given file
 --

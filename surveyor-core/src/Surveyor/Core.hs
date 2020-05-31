@@ -9,6 +9,12 @@ module Surveyor.Core (
   CS.writeChan,
   -- * Events
   CE.Events(..),
+  CE.ContextEvent(..),
+  CE.LoggingEvent(..),
+  CE.LoadEvent(..),
+  CE.InfoEvent(..),
+  CE.SymbolicExecutionEvent(..),
+  CE.emitEvent,
   -- * Binaries
   -- ** Loading
   CL.AsyncLoader,
