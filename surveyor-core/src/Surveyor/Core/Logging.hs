@@ -8,6 +8,7 @@ module Surveyor.Core.Logging (
   logToFile,
   logToState,
   logMessage,
+  defaultLogFile,
   -- * Log messages
   CLM.Source(..),
   CLM.Severity(..),
@@ -32,6 +33,8 @@ import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 import qualified Lumberjack as L
 import           Numeric.Natural ( Natural )
+import qualified System.Directory as SD
+import           System.FilePath ( (</>) )
 import qualified System.IO as IO
 
 import qualified Surveyor.Core.Chan as SCC
@@ -67,24 +70,40 @@ emptyLogStore = LogStore { logs = mempty }
 appendLog :: CLM.Timestamped CLM.LogMessage -> LogStore -> LogStore
 appendLog msg st = st { logs = logs st Seq.|> msg }
 
+-- | This logger sends a message to direct the system to add a log message to
+-- the log store (for display in the UI)
 logToState :: SCC.Chan (SCE.Events s st) -> LogAction
 logToState chan =
   LogAction (CLM.addTimestamp logAction)
   where
     logAction = L.LogAction (\msg -> SCC.writeChan chan (SCE.LogDiagnostic msg))
 
-logToFile :: FilePath -> IO LogAction
+-- | Create a 'LogAction' that logs to the given file
+--
+-- This function also returns the asynchronous task that manages reading queued
+-- log messages and flushing them to disk so that the thread can be canceled if
+-- the log target changes.
+logToFile :: FilePath -> IO (A.Async (), LogAction)
 logToFile fp = do
   c <- CC.newChan
-  _ <- A.async $ do
+  logTask <- A.async $ do
     IO.withFile fp IO.AppendMode $ \h ->
       writeMessageToFile h c
   let logAction = L.LogAction (CC.writeChan c)
-  return (LogAction (CLM.addTimestamp logAction))
+  return (logTask, LogAction (CLM.addTimestamp logAction))
 
+-- | Return the path of the default surveyor log file
+--
+-- This uses the XDG spec on Unix systems to identify a suitable user-local
+-- logging directory.
+defaultLogFile :: IO FilePath
+defaultLogFile = (</> "surveyor.log") <$> SD.getXdgDirectory SD.XdgData "surveyor"
+
+-- | This worker runs in an asynchronous thread to flush the message queue to disk
 writeMessageToFile :: PP.Pretty a => IO.Handle -> CC.Chan a -> IO ()
 writeMessageToFile hdl c = do
   msg <- CC.readChan c
   let doc = PP.layoutSmart PP.defaultLayoutOptions (PP.pretty msg)
   TIO.hPutStrLn hdl (PPT.renderStrict doc)
+  IO.hFlush hdl
   writeMessageToFile hdl c

@@ -154,6 +154,7 @@ module Surveyor.Core (
   SCL.LogAction,
   SCL.logToFile,
   SCL.logToState,
+  SCL.defaultLogFile,
   -- ** Log Store
   SCL.LogStore,
   SCL.appendLog,

@@ -249,7 +249,9 @@ emptyState mfp mloader ng customEventChan = do
   return C.S { C.sInputFile = mfp
              , C.sLoader = mloader
              , C.sLogStore = mempty
-             , C.sLogAction = C.logToState customEventChan
+             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState customEventChan
+                                                , C.sFileLogger = Nothing
+                                                }
              , C.sDiagnosticLevel = C.Debug
              , C.sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
              , C.sUIMode = C.SomeUIMode C.Diags

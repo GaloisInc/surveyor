@@ -86,6 +86,8 @@ data Events s st where
   EchoText :: !T.Text -> Events s st
   ResetEchoArea :: Events s st
   LogDiagnostic :: !(CLM.Timestamped CLM.LogMessage) -> Events s st
+  SetLogFile :: FilePath -> Events s st
+  DisableFileLogging :: Events s st
   DescribeKeys :: Events s st
 
   -- UI Modes

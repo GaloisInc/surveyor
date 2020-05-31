@@ -28,6 +28,8 @@ module Surveyor.Core.Commands (
   initializeSymbolicExecutionC,
   beginSymbolicExecutionSetupC,
   startSymbolicExecutionC,
+  setLogFileC,
+  disableFileLoggingC,
   allCommands
   ) where
 
@@ -79,6 +81,8 @@ allCommands =
   , C.SomeCommand initializeSymbolicExecutionC
   , C.SomeCommand beginSymbolicExecutionSetupC
   , C.SomeCommand startSymbolicExecutionC
+  , C.SomeCommand setLogFileC
+  , C.SomeCommand disableFileLoggingC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -217,6 +221,26 @@ contextForwardC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       C.writeChan customEventChan ContextForward
+
+setLogFileC :: forall s st . Command s st '[AR.FilePathType]
+setLogFileC =
+  C.Command "set-log-file" doc names rep callback (const True)
+  where
+    doc = "Log to a file (in addition to the internal buffer); if the provided filepath is the empty string, the default is used (~/.cache/surveyor.log)"
+    names = C.Const "file-name" PL.:< PL.Nil
+    rep = AR.FilePathTypeRepr PL.:< PL.Nil
+    callback :: Callback s st '[AR.FilePathType]
+    callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
+      C.writeChan customEventChan (SetLogFile filepath)
+
+disableFileLoggingC :: forall s st . Command s st '[]
+disableFileLoggingC =
+  C.Command "disable-file-logging" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Disable logging to a file, if it is enabled"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ _ ->
+      C.writeChan customEventChan DisableFileLogging
 
 loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =

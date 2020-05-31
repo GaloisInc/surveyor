@@ -457,6 +457,24 @@ handleCustomEvent s0 evt =
         B.continue $! C.State (s0 & C.lLogStore %~ C.appendLog msg)
       | otherwise -> B.continue $! C.State s0
 
+    C.SetLogFile fp -> do
+      dfltFile <- liftIO C.defaultLogFile
+      let logFile = if null fp then dfltFile else fp
+      (newTask, newAction) <- liftIO $ C.logToFile logFile
+      case s0 ^. C.lLogActions . C.lFileLogger of
+        Nothing -> return ()
+        Just (task, _) -> liftIO $ A.cancel task
+      let s1 = s0 & C.lLogActions . C.lFileLogger .~ Just (newTask, newAction)
+      B.continue $! C.State s1
+
+    C.DisableFileLogging -> do
+      case s0 ^. C.lLogActions . C.lFileLogger of
+        Nothing -> B.continue $! C.State s0
+        Just (task, _) -> do
+          liftIO $ A.cancel task
+          let s1 = s0 & C.lLogActions . C.lFileLogger .~ Nothing
+          B.continue $! C.State s1
+
     C.DescribeKeys -> do
       withBaseMode (s0 ^. C.lUIMode) $ \normalMode -> do
         let keys = C.modeKeybindings (s0 ^. C.lKeymap) (C.SomeUIMode normalMode)
@@ -544,8 +562,9 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
   nextLogStore <- F.foldlM appendTextLog (C.sLogStore s0) newDiags
   return C.S { C.sLogStore = nextLogStore
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
-             -- FIXME: Add a way to set a log file
-             , C.sLogAction = C.logToState (C.sEventChannel s0)
+             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState (C.sEventChannel s0)
+                                                , C.sFileLogger = Nothing
+                                                }
              , C.sUIMode = uiMode
              , C.sAppState = state
              , C.sEmitEvent = C.sEmitEvent s0
