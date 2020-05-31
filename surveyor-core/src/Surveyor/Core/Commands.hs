@@ -28,6 +28,8 @@ module Surveyor.Core.Commands (
   initializeSymbolicExecutionC,
   beginSymbolicExecutionSetupC,
   startSymbolicExecutionC,
+  setLogFileC,
+  disableFileLoggingC,
   allCommands
   ) where
 
@@ -36,7 +38,8 @@ import qualified Data.Functor.Const as C
 import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
-import qualified Data.Text as T
+import           Fmt ( (+||), (||+) )
+import qualified Fmt as Fmt
 import qualified Lang.Crucible.CFG.Core as CCC
 
 import qualified Surveyor.Core.Architecture as CA
@@ -44,9 +47,10 @@ import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Core.Context as CCX
-import qualified Surveyor.Core.SymbolicExecution as SymEx
 import           Surveyor.Core.Events ( Events(..) )
+import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.State as CS
+import qualified Surveyor.Core.SymbolicExecution as SymEx
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
 type Callback s st tps = C.Chan (Events s st)
@@ -77,6 +81,8 @@ allCommands =
   , C.SomeCommand initializeSymbolicExecutionC
   , C.SomeCommand beginSymbolicExecutionSetupC
   , C.SomeCommand startSymbolicExecutionC
+  , C.SomeCommand setLogFileC
+  , C.SomeCommand disableFileLoggingC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -216,6 +222,26 @@ contextForwardC =
     callback = \customEventChan _ PL.Nil ->
       C.writeChan customEventChan ContextForward
 
+setLogFileC :: forall s st . Command s st '[AR.FilePathType]
+setLogFileC =
+  C.Command "set-log-file" doc names rep callback (const True)
+  where
+    doc = "Log to a file (in addition to the internal buffer); if the provided filepath is the empty string, the default is used (~/.cache/surveyor.log)"
+    names = C.Const "file-name" PL.:< PL.Nil
+    rep = AR.FilePathTypeRepr PL.:< PL.Nil
+    callback :: Callback s st '[AR.FilePathType]
+    callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
+      C.writeChan customEventChan (SetLogFile filepath)
+
+disableFileLoggingC :: forall s st . Command s st '[]
+disableFileLoggingC =
+  C.Command "disable-file-logging" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Disable logging to a file, if it is enabled"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ _ ->
+      C.writeChan customEventChan DisableFileLogging
+
 loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =
   C.Command "load-file" doc names rep callback (const True)
@@ -288,10 +314,15 @@ beginSymbolicExecutionSetupC =
               let conf = SymEx.symbolicExecutionConfig symExecState
               C.writeChan customEventChan (BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
             Nothing -> do
-              let msg = T.pack ("Missing CFG for function: " ++ show fh)
-              C.writeChan customEventChan (LogDiagnostic Nothing msg)
+              CS.logMessage state (SCL.msgWith { SCL.logText = [Fmt.fmt ("Missing CFG for function "+||fh||+"")]
+                                               , SCL.logLevel = SCL.Warn
+                                               , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
+                                               })
       | otherwise =
-        C.writeChan customEventChan (LogDiagnostic Nothing "Missing context for symbolic execution")
+        CS.logMessage state (SCL.msgWith { SCL.logText = ["Missing context for symbolic execution"]
+                                         , SCL.logLevel = SCL.Warn
+                                         , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
+                                         })
 
 startSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 startSymbolicExecutionC =

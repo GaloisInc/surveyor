@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PolyKinds #-}
-module Surveyor.Core.Events ( Events(..), LogLevel(..) ) where
+module Surveyor.Core.Events ( Events(..) ) where
 
 import qualified Control.Exception as X
 import qualified Control.NF as NF
@@ -22,13 +22,7 @@ import qualified Surveyor.Core.SymbolicExecution.Config as SE
 import qualified Surveyor.Core.SymbolicExecution.Session as CSS
 import qualified Surveyor.Core.SymbolicExecution.State as SES
 import qualified Surveyor.Core.IRRepr as IR
-
-data LogLevel = LogDebug
-              | LogInfo
-              | LogWarning
-              | LogError
-              | LogFatal
-              deriving (Show, Eq, Ord)
+import qualified Surveyor.Core.Logging.Message as CLM
 
 data Events s st where
   -- Loading events
@@ -91,7 +85,9 @@ data Events s st where
   DescribeCommand :: (C.CommandLike cmd) => C.SomeCommand cmd -> Events s st
   EchoText :: !T.Text -> Events s st
   ResetEchoArea :: Events s st
-  LogDiagnostic :: Maybe LogLevel -> !T.Text -> Events s st
+  LogDiagnostic :: !(CLM.Timestamped CLM.LogMessage) -> Events s st
+  SetLogFile :: FilePath -> Events s st
+  DisableFileLogging :: Events s st
   DescribeKeys :: Events s st
 
   -- UI Modes

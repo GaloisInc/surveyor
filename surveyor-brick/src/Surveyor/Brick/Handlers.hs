@@ -31,8 +31,8 @@ import           GHC.Generics ( Generic )
 
 import qualified Brick as B
 import qualified Control.Concurrent.Async as A
-import qualified Control.Lens as L
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
+import qualified Control.Lens as L
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Control.NF as NF
 import qualified Data.Foldable as F
@@ -48,8 +48,8 @@ import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Vector as V
-import qualified Fmt as Fmt
 import           Fmt ( (+|), (|+), (||+) )
+import qualified Fmt as Fmt
 import qualified Graphics.Vty as V
 import           Text.Printf ( printf )
 
@@ -151,20 +151,29 @@ handleCustomEvent s0 evt =
       s1 <- liftIO $ stateFromAnalysisResult s0 bar Seq.empty C.Loading (C.sUIMode s0)
       B.continue (C.State s1)
     C.AnalysisFailure exn -> do
-      liftIO (C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogError) (Fmt.fmt ("Analysis failure: " +| exn ||+ ""))))
+      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
+                                          , C.logSource = C.EventHandler "Analysis Failure"
+                                          , C.logText = [Fmt.fmt ("Analysis failure: " +| exn ||+ "")]
+                                          })
       B.continue $! C.State s0
     C.ErrorLoadingELFHeader off msg -> do
-      let t = T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)
-      let s1 = s0 & C.lDiagnosticLog %~ (Seq.|> (Just C.LogError, t))
-      B.continue $! C.State s1
+      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
+                                          , C.logSource = C.EventHandler "ELF Loader"
+                                          , C.logText = [T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)]
+                                          })
+      B.continue $! C.State s0
     C.ErrorLoadingELF errs -> do
-      let newDiags = map (\d -> (Just C.LogError, Fmt.fmt ("ELF Loading error: " +| d ||+ ""))) errs
-      let s1 = s0 & C.lDiagnosticLog %~ (<> Seq.fromList newDiags)
-      B.continue $! C.State s1
+      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
+                                          , C.logSource = C.EventHandler "ELF Loader"
+                                          , C.logText = map (\d -> Fmt.fmt ("ELF Loading error: " +| d ||+ "")) errs
+                                          })
+      B.continue $! C.State s0
     C.ErrorLoadingLLVM s -> do
-      let t = Fmt.fmt ("Error loading LLVM bitcode: " +| s |+ "")
-      let s1 = s0 & C.lDiagnosticLog %~ (Seq.|> (Just C.LogError, t))
-      B.continue $! C.State s1
+      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
+                                          , C.logSource = C.EventHandler "LLVM Loader"
+                                          , C.logText = [Fmt.fmt ("Error loading LLVM bitcode: " +| s |+ "")]
+                                          })
+      B.continue $! C.State s0
     C.LoadFile filename -> do
       liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
       loader <- liftIO $ C.asynchronouslyLoad (C.sNonceGenerator s0) (C.sEventChannel s0) filename
@@ -194,9 +203,13 @@ handleCustomEvent s0 evt =
     C.DescribeCommand (C.SomeCommand cmd) -> do
       let msg = T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
       liftIO (C.sEmitEvent s0 (C.EchoText msg))
-      let s1 = s0 & C.lDiagnosticLog %~ (Seq.|> (Nothing, msg))
-      B.continue $! C.State s1
+      B.continue $! C.State s0
     C.EchoText txt -> do
+      -- All echo area text is mirrored into the log
+      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Requested
+                                          , C.logSource = C.EchoAreaUpdate
+                                          , C.logText = [txt]
+                                          })
       ea' <- liftIO (C.setEchoAreaText (C.sEchoArea s0) txt)
       B.continue $! C.State (s0 & C.lEchoArea .~ ea')
     C.ResetEchoArea -> B.continue $! C.State (s0 & C.lEchoArea %~ C.resetEchoArea)
@@ -265,7 +278,10 @@ handleCustomEvent s0 evt =
           -- Set the current view to the block viewer (of the appropriate IR)
           --
           -- Note that this doesn't manipulate the context at all
-          liftIO (C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Viewing a block for repr " +| rep ||+ ""))))
+          liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
+                                              , C.logSource = C.EventHandler "ViewBlock"
+                                              , C.logText = [Fmt.fmt ("Viewing a block for repr " +| rep ||+ "")]
+                                              })
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode (C.BlockViewer archNonce rep)
           B.continue $! C.State s1
       | otherwise -> B.continue (C.State s0)
@@ -340,7 +356,10 @@ handleCustomEvent s0 evt =
       | Just archState <- s0 ^. C.lArchState
       , ares <- archState ^. C.lAnalysisResult
       , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          liftIO (C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Finding block at address " +| C.prettyAddress addr |+ ""))))
+          liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
+                                              , C.logSource = C.EventHandler "FindBlockContaining"
+                                              , C.logText = [Fmt.fmt ("Finding block at address " +| C.prettyAddress addr |+ "")]
+                                              })
           case C.containingBlocks ares addr of
             [b] -> do
               let fh = C.blockFunction b
@@ -355,8 +374,11 @@ handleCustomEvent s0 evt =
       | Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
           let callback b = do
                 let fh = C.blockFunction b
+                C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
+                                           , C.logSource = C.EventHandler "ListBlocks"
+                                           , C.logText = [Fmt.fmt ("Pushing a block to view: " +| C.blockAddress b ||+"")]
+                                           })
                 C.sEmitEvent s0 (C.PushContext archNonce fh C.BaseRepr b)
-                C.logDiagnostic s0 C.LogDebug (Fmt.fmt ("Pushing a block to view: " +| C.blockAddress b ||+""))
                 C.sEmitEvent s0 (C.ViewBlock archNonce C.BaseRepr)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.BlockSelector
                       & C.lArchState . _Just . blockSelectorL .~ BS.blockSelector callback focusedListAttr blocks
@@ -379,9 +401,15 @@ handleCustomEvent s0 evt =
           let callback f = do
                 case C.functionBlocks (archState ^. C.lAnalysisResult) f of
                   [] ->
-                    C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogWarning) (Fmt.fmt ("Failed to find blocks for function: " +| f ||+"")))
+                    C.logMessage s0 (C.msgWith { C.logLevel = C.Warn
+                                               , C.logSource = C.EventHandler "ListFunctions"
+                                               , C.logText = [Fmt.fmt ("Failed to find blocks for function: " +| f ||+"")]
+                                               })
                   entryBlock : _ -> do
-                    C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Selecting function: " +| f ||+ "")))
+                    C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
+                                               , C.logSource = C.EventHandler "ListFunctions"
+                                               , C.logText = [Fmt.fmt ("Selecting function: " +| f ||+ "")]
+                                               })
                     C.sEmitEvent s0 (C.PushContext archNonce f C.BaseRepr entryBlock)
                     C.sEmitEvent s0 (C.ViewFunction archNonce C.BaseRepr)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.FunctionSelector
@@ -396,17 +424,26 @@ handleCustomEvent s0 evt =
           (ctx, sessionState) <- liftIO $ C.makeContext ng (archState ^. C.irCacheL) (archState ^. C.lAnalysisResult) fh irrepr b
           let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.pushContext ctx
                       & C.lArchState . _Just . C.symExStateL %~ (<> sessionState)
-          liftIO $ C.sEmitEvent s0 (C.LogDiagnostic (Just C.LogDebug) (Fmt.fmt ("Selecting block: " +| C.blockAddress b ||+ "")))
-          liftIO $ C.logDiagnostic s0 C.LogDebug (Fmt.fmt ("from function " +| C.blockFunction b ||+ ""))
+          liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
+                                              , C.logSource = C.EventHandler "PushContext"
+                                              , C.logText = [ Fmt.fmt ("Selecting block: " +| C.blockAddress b ||+ "")
+                                                            , Fmt.fmt ("from function " +| C.blockFunction b ||+ "")
+                                                            ]})
           B.continue (C.State s1)
       | otherwise -> do
         case s0 ^. C.lArchState of
-          Nothing -> liftIO $ C.logDiagnostic s0 C.LogDebug "PushContext: no arch state"
+          Nothing -> liftIO $ C.logMessage s0 (C.msgWith { C.logText = ["No arch state"]
+                                                         , C.logLevel = C.Warn
+                                                         , C.logSource = C.EventHandler "PushContext"
+                                                         })
           Just _archState
             | Just Refl <- testEquality (s0 ^. C.lNonce) archNonce ->
               return ()
             | otherwise ->
-              liftIO $ C.logDiagnostic s0 C.LogDebug "PushContext: Nonce mismatch"
+              liftIO $ C.logMessage s0 (C.msgWith { C.logText = ["Nonce mismatch"]
+                                                  , C.logLevel = C.Warn
+                                                  , C.logSource = C.EventHandler "PushContext"
+                                                  })
         B.continue (C.State s0)
     C.ContextBack -> do
       let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.contextBack
@@ -415,20 +452,44 @@ handleCustomEvent s0 evt =
       let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.contextForward
       B.continue $! C.State s1
 
-    C.LogDiagnostic mLogLevel t ->
-      case mLogLevel of
-        Nothing -> B.continue $! C.State (s0 & C.lDiagnosticLog %~ (Seq.|> (mLogLevel, t)))
-        Just logLevel
-          | logLevel >= C.sDiagnosticLevel s0 ->
-            B.continue $! C.State (s0 & C.lDiagnosticLog %~ (Seq.|> (Just logLevel, t)))
-          | otherwise -> B.continue $! C.State s0
+    C.LogDiagnostic msg
+      | C.logLevel (C.logMsg msg) >= C.sDiagnosticLevel s0 ->
+        B.continue $! C.State (s0 & C.lLogStore %~ C.appendLog msg)
+      | otherwise -> B.continue $! C.State s0
+
+    C.SetLogFile fp -> do
+      dfltFile <- liftIO C.defaultLogFile
+      let logFile = if null fp then dfltFile else fp
+      (newTask, newAction) <- liftIO $ C.logToFile logFile
+      case s0 ^. C.lLogActions . C.lFileLogger of
+        Nothing -> return ()
+        Just (task, _) -> liftIO $ A.cancel task
+      let s1 = s0 & C.lLogActions . C.lFileLogger .~ Just (newTask, newAction)
+      liftIO $ C.logMessage s1 (C.msgWith { C.logLevel = C.Info
+                                          , C.logText = ["Logging to file " <> T.pack logFile]
+                                          , C.logSource = C.EventHandler "SetLogFile"
+                                          })
+      B.continue $! C.State s1
+
+    C.DisableFileLogging -> do
+      case s0 ^. C.lLogActions . C.lFileLogger of
+        Nothing -> B.continue $! C.State s0
+        Just (task, _) -> do
+          liftIO $ A.cancel task
+          let s1 = s0 & C.lLogActions . C.lFileLogger .~ Nothing
+          B.continue $! C.State s1
 
     C.DescribeKeys -> do
       withBaseMode (s0 ^. C.lUIMode) $ \normalMode -> do
         let keys = C.modeKeybindings (s0 ^. C.lKeymap) (C.SomeUIMode normalMode)
-        liftIO $ C.logMessage s0 (Fmt.fmt ("Keybindings for " +| C.prettyMode normalMode |+ ":"))
-        F.forM_ keys $ \(k, C.SomeCommand cmd) -> do
-          liftIO $ C.logMessage s0 (Fmt.fmt ("  " +| PP.pretty k ||+ ": " +| C.cmdName cmd |+ ""))
+        let formatKey (k, C.SomeCommand cmd) =
+              Fmt.fmt ("  "+| PP.pretty k ||+ ": " +| C.cmdName cmd |+ "")
+        liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Requested
+                                            , C.logSource = C.EventHandler "DescribeKeys"
+                                            , C.logText = ( Fmt.fmt ("Keybindings for " +| C.prettyMode normalMode |+ ":")
+                                                          : map formatKey keys
+                                                          )
+                                            })
       let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.Diags
       B.continue $! C.State s1
 
@@ -499,8 +560,15 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                    _ -> error ("No blocks in function " ++ show defFunc)
   let ng = C.sNonceGenerator s0
   ses <- C.defaultSymbolicExecutionConfig ng
-  return C.S { C.sDiagnosticLog = C.sDiagnosticLog s0 <> fmap (Nothing,) newDiags
+  let appendTextLog ls t = do
+        msg <- C.timestamp (C.msgWith { C.logText = [t], C.logSource = C.Loader })
+        return (C.appendLog msg ls)
+  nextLogStore <- F.foldlM appendTextLog (C.sLogStore s0) newDiags
+  return C.S { C.sLogStore = nextLogStore
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
+             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState (C.sEventChannel s0)
+                                                , C.sFileLogger = C.sFileLogger (C.sLogActions s0)
+                                                }
              , C.sUIMode = uiMode
              , C.sAppState = state
              , C.sEmitEvent = C.sEmitEvent s0

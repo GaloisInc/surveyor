@@ -150,7 +150,25 @@ module Surveyor.Core (
   K.modeKeybindings,
   K.lookupKeyCommand,
   -- * Logging
-  CE.LogLevel(..),
+  -- ** Log Actions
+  SCL.LogAction,
+  SCL.logToFile,
+  SCL.logToState,
+  SCL.defaultLogFile,
+  -- ** Log Store
+  SCL.LogStore,
+  SCL.appendLog,
+  SCL.takeLogs,
+  -- ** Log Messages
+  SCL.Source(..),
+  SCL.Severity(..),
+  SCL.LogMessage(..),
+  SCL.msgWith,
+  SCL.Timestamped,
+  SCL.Timestamp,
+  SCL.timestamp,
+  SCL.logTime,
+  SCL.logMsg,
   -- * Defaults
   defaultKeymap
   ) where
@@ -172,6 +190,7 @@ import qualified Surveyor.Core.Events as CE
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.Loader as CL
+import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.Mode as M
 import qualified Surveyor.Core.OperandList as OL
 import           Surveyor.Core.State

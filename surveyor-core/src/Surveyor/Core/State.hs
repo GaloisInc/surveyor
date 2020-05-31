@@ -5,16 +5,19 @@
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.State (
   State(..),
+  LoggingActions(..),
   S(..),
   ArchState(..),
   AppState(..),
   -- * Logging
   logMessage,
-  logDiagnostic,
   -- * Lenses
+  lStateLogger,
+  lFileLogger,
+  lLogActions,
   lInputFile,
   lLoader,
-  lDiagnosticLog,
+  lLogStore,
   diagnosticLevelL,
   lEchoArea,
   lUIMode,
@@ -35,12 +38,11 @@ module Surveyor.Core.State (
 
 import           GHC.Generics ( Generic )
 
+import qualified Control.Concurrent.Async as CA
 import qualified Control.Lens as L
 import qualified Data.Generics.Product as GL
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as NG
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
 
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Arguments as AR
@@ -48,9 +50,10 @@ import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Context as CC
 import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.EchoArea as EA
-import           Surveyor.Core.Events ( Events(LogDiagnostic), LogLevel )
+import           Surveyor.Core.Events ( Events )
 import           Surveyor.Core.Keymap ( Keymap )
 import           Surveyor.Core.Loader ( AsyncLoader )
+import qualified Surveyor.Core.Logging as SCL
 import           Surveyor.Core.Mode
 import qualified Surveyor.Core.TranslationCache as TC
 
@@ -62,6 +65,27 @@ data State e u s where
 
 instance AR.HasNonce (S e u) where
   getNonce (AR.SomeState s) = AR.SomeNonce (sArchNonce s)
+
+-- | There are multiple supported logging actions: internal state and file
+--
+-- We keep them separate so that the file logger can be replaced or redirected
+-- to a different file at run-time.  If we pre-combine them with the monoid
+-- instance for LogAction, we cannot separate them later.
+data LoggingActions =
+  LoggingActions { sStateLogger :: SCL.LogAction
+                 -- ^ The logger that logs to an internal buffer (for display in the frontend UI)
+                 , sFileLogger :: Maybe (CA.Async (), SCL.LogAction)
+                 -- ^ The optional logger to a file target, along with the async thread
+                 -- that implements the file logger.  If the file logger is replaced,
+                 -- the async thread should be canceled.
+                 }
+  deriving (Generic)
+
+lStateLogger :: L.Lens' LoggingActions SCL.LogAction
+lStateLogger = GL.field @"sStateLogger"
+
+lFileLogger :: L.Lens' LoggingActions (Maybe (CA.Async (), SCL.LogAction))
+lFileLogger = GL.field @"sFileLogger"
 
 -- | This is the core application state
 --
@@ -75,9 +99,8 @@ instance AR.HasNonce (S e u) where
 data S e u (arch :: Type) s =
   S { sInputFile :: Maybe FilePath
     , sLoader :: Maybe AsyncLoader
-    , sDiagnosticLog :: !(Seq.Seq (Maybe LogLevel, T.Text))
-    -- ^ Diagnostics collected over time (displayed in the diagnostic view)
-    , sDiagnosticLevel :: !LogLevel
+    , sDiagnosticLevel :: !SCL.Severity
+    -- ^ The level of log to display
     , sEchoArea :: !EA.EchoArea
     -- ^ An area where one-line messages can be displayed
     , sUIMode :: !(SomeUIMode s)
@@ -88,6 +111,10 @@ data S e u (arch :: Type) s =
     , sEmitEvent :: Events s (S e u) -> IO ()
     -- ^ An IO action to emit an event (via the custom event channel)
     , sEventChannel :: C.Chan (Events s (S e u))
+    , sLogStore :: SCL.LogStore
+    -- ^ Storage for generated logs (for visualization in the UI)
+    , sLogActions :: LoggingActions
+    -- ^ The action to emit log messages
     , sNonceGenerator :: NG.NonceGenerator IO s
     -- ^ Nonce source used to correlate related analysis results as they stream
     -- in.  The reporting of analysis results through an existential wrapper
@@ -112,19 +139,24 @@ data S e u (arch :: Type) s =
 lNonce :: L.Lens' (S e u arch s) (NG.Nonce s arch)
 lNonce = GL.field @"sArchNonce"
 
-logMessage :: S e u arch s -> T.Text -> IO ()
-logMessage s t = sEmitEvent s (LogDiagnostic Nothing t)
+lLogActions :: L.Lens' (S e u arch s) LoggingActions
+lLogActions = GL.field @"sLogActions"
 
-logDiagnostic :: S e u arch s -> LogLevel -> T.Text -> IO ()
-logDiagnostic s ll t = sEmitEvent s (LogDiagnostic (Just ll) t)
+logMessage :: S e u arch s -> SCL.LogMessage -> IO ()
+logMessage s msg = do
+  let actions = sLogActions s
+  -- Combine the two loggers into one (if we have both) so that we can send the
+  -- log message to both targets
+  let logAct = maybe (sStateLogger actions) (sStateLogger actions <>) (fmap snd (sFileLogger actions))
+  SCL.logMessage logAct msg
 
 lInputFile :: L.Lens' (S e u arch s) (Maybe FilePath)
 lInputFile = GL.field @"sInputFile"
 
-lDiagnosticLog :: L.Lens' (S e u arch s) (Seq.Seq (Maybe LogLevel, T.Text))
-lDiagnosticLog = GL.field @"sDiagnosticLog"
+lLogStore :: L.Lens' (S e u arch s) SCL.LogStore
+lLogStore = GL.field @"sLogStore"
 
-diagnosticLevelL :: L.Lens' (S e u arch s) LogLevel
+diagnosticLevelL :: L.Lens' (S e u arch s) SCL.Severity
 diagnosticLevelL = GL.field @"sDiagnosticLevel"
 
 lEchoArea :: L.Lens' (S e u arch s) EA.EchoArea

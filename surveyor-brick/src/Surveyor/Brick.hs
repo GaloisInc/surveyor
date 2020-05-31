@@ -8,9 +8,9 @@
 module Surveyor.Brick ( surveyor ) where
 
 import qualified Brick as B
-import qualified Brick.Markup as B
-import           Brick.Markup ( (@?) )
 import qualified Brick.BChan as B
+import           Brick.Markup ( (@?) )
+import qualified Brick.Markup as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.Lens ( (^.) )
@@ -18,11 +18,13 @@ import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Nonce as PN
-import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
+import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 import qualified Data.Traversable as T
 import           Data.Void ( Void )
+import           Fmt ( (+|), (||+) )
+import qualified Fmt as Fmt
 import qualified Graphics.Vty as V
 
 import qualified Surveyor.Core as C
@@ -48,22 +50,46 @@ drawSummaryTableEntry :: Int -> (T.Text, T.Text) -> B.Widget Names
 drawSummaryTableEntry keyColWidth (key, val) =
   B.padRight (B.Pad (keyColWidth - T.length key)) (B.txt key) B.<+> B.txt val
 
-drawDiagnostics :: Seq.Seq (Maybe C.LogLevel, T.Text) -> B.Widget Names
+drawDiagnostics :: C.LogStore -> B.Widget Names
 drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
   where
-    body = B.vBox [ B.markup (renderLogLevel logLevel) B.<+> B.txtWrap t
-                  | (logLevel, t) <- F.toList diags
+    -- FIXME: Make the history length configurable
+    --
+    -- We do want to limit what we render, though, because pointlessly rendering
+    -- a huge history really slows down brick
+    body = B.vBox [ renderMessage msg
+                    -- B.markup (renderSeverity logLevel) B.<+> B.txtWrap t
+                  | msg <- F.toList (C.takeLogs 100 diags)
                   ]
-    renderLogLevel mll =
-      case mll of
-        Nothing -> ""
-        Just ll ->
-          case ll of
-            C.LogDebug -> "DEBUG" @? "log-debug" <> ":"
-            C.LogInfo -> "INFO" @? "log-info" <> ":"
-            C.LogWarning -> "WARN" @? "log-warning" <> ":"
-            C.LogError -> "ERROR" @? "log-error" <> ":"
-            C.LogFatal -> "FATAL" @? "log-fatal" <> ":"
+    renderMessage msg =
+      let tm = renderTime (C.logTime msg)
+          sev = renderSeverity (C.logLevel (C.logMsg msg))
+          comp = renderComponent (C.logSource (C.logMsg msg))
+      in case C.logText (C.logMsg msg) of
+        [] -> B.markup tm B.<+> B.markup sev B.<+> B.markup comp
+        [txt] -> B.markup tm B.<+> B.markup sev B.<+> B.markup comp B.<+> B.txtWrap txt
+        txts -> B.vBox ( B.markup tm B.<+> B.markup sev B.<+> B.markup comp
+                       : map B.txtWrap txts
+                       )
+    renderComponent comp =
+      case comp of
+        C.Unspecified -> ""
+        C.Loader -> "Loader" @? "log-component"
+        C.EventHandler nm -> Fmt.fmt ("Event[" +| nm ||+ "]") @? "log-component"
+        C.CommandCallback nm -> Fmt.fmt ("Command[" +| nm ||+ "]") @? "log-component"
+        C.EchoAreaUpdate -> ""
+
+    renderTime tm = PPT.renderStrict (PP.layoutCompact (PP.pretty tm)) @? "log-time"
+
+    renderSeverity sev =
+      case sev of
+        C.Debug -> "DEBUG" @? "log-debug" <> ":"
+        C.Info -> "INFO" @? "log-info" <> ":"
+        C.Warn -> "WARN" @? "log-warning" <> ":"
+        C.Error -> "ERROR" @? "log-error" <> ":"
+        -- Requested messages were explicitly initiated from a user action and
+        -- shouldn't have a visible tag (and are always displayed)
+        C.Requested -> ""
 
 -- | Draw a status bar based on the current state
 --
@@ -144,7 +170,7 @@ drawUIMode :: (C.Architecture arch s)
            -> [B.Widget Names]
 drawUIMode binFileName archState s uim =
   case uim of
-    C.Diags -> drawAppShell s (drawDiagnostics (C.sDiagnosticLog s))
+    C.Diags -> drawAppShell s (drawDiagnostics (C.sLogStore s))
     C.Summary -> drawAppShell s (drawSummary binFileName binfo)
     C.FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. BH.functionSelectorG))
     C.BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. BH.blockSelectorG))
@@ -222,8 +248,11 @@ emptyState mfp mloader ng customEventChan = do
   let uiExt = BH.mkExtension (C.writeChan customEventChan) n0 addrParser "M-x"
   return C.S { C.sInputFile = mfp
              , C.sLoader = mloader
-             , C.sDiagnosticLog = Seq.empty
-             , C.sDiagnosticLevel = C.LogDebug
+             , C.sLogStore = mempty
+             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState customEventChan
+                                                , C.sFileLogger = Nothing
+                                                }
+             , C.sDiagnosticLevel = C.Debug
              , C.sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
              , C.sUIMode = C.SomeUIMode C.Diags
              , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
