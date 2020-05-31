@@ -465,6 +465,10 @@ handleCustomEvent s0 evt =
         Nothing -> return ()
         Just (task, _) -> liftIO $ A.cancel task
       let s1 = s0 & C.lLogActions . C.lFileLogger .~ Just (newTask, newAction)
+      liftIO $ C.logMessage s1 (C.msgWith { C.logLevel = C.Info
+                                          , C.logText = ["Logging to file " <> T.pack logFile]
+                                          , C.logSource = C.EventHandler "SetLogFile"
+                                          })
       B.continue $! C.State s1
 
     C.DisableFileLogging -> do
@@ -563,7 +567,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
   return C.S { C.sLogStore = nextLogStore
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
              , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState (C.sEventChannel s0)
-                                                , C.sFileLogger = Nothing
+                                                , C.sFileLogger = C.sFileLogger (C.sLogActions s0)
                                                 }
              , C.sUIMode = uiMode
              , C.sAppState = state

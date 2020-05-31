@@ -97,7 +97,10 @@ logToFile fp = do
 -- This uses the XDG spec on Unix systems to identify a suitable user-local
 -- logging directory.
 defaultLogFile :: IO FilePath
-defaultLogFile = (</> "surveyor.log") <$> SD.getXdgDirectory SD.XdgData "surveyor"
+defaultLogFile = do
+  logDir <- SD.getXdgDirectory SD.XdgData "surveyor"
+  SD.createDirectoryIfMissing True logDir
+  return (logDir </> "surveyor.log")
 
 -- | This worker runs in an asynchronous thread to flush the message queue to disk
 writeMessageToFile :: PP.Pretty a => IO.Handle -> CC.Chan a -> IO ()
