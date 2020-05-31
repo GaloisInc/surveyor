@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.State (
   State(..),
@@ -9,6 +10,7 @@ module Surveyor.Core.State (
   S(..),
   ArchState(..),
   AppState(..),
+  sEmitEvent,
   -- * Logging
   logMessage,
   -- * Lenses
@@ -50,7 +52,7 @@ import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Context as CC
 import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.EchoArea as EA
-import           Surveyor.Core.Events ( Events )
+import qualified Surveyor.Core.Events as SCE
 import           Surveyor.Core.Keymap ( Keymap )
 import           Surveyor.Core.Loader ( AsyncLoader )
 import qualified Surveyor.Core.Logging as SCL
@@ -108,9 +110,7 @@ data S e u (arch :: Type) s =
     , sAppState :: AppState
     -- ^ An indicator of the general state of the application (displayed in the
     -- status line)
-    , sEmitEvent :: Events s (S e u) -> IO ()
-    -- ^ An IO action to emit an event (via the custom event channel)
-    , sEventChannel :: C.Chan (Events s (S e u))
+    , sEventChannel :: C.Chan (SCE.Events s (S e u))
     , sLogStore :: SCL.LogStore
     -- ^ Storage for generated logs (for visualization in the UI)
     , sLogActions :: LoggingActions
@@ -135,6 +135,9 @@ data S e u (arch :: Type) s =
     , sArchNonce :: NG.Nonce s arch
     }
   deriving (Generic)
+
+sEmitEvent :: forall evt e u arch s . (SCE.ToEvent evt) => S e u arch s -> evt s (S e u) -> IO ()
+sEmitEvent s evt = SCE.emitEvent (sEventChannel s) evt
 
 lNonce :: L.Lens' (S e u arch s) (NG.Nonce s arch)
 lNonce = GL.field @"sArchNonce"
@@ -165,7 +168,7 @@ lEchoArea = GL.field @"sEchoArea"
 lUIMode :: L.Lens' (S e u arch s) (SomeUIMode s)
 lUIMode = GL.field @"sUIMode"
 
-lEventChannel :: L.Lens' (S e u arch s) (C.Chan (Events s (S e u)))
+lEventChannel :: L.Lens' (S e u arch s) (C.Chan (SCE.Events s (S e u)))
 lEventChannel = GL.field @"sEventChannel"
 
 lAppState :: L.Lens' (S e u arch s) AppState

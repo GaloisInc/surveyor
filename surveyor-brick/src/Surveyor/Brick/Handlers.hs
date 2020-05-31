@@ -14,60 +14,48 @@
 -- by sending messages.  To facilitate this, no mutation functions are exported.
 module Surveyor.Brick.Handlers (
   appHandleEvent,
-  mkExtension,
+  SBE.mkExtension,
   -- * State types
-  BrickUIExtension,
-  BrickUIState,
+  SBE.BrickUIExtension,
+  SBE.BrickUIState,
   -- * Lenses ('L.Getter's only)
-  blockSelectorG,
-  blockViewerG,
-  functionSelectorG,
-  functionViewerG,
-  minibufferG,
-  symbolicExecutionManagerG
+  SBE.blockSelectorG,
+  SBE.blockViewerG,
+  SBE.functionSelectorG,
+  SBE.functionViewerG,
+  SBE.minibufferG,
+  SBE.symbolicExecutionManagerG
   ) where
 
-import           GHC.Generics ( Generic )
-
 import qualified Brick as B
-import qualified Control.Concurrent.Async as A
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
-import qualified Control.Lens as L
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Control.NF as NF
 import qualified Data.Foldable as F
-import qualified Data.Generics.Product as GL
 import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
-import qualified Data.Parameterized.Map as MapF
-import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some(..), viewSome )
-import           Data.Proxy ( Proxy(..) )
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
-import qualified Data.Text.Prettyprint.Doc as PP
-import qualified Data.Vector as V
-import           Fmt ( (+|), (|+), (||+) )
-import qualified Fmt as Fmt
+import           Data.Parameterized.Some ( viewSome )
 import qualified Graphics.Vty as V
-import           Text.Printf ( printf )
 
 import           Prelude
 
-import qualified Brick.Widget.Minibuffer as MBW
 import qualified Surveyor.Core as C
-import           Surveyor.Brick.Attributes ( focusedListAttr )
-import qualified Surveyor.Brick.Command as BC
+import qualified Surveyor.Brick.Extension as SBE
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
-import qualified Surveyor.Brick.Widget.BlockViewer as BV
 import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
 
-appHandleEvent :: C.State BrickUIExtension BrickUIState s -> B.BrickEvent Names (C.Events s (C.S BrickUIExtension BrickUIState)) -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
+import           Surveyor.Brick.Handlers.Context ( handleContextEvent )
+import           Surveyor.Brick.Handlers.Info ( handleInfoEvent )
+import           Surveyor.Brick.Handlers.Load ( handleLoadEvent )
+import           Surveyor.Brick.Handlers.Logging ( handleLoggingEvent )
+import           Surveyor.Brick.Handlers.SymbolicExecution ( handleSymbolicExecutionEvent )
+
+appHandleEvent :: C.State SBE.BrickUIExtension SBE.BrickUIState s -> B.BrickEvent Names (C.Events s (C.S SBE.BrickUIExtension SBE.BrickUIState)) -> B.EventM Names (B.Next (C.State SBE.BrickUIExtension SBE.BrickUIState s))
 appHandleEvent (C.State s0) evt =
   case evt of
     B.AppEvent ae -> handleCustomEvent s0 ae
@@ -75,7 +63,7 @@ appHandleEvent (C.State s0) evt =
     B.MouseDown {} -> B.continue (C.State s0)
     B.MouseUp {} -> B.continue (C.State s0)
 
-handleVtyEvent :: C.State BrickUIExtension BrickUIState s -> V.Event -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
+handleVtyEvent :: C.State SBE.BrickUIExtension SBE.BrickUIState s -> V.Event -> B.EventM Names (B.Next (C.State SBE.BrickUIExtension SBE.BrickUIState s))
 handleVtyEvent s0@(C.State s) evt
   | V.EvKey k mods <- evt
   , km <- s ^. C.lKeymap
@@ -90,408 +78,72 @@ handleVtyEvent s0@(C.State s) evt
   | otherwise =
   case C.sUIMode s of
     C.SomeMiniBuffer (C.MiniBuffer oldMode)
-      | mb <- s ^. C.lUIExtension . minibufferL -> do
+      | mb <- s ^. C.lUIExtension . SBE.minibufferL -> do
           mbs <- MB.handleMinibufferEvent evt (C.sEventChannel s) (C.SomeState s) mb
           case mbs of
             MB.Canceled mb' -> do
               let s' = s & C.lUIMode .~ C.SomeUIMode oldMode
-                         & C.lUIExtension . minibufferL .~ mb'
+                         & C.lUIExtension . SBE.minibufferL .~ mb'
               B.continue $! C.State s'
             MB.Completed mb' -> do
-              let s' = s & C.lUIExtension . minibufferL .~ mb'
+              let s' = s & C.lUIExtension . SBE.minibufferL .~ mb'
               B.continue $! C.State s'
             MB.Executed mb' -> do
               let s' = s & C.lUIMode .~ C.SomeUIMode oldMode
-                         & C.lUIExtension . minibufferL .~ mb'
+                         & C.lUIExtension . SBE.minibufferL .~ mb'
               B.continue $! C.State s'
       | otherwise -> B.continue s0
     C.SomeUIMode C.BlockSelector
-      | Just bsel <- s ^? C.lArchState . _Just . blockSelectorL -> do
+      | Just bsel <- s ^? C.lArchState . _Just . SBE.blockSelectorL -> do
           bsel' <- BS.handleBlockSelectorEvent evt bsel
-          let s' = s & C.lArchState . _Just . blockSelectorL .~ bsel'
+          let s' = s & C.lArchState . _Just . SBE.blockSelectorL .~ bsel'
           B.continue $! C.State s'
       | otherwise -> B.continue s0
     C.SomeUIMode (C.BlockViewer _archNonce _rep) -> B.continue s0
     C.SomeUIMode C.FunctionSelector
-      | Just fsel <- s ^? C.lArchState . _Just . functionSelectorL -> do
+      | Just fsel <- s ^? C.lArchState . _Just . SBE.functionSelectorL -> do
           fsel' <- FS.handleFunctionSelectorEvent evt fsel
-          let s' = s & C.lArchState . _Just . functionSelectorL .~ fsel'
+          let s' = s & C.lArchState . _Just . SBE.functionSelectorL .~ fsel'
           B.continue $! C.State s'
       | otherwise -> B.continue s0
     C.SomeUIMode (C.FunctionViewer fvNonce rep)
       | Just Refl <- testEquality fvNonce (s ^. C.lNonce)
       , Just archState <- s ^. C.lArchState
-      , Just fview <- archState ^. functionViewerG rep
+      , Just fview <- archState ^. SBE.functionViewerG rep
       , Just cstk <- s ^? C.lArchState . _Just . C.contextL -> do
           cstk' <- FV.handleFunctionViewerEvent evt fview cstk
           let s' = s & C.lArchState . _Just . C.contextL .~ cstk'
           B.continue $! C.State s'
     C.SomeUIMode C.SymbolicExecutionManager
       | Just archState <- s ^. C.lArchState -> do
-          let manager0 = archState ^. symbolicExecutionManagerL
+          let manager0 = archState ^. SBE.symbolicExecutionManagerL
           manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
           let st1 = SEM.symbolicExecutionManagerState manager1
-          let s' = s & C.lArchState . _Just . symbolicExecutionManagerL .~ manager1
+          let s' = s & C.lArchState . _Just . SBE.symbolicExecutionManagerL .~ manager1
                      & C.lArchState . _Just . C.symExStateL %~ (<> viewSome C.singleSessionState st1)
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
 handleCustomEvent :: (C.Architecture arch s)
-                  => C.S BrickUIExtension BrickUIState arch s
-                  -> C.Events s (C.S BrickUIExtension BrickUIState)
-                  -> B.EventM Names (B.Next (C.State BrickUIExtension BrickUIState s))
+                  => C.S SBE.BrickUIExtension SBE.BrickUIState arch s
+                  -> C.Events s (C.S SBE.BrickUIExtension SBE.BrickUIState)
+                  -> B.EventM Names (B.Next (C.State SBE.BrickUIExtension SBE.BrickUIState s))
 handleCustomEvent s0 evt =
   case evt of
-    C.AnalysisFinished (C.SomeResult bar) diags -> do
-      let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
-          notification = "Finished loading file"
-      s1 <- liftIO $ stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) C.Ready (C.SomeUIMode C.Diags)
-      B.continue (C.State s1)
-    C.AnalysisProgress (C.SomeResult bar) -> do
-      s1 <- liftIO $ stateFromAnalysisResult s0 bar Seq.empty C.Loading (C.sUIMode s0)
-      B.continue (C.State s1)
-    C.AnalysisFailure exn -> do
-      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "Analysis Failure"
-                                          , C.logText = [Fmt.fmt ("Analysis failure: " +| exn ||+ "")]
-                                          })
-      B.continue $! C.State s0
-    C.ErrorLoadingELFHeader off msg -> do
-      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "ELF Loader"
-                                          , C.logText = [T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)]
-                                          })
-      B.continue $! C.State s0
-    C.ErrorLoadingELF errs -> do
-      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "ELF Loader"
-                                          , C.logText = map (\d -> Fmt.fmt ("ELF Loading error: " +| d ||+ "")) errs
-                                          })
-      B.continue $! C.State s0
-    C.ErrorLoadingLLVM s -> do
-      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "LLVM Loader"
-                                          , C.logText = [Fmt.fmt ("Error loading LLVM bitcode: " +| s |+ "")]
-                                          })
-      B.continue $! C.State s0
-    C.LoadFile filename -> do
-      liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
-      loader <- liftIO $ C.asynchronouslyLoad (C.sNonceGenerator s0) (C.sEventChannel s0) filename
-      let s1 = s0 & C.lLoader .~ Just loader
-                  & C.lInputFile .~ Just filename
-      B.continue $! C.State s1
-    C.LoadELF filename -> do
-      liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
-      loader <- liftIO $ C.asynchronouslyLoadElf (C.sNonceGenerator s0) (C.sEventChannel s0) filename
-      let s1 = s0 & C.lLoader .~ Just loader
-                  & C.lInputFile .~ Just filename
-      B.continue $! C.State s1
-    C.LoadJAR filename -> do
-      liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
-      loader <- liftIO $ C.asynchronouslyLoadJAR (C.sNonceGenerator s0) (C.sEventChannel s0) filename
-      let s1 = s0 & C.lLoader .~ Just loader
-                  & C.lInputFile .~ Just filename
-      B.continue $! C.State s1
-    C.LoadLLVM filename -> do
-      liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
-      loader <- liftIO $ C.asynchronouslyLoadLLVM (C.sNonceGenerator s0) (C.sEventChannel s0) filename
-      let s1 = s0 & C.lLoader .~ Just loader
-                  & C.lInputFile .~ Just filename
-      B.continue $! C.State s1
+    C.LoadEvent le -> handleLoadEvent s0 le
+    C.SymbolicExecutionEvent se -> handleSymbolicExecutionEvent s0 se
+    C.LoggingEvent le -> handleLoggingEvent s0 le
+    C.InfoEvent ie -> handleInfoEvent s0 ie
+    C.ContextEvent ce -> handleContextEvent s0 ce
+
     C.ShowSummary -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Summary)
     C.ShowDiagnostics -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Diags)
-    C.DescribeCommand (C.SomeCommand cmd) -> do
-      let msg = T.pack (printf "%s: %s" (C.cmdName cmd) (C.cmdDocstring cmd))
-      liftIO (C.sEmitEvent s0 (C.EchoText msg))
-      B.continue $! C.State s0
-    C.EchoText txt -> do
-      -- All echo area text is mirrored into the log
-      liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Requested
-                                          , C.logSource = C.EchoAreaUpdate
-                                          , C.logText = [txt]
-                                          })
-      ea' <- liftIO (C.setEchoAreaText (C.sEchoArea s0) txt)
-      B.continue $! C.State (s0 & C.lEchoArea .~ ea')
-    C.ResetEchoArea -> B.continue $! C.State (s0 & C.lEchoArea %~ C.resetEchoArea)
     C.OpenMinibuffer ->
       case C.sUIMode s0 of
         C.SomeMiniBuffer _ -> B.continue (C.State s0)
         C.SomeUIMode mode -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer mode))
 
-    C.InitializeSymbolicExecution archNonce mConfig mFuncHandle
-      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce)
-      , Just sessionID <- s0 ^? C.lArchState . _Just . C.contextL . C.currentContext . C.symExecSessionIDL
-      , Just symExSt <- s0 ^? C.lArchState . _Just . C.symExStateL -> do
-          -- FIXME: Instead of the default, we could scan the context stack for
-          -- the most recent configuration
-          let ng = C.sNonceGenerator s0
-          conf <- liftIO $ maybe (C.defaultSymbolicExecutionConfig ng) return mConfig
-          case C.lookupSessionState symExSt sessionID of
-            Just (Some oldState) -> liftIO $ C.cleanupSymbolicExecutionState oldState
-            Nothing -> return ()
-          let newState = C.configuringSymbolicExecution conf
-          let manager = SEM.symbolicExecutionManager (Some newState)
-          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
-                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
-          B.continue (C.State s1)
-      | otherwise -> B.continue (C.State s0)
 
-    C.BeginSymbolicExecutionSetup archNonce symExConfig cfg
-      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
-          let ng = C.sNonceGenerator s0
-          symExSt <- liftIO $ C.initializingSymbolicExecution ng symExConfig cfg
-          let manager = SEM.symbolicExecutionManager (Some symExSt)
-          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
-                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState symExSt)
-          B.continue (C.State s1)
-      | otherwise -> B.continue (C.State s0)
-    C.StartSymbolicExecution archNonce ares symState
-      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
-        let eventChan = s0 ^. C.lEventChannel
-        (newState, executionLoop) <- liftIO $ C.startSymbolicExecution eventChan ares symState
-        task <- liftIO $ A.async $ do
-          inspectState <- executionLoop
-          let updateSymExecState _ st =
-                let manager = SEM.symbolicExecutionManager (Some inspectState)
-                in st & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
-                      & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
-                      & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-          -- We pass () as the value of the update state and capture the real
-          -- value (the new state) because there isn't an easy way to get an
-          -- NFData instance for states.  That is okay, though, because they are
-          -- evaluated enough.
-          C.writeChan eventChan (C.AsyncStateUpdate archNonce (NF.nf ()) updateSymExecState)
-        let manager = SEM.symbolicExecutionManager (Some newState)
-        let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                    & C.lArchState . _Just . symbolicExecutionManagerL .~ manager
-                    & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
-        B.continue (C.State s1)
-      | otherwise -> B.continue (C.State s0)
-    C.ReportSymbolicExecutionMetrics sid metrics -> do
-      let s1 = s0 & C.lArchState . _Just . C.symExStateL %~ C.updateSessionMetrics sid metrics
-      B.continue (C.State s1)
-
-    C.ViewBlock archNonce rep
-      | Just Refl <- testEquality archNonce (s0 ^. C.lNonce) -> do
-          -- Set the current view to the block viewer (of the appropriate IR)
-          --
-          -- Note that this doesn't manipulate the context at all
-          liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                              , C.logSource = C.EventHandler "ViewBlock"
-                                              , C.logText = [Fmt.fmt ("Viewing a block for repr " +| rep ||+ "")]
-                                              })
-          let s1 = s0 & C.lUIMode .~ C.SomeUIMode (C.BlockViewer archNonce rep)
-          B.continue $! C.State s1
-      | otherwise -> B.continue (C.State s0)
-    C.ViewFunction archNonce rep -> do
-      let s1 = s0 & C.lUIMode .~ C.SomeUIMode (C.FunctionViewer archNonce rep)
-      B.continue $! C.State s1
-    C.ViewInstructionSemantics _archNonce -> do
-      let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SemanticsViewer
-      B.continue $! C.State s1
-    C.SelectNextInstruction archNonce ->
-      withBlockViewer s0 $ \vnonce repr ->
-        if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. C.contextG
-           , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
-             case archState ^. blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
-               Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectNextInstruction repr cstk
-                 B.continue $! C.State s1
-           | otherwise -> B.continue $! C.State s0
-    C.SelectPreviousInstruction archNonce ->
-      withBlockViewer s0 $ \vnonce repr ->
-        if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. C.contextG
-           , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
-             case archState ^. blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
-               Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectPreviousInstruction repr cstk
-                 B.continue $! C.State s1
-           | otherwise -> B.continue $! C.State s0
-    C.SelectNextOperand archNonce ->
-      withBlockViewer s0 $ \vnonce repr ->
-        if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. C.contextG
-           , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
-             case archState ^. blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
-               Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectNextOperand repr cstk
-                 B.continue $! C.State s1
-           | otherwise -> B.continue $! C.State s0
-    C.SelectPreviousOperand archNonce ->
-      withBlockViewer s0 $ \vnonce repr ->
-        if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. C.contextG
-           , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
-             case archState ^. blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
-               Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectPreviousOperand repr cstk
-                 B.continue $! C.State s1
-           | otherwise -> B.continue $! C.State s0
-    C.ResetInstructionSelection archNonce ->
-      withBlockViewer s0 $ \vnonce repr ->
-        if | Just archState <- s0 ^. C.lArchState
-           , cstk <- archState ^. C.contextG
-           , Just Refl <- testEquality archNonce vnonce
-           , Just Refl <- testEquality archNonce (s0 ^. C.lNonce) ->
-             case archState ^. blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
-               Just bv -> BV.withBlockViewerConstraints bv $ do
-                 let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.resetBlockSelection cstk
-                 B.continue $! C.State s1
-           | otherwise -> B.continue $! C.State s0
-
-    C.FindBlockContaining archNonce addr
-      | Just archState <- s0 ^. C.lArchState
-      , ares <- archState ^. C.lAnalysisResult
-      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                              , C.logSource = C.EventHandler "FindBlockContaining"
-                                              , C.logText = [Fmt.fmt ("Finding block at address " +| C.prettyAddress addr |+ "")]
-                                              })
-          case C.containingBlocks ares addr of
-            [b] -> do
-              let fh = C.blockFunction b
-              liftIO (C.sEmitEvent s0 (C.PushContext archNonce fh C.BaseRepr b))
-              liftIO (C.sEmitEvent s0 (C.ViewBlock archNonce C.BaseRepr))
-              B.continue (C.State s0)
-            blocks -> do
-              liftIO (C.sEmitEvent s0 (C.ListBlocks archNonce blocks))
-              B.continue (C.State s0)
-      | otherwise -> B.continue (C.State s0)
-    C.ListBlocks archNonce blocks
-      | Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          let callback b = do
-                let fh = C.blockFunction b
-                C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                           , C.logSource = C.EventHandler "ListBlocks"
-                                           , C.logText = [Fmt.fmt ("Pushing a block to view: " +| C.blockAddress b ||+"")]
-                                           })
-                C.sEmitEvent s0 (C.PushContext archNonce fh C.BaseRepr b)
-                C.sEmitEvent s0 (C.ViewBlock archNonce C.BaseRepr)
-          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.BlockSelector
-                      & C.lArchState . _Just . blockSelectorL .~ BS.blockSelector callback focusedListAttr blocks
-          B.continue $! C.State s1
-      | otherwise -> B.continue (C.State s0)
-
-    C.FindFunctionsContaining archNonce maddr
-      | Just oldArchState <- s0 ^. C.lArchState
-      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce ->
-        let ares = oldArchState ^. C.lAnalysisResult
-        in case maddr of
-            Nothing -> do
-              liftIO (C.sEmitEvent s0 (C.ListFunctions archNonce (C.functions ares)))
-              B.continue $! C.State s0
-      | otherwise -> B.continue $! C.State s0
-
-    C.ListFunctions archNonce funcs
-      | Just archState <- s0 ^. C.lArchState
-      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          let callback f = do
-                case C.functionBlocks (archState ^. C.lAnalysisResult) f of
-                  [] ->
-                    C.logMessage s0 (C.msgWith { C.logLevel = C.Warn
-                                               , C.logSource = C.EventHandler "ListFunctions"
-                                               , C.logText = [Fmt.fmt ("Failed to find blocks for function: " +| f ||+"")]
-                                               })
-                  entryBlock : _ -> do
-                    C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                               , C.logSource = C.EventHandler "ListFunctions"
-                                               , C.logText = [Fmt.fmt ("Selecting function: " +| f ||+ "")]
-                                               })
-                    C.sEmitEvent s0 (C.PushContext archNonce f C.BaseRepr entryBlock)
-                    C.sEmitEvent s0 (C.ViewFunction archNonce C.BaseRepr)
-          let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.FunctionSelector
-                      & C.lArchState . _Just . functionSelectorL .~ FS.functionSelector callback focusedListAttr funcs
-          B.continue (C.State s1)
-      | otherwise -> B.continue (C.State s0)
-
-    C.PushContext archNonce fh irrepr b
-      | Just archState <- s0 ^. C.lArchState
-      , Just Refl <- testEquality (s0 ^. C.lNonce) archNonce -> do
-          let ng = C.sNonceGenerator s0
-          (ctx, sessionState) <- liftIO $ C.makeContext ng (archState ^. C.irCacheL) (archState ^. C.lAnalysisResult) fh irrepr b
-          let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.pushContext ctx
-                      & C.lArchState . _Just . C.symExStateL %~ (<> sessionState)
-          liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                              , C.logSource = C.EventHandler "PushContext"
-                                              , C.logText = [ Fmt.fmt ("Selecting block: " +| C.blockAddress b ||+ "")
-                                                            , Fmt.fmt ("from function " +| C.blockFunction b ||+ "")
-                                                            ]})
-          B.continue (C.State s1)
-      | otherwise -> do
-        case s0 ^. C.lArchState of
-          Nothing -> liftIO $ C.logMessage s0 (C.msgWith { C.logText = ["No arch state"]
-                                                         , C.logLevel = C.Warn
-                                                         , C.logSource = C.EventHandler "PushContext"
-                                                         })
-          Just _archState
-            | Just Refl <- testEquality (s0 ^. C.lNonce) archNonce ->
-              return ()
-            | otherwise ->
-              liftIO $ C.logMessage s0 (C.msgWith { C.logText = ["Nonce mismatch"]
-                                                  , C.logLevel = C.Warn
-                                                  , C.logSource = C.EventHandler "PushContext"
-                                                  })
-        B.continue (C.State s0)
-    C.ContextBack -> do
-      let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.contextBack
-      B.continue $! C.State s1
-    C.ContextForward -> do
-      let s1 = s0 & C.lArchState . _Just . C.contextL %~ C.contextForward
-      B.continue $! C.State s1
-
-    C.LogDiagnostic msg
-      | C.logLevel (C.logMsg msg) >= C.sDiagnosticLevel s0 ->
-        B.continue $! C.State (s0 & C.lLogStore %~ C.appendLog msg)
-      | otherwise -> B.continue $! C.State s0
-
-    C.SetLogFile fp -> do
-      dfltFile <- liftIO C.defaultLogFile
-      let logFile = if null fp then dfltFile else fp
-      (newTask, newAction) <- liftIO $ C.logToFile logFile
-      case s0 ^. C.lLogActions . C.lFileLogger of
-        Nothing -> return ()
-        Just (task, _) -> liftIO $ A.cancel task
-      let s1 = s0 & C.lLogActions . C.lFileLogger .~ Just (newTask, newAction)
-      liftIO $ C.logMessage s1 (C.msgWith { C.logLevel = C.Info
-                                          , C.logText = ["Logging to file " <> T.pack logFile]
-                                          , C.logSource = C.EventHandler "SetLogFile"
-                                          })
-      B.continue $! C.State s1
-
-    C.DisableFileLogging -> do
-      case s0 ^. C.lLogActions . C.lFileLogger of
-        Nothing -> B.continue $! C.State s0
-        Just (task, _) -> do
-          liftIO $ A.cancel task
-          let s1 = s0 & C.lLogActions . C.lFileLogger .~ Nothing
-          B.continue $! C.State s1
-
-    C.DescribeKeys -> do
-      withBaseMode (s0 ^. C.lUIMode) $ \normalMode -> do
-        let keys = C.modeKeybindings (s0 ^. C.lKeymap) (C.SomeUIMode normalMode)
-        let formatKey (k, C.SomeCommand cmd) =
-              Fmt.fmt ("  "+| PP.pretty k ||+ ": " +| C.cmdName cmd |+ "")
-        liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Requested
-                                            , C.logSource = C.EventHandler "DescribeKeys"
-                                            , C.logText = ( Fmt.fmt ("Keybindings for " +| C.prettyMode normalMode |+ ":")
-                                                          : map formatKey keys
-                                                          )
-                                            })
-      let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.Diags
-      B.continue $! C.State s1
 
     -- We discard async state updates if the type of the state has changed in
     -- the interim (i.e., if another binary has been loaded)
@@ -504,238 +156,3 @@ handleCustomEvent s0 evt =
     C.Exit -> do
       liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
       B.halt (C.State s0)
-
--- | Get the current mode (looking through the minibuffer if necessary)
-withBaseMode :: C.SomeUIMode s -> (C.UIMode s C.NormalK -> a) -> a
-withBaseMode sm k =
-  case sm of
-    C.SomeUIMode m -> k m
-    C.SomeMiniBuffer (C.MiniBuffer m) -> k m
-
-withBlockViewer :: (C.Architecture arch s)
-                => C.S BrickUIExtension BrickUIState arch s
-                -> (forall arch1 ir1 . PN.Nonce s arch1 -> C.IRRepr arch1 ir1 -> B.EventM n (B.Next (C.State BrickUIExtension BrickUIState s)))
-                -> B.EventM n (B.Next (C.State BrickUIExtension BrickUIState s))
-withBlockViewer s0 k =
-  case s0 ^. C.lUIMode of
-    C.SomeUIMode (C.BlockViewer vnonce repr) -> k vnonce repr
-    C.SomeMiniBuffer (C.MiniBuffer m) ->
-      case m of
-        C.BlockViewer vnonce repr -> k vnonce repr
-        _ -> B.continue $! C.State s0
-    _ -> B.continue $! C.State s0
-
-stateFromAnalysisResult :: forall arch0 arch s
-                         . (C.Architecture arch s)
-                        => C.S BrickUIExtension BrickUIState arch0 s
-                        -> C.AnalysisResult arch s
-                        -> Seq.Seq T.Text
-                        -> C.AppState
-                        -> C.SomeUIMode s
-                        -> IO (C.S BrickUIExtension BrickUIState arch s)
-stateFromAnalysisResult s0 ares newDiags state uiMode = do
-  tcache <- C.newTranslationCache
-  case () of
-    () | Just Refl <- testEquality (s0 ^. C.lNonce) (C.archNonce ares) -> return ()
-       | otherwise -> do
-           -- When we get a new binary (and have a fresh state), queue up a
-           -- default function to view (the first function we found).
-           --
-           -- We have to do this in a separate thread, as constructing the
-           -- function viewer can be a bit expensive (since we are translating
-           -- the function on-demand).
-           --
-           -- If there is no function, then just don't do anything.
-           case C.functions ares of
-             [] -> return ()
-             defFunc : _ -> do
-               let pushContext (newContext, sessState) oldState =
-                     oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newContext
-                              & C.lArchState . _Just . C.symExStateL %~ (<> sessState)
-               C.asynchronously (C.archNonce ares) (C.sEmitEvent s0) pushContext $ do
-                 case C.functionBlocks ares defFunc of
-                   b0 : _ -> do
-                     let ng = C.sNonceGenerator s0
-                     C.makeContext ng tcache ares defFunc C.BaseRepr b0
-                   _ -> error ("No blocks in function " ++ show defFunc)
-  let ng = C.sNonceGenerator s0
-  ses <- C.defaultSymbolicExecutionConfig ng
-  let appendTextLog ls t = do
-        msg <- C.timestamp (C.msgWith { C.logText = [t], C.logSource = C.Loader })
-        return (C.appendLog msg ls)
-  nextLogStore <- F.foldlM appendTextLog (C.sLogStore s0) newDiags
-  return C.S { C.sLogStore = nextLogStore
-             , C.sDiagnosticLevel = C.sDiagnosticLevel s0
-             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState (C.sEventChannel s0)
-                                                , C.sFileLogger = C.sFileLogger (C.sLogActions s0)
-                                                }
-             , C.sUIMode = uiMode
-             , C.sAppState = state
-             , C.sEmitEvent = C.sEmitEvent s0
-             , C.sEventChannel = C.sEventChannel s0
-             , C.sNonceGenerator = C.sNonceGenerator s0
-             , C.sEchoArea = C.sEchoArea s0
-             , C.sInputFile = C.sInputFile s0
-             , C.sLoader = C.sLoader s0
-             , C.sKeymap = keymap
-             , C.sUIExtension = uiExt
-             , C.sArchNonce = C.archNonce ares
-             , C.sArchState =
-               case () of
-                 () | Just oldArchState <- C.sArchState s0
-                    , Just Refl <- testEquality (s0 ^. C.lNonce) (C.archNonce ares) ->
-                      Just (oldArchState { C.sAnalysisResult = ares })
-                    | otherwise -> do
-                        let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
-                                         : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
-                                           | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
-                                           ]
-                        let funcViewerCallback :: forall ir . (C.ArchConstraints ir s) => C.IRRepr arch ir -> C.FunctionHandle arch s -> C.Block ir s -> IO ()
-                            funcViewerCallback rep fh b = do
-                              C.sEmitEvent s0 (C.PushContext (C.archNonce ares) fh rep b)
-                              C.sEmitEvent s0 (C.ViewBlock (C.archNonce ares) rep)
-                        let funcViewers = (MapF.Pair C.BaseRepr (FV.functionViewer (funcViewerCallback C.BaseRepr) FunctionCFGViewer C.BaseRepr))
-                                          : [ MapF.Pair rep (FV.functionViewer (funcViewerCallback rep) FunctionCFGViewer rep)
-                                            | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
-                                            ]
-                        let uiState = BrickUIState { sBlockSelector = BS.emptyBlockSelector
-                                                   , sBlockViewers = MapF.fromList blockViewers
-                                                   , sFunctionViewer = MapF.fromList funcViewers
-                                                   , sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                                   , sSymbolicExecutionManager =
-                                                     SEM.symbolicExecutionManager (Some (C.Configuring ses))
-                                                   }
-                        return C.ArchState { C.sAnalysisResult = ares
-                                           , C.sUIState = uiState
-                                           , C.sContext = C.emptyContextStack
-                                           , C.sSymExState = mempty
-                                           , C.sIRCache = tcache
-                                           }
-             }
-  where
-    addrParser s = C.SomeAddress (C.archNonce ares) <$> C.parseAddress s
-    uiExt = BrickUIExtension { sMinibuffer = MB.minibuffer addrParser (updateMinibufferCompletions (C.sEmitEvent s0) (C.archNonce ares)) MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands ++ BC.extraCommands)
-                             }
-
-    modeKeys = [ blockViewerKeys (C.archNonce ares) C.BaseRepr
-               , blockViewerKeys (C.archNonce ares) C.MacawRepr
-               , blockViewerKeys (C.archNonce ares) C.CrucibleRepr
-               , functionViewerKeys (C.archNonce ares) C.BaseRepr
-               , functionViewerKeys (C.archNonce ares) C.MacawRepr
-               , functionViewerKeys (C.archNonce ares) C.CrucibleRepr
-               , (C.SomeUIMode C.SymbolicExecutionManager,
-                  [ (C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)
-                  , (C.Key (V.KChar 's') [], C.SomeCommand C.startSymbolicExecutionC)
-                  ])
-               ]
-    addModeKeys (mode, keys) modeKeymap =
-      foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
-    keymap = foldr addModeKeys C.defaultKeymap modeKeys
-
-updateMinibufferCompletions :: (C.Events s (C.S BrickUIExtension BrickUIState) -> IO ())
-                            -> PN.Nonce s arch
-                            -> (T.Text -> V.Vector T.Text -> IO ())
-updateMinibufferCompletions emitEvent archNonce = \t matches -> do
-  let stateTransformer matches' state
-        | mb <- state ^. C.lUIExtension . minibufferL
-        , MBW.activeCompletionTarget mb == Just t =
-          state & C.lUIExtension . minibufferL %~ MBW.setCompletions matches'
-        | otherwise = state
-  emitEvent (C.AsyncStateUpdate archNonce (NF.nf matches) stateTransformer)
-
-functionViewerKeys :: PN.Nonce s arch
-                   -> C.IRRepr arch ir
-                   -> (C.SomeUIMode s, [(C.Key, C.SomeCommand (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)))])
-functionViewerKeys nonce rep = ( C.SomeUIMode (C.FunctionViewer nonce rep)
-                               , [ (C.Key (V.KChar 'm') [], C.SomeCommand BC.showMacawFunctionC)
-                                 , (C.Key (V.KChar 'c') [], C.SomeCommand BC.showCrucibleFunctionC)
-                                 , (C.Key (V.KChar 'b') [], C.SomeCommand BC.showBaseFunctionC)
-                                 , (C.Key (V.KChar 's') [], C.SomeCommand C.initializeSymbolicExecutionC)
-                                 ]
-                               )
-
-blockViewerKeys :: PN.Nonce s arch
-                -> C.IRRepr arch ir
-                -> (C.SomeUIMode s, [(C.Key, C.SomeCommand (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)))])
-blockViewerKeys nonce rep = ( C.SomeUIMode (C.BlockViewer nonce rep)
-                            , [ (C.Key V.KDown [], C.SomeCommand C.selectNextInstructionC)
-                              , (C.Key (V.KChar 'n') [V.MCtrl], C.SomeCommand C.selectNextInstructionC)
-                              , (C.Key V.KUp [], C.SomeCommand C.selectPreviousInstructionC)
-                              , (C.Key (V.KChar 'p') [V.MCtrl], C.SomeCommand C.selectPreviousInstructionC)
-                              , (C.Key V.KEsc [], C.SomeCommand C.resetInstructionSelectionC)
-                              , (C.Key V.KRight [], C.SomeCommand C.selectNextOperandC)
-                              , (C.Key V.KLeft [], C.SomeCommand C.selectPreviousOperandC)
-                              , (C.Key (V.KChar 'm') [], C.SomeCommand BC.showMacawBlockC)
-                              , (C.Key (V.KChar 'c') [], C.SomeCommand BC.showCrucibleBlockC)
-                              , (C.Key (V.KChar 'b') [], C.SomeCommand BC.showBaseBlockC)
-                              ]
-                            )
--- | State specific to the Brick UI
---
--- This is mostly storage for widgets
-data BrickUIState arch s =
-  BrickUIState { sFunctionSelector :: !(FS.FunctionSelector arch s)
-               -- ^ Functions available in the function selector
-               , sBlockSelector :: !(BS.BlockSelector arch s)
-               , sBlockViewers :: !(MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
-               , sFunctionViewer :: !(MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
-               , sSymbolicExecutionManager :: !(SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
-               }
-  deriving (Generic)
-
--- | Extra UI extensions for the Brick UI
---
--- This differs from 'BrickUIState' in that it is not parameterized by the
--- architecture (@arch@).  That is important, as there is not always an active
--- architecture.  Objects in this extension state can always be available (e.g.,
--- the minibuffer).
-data BrickUIExtension s =
-  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
-                   -- ^ The persistent state of the minibuffer
-                   }
-  deriving (Generic)
-
-mkExtension :: (C.Events s (C.S BrickUIExtension BrickUIState) -> IO ())
-            -> PN.Nonce s arch
-            -> (String -> Maybe (C.SomeAddress s)) -> T.Text -> BrickUIExtension s
-mkExtension emitEvent archNonce addrParser prompt =
-  BrickUIExtension { sMinibuffer = MB.minibuffer addrParser updater MinibufferEditor MinibufferCompletionList prompt (C.allCommands ++ BC.extraCommands)
-                   }
-  where
-    updater = updateMinibufferCompletions emitEvent archNonce
-
-minibufferL :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
-minibufferL = GL.field @"sMinibuffer"
-
-minibufferG :: L.Getter (BrickUIExtension s) (MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
-minibufferG = L.to (^. minibufferL)
-
-functionSelectorL :: L.Lens' (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)
-functionSelectorL = C.lUIState . GL.field @"sFunctionSelector"
-
-functionSelectorG :: L.Getter (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)
-functionSelectorG = L.to (^. functionSelectorL)
-
-blockSelectorL :: L.Lens' (C.ArchState BrickUIState arch s) (BS.BlockSelector arch s)
-blockSelectorL = C.lUIState . GL.field @"sBlockSelector"
-
-blockSelectorG :: L.Getter (C.ArchState BrickUIState arch s) (BS.BlockSelector arch s)
-blockSelectorG = L.to (^. blockSelectorL)
-
-blockViewersL :: L.Lens' (C.ArchState BrickUIState arch s) (MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
-blockViewersL = C.lUIState . GL.field @"sBlockViewers"
-
-blockViewerG :: C.IRRepr arch ir -> L.Getter (C.ArchState BrickUIState arch s) (Maybe (BV.BlockViewer arch s ir))
-blockViewerG rep = L.to (\as -> MapF.lookup rep (as ^. blockViewersL))
-
-functionViewersL :: L.Lens' (C.ArchState BrickUIState arch s) (MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
-functionViewersL = C.lUIState . GL.field @"sFunctionViewer"
-
-functionViewerG :: C.IRRepr arch ir -> L.Getter (C.ArchState BrickUIState arch s) (Maybe (FV.FunctionViewer arch s ir))
-functionViewerG rep = L.to (\as -> MapF.lookup rep (as ^. functionViewersL))
-
-symbolicExecutionManagerL :: L.Lens' (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
-symbolicExecutionManagerL = C.lUIState . GL.field @"sSymbolicExecutionManager"
-
-symbolicExecutionManagerG :: L.Getter (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
-symbolicExecutionManagerG = L.to (^. symbolicExecutionManagerL)

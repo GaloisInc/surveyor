@@ -50,7 +50,7 @@ showMacawBlockC =
           C.logMessage st (C.msgWith { C.logText = ["Showing Macaw IR"]
                                      , C.logLevel = C.Debug
                                      })
-          C.writeChan eventChan (C.ViewBlock archNonce C.MacawRepr)
+          C.emitEvent eventChan (C.ViewBlock archNonce C.MacawRepr)
 
 
 showCrucibleBlockC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
@@ -65,7 +65,7 @@ showCrucibleBlockC =
           C.logMessage st (C.msgWith { C.logText = ["Showing Crucible IR"]
                                      , C.logLevel = C.Debug
                                      })
-          C.writeChan eventChan (C.ViewBlock archNonce C.CrucibleRepr)
+          C.emitEvent eventChan (C.ViewBlock archNonce C.CrucibleRepr)
 
 showBaseBlockC :: forall s st . (C.HasNonce st) => Command s st '[]
 showBaseBlockC =
@@ -74,7 +74,7 @@ showBaseBlockC =
     doc = "Show the base representation of the currently-selected block"
     callback :: Callback s st '[]
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
-      C.writeChan eventChan (C.ViewBlock archNonce C.BaseRepr)
+      C.emitEvent eventChan (C.ViewBlock archNonce C.BaseRepr)
 
 showMacawFunctionC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showMacawFunctionC =
@@ -83,7 +83,7 @@ showMacawFunctionC =
     doc = "Show the macaw CFG for the currently-selected function"
     callback :: Callback s st '[]
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
-      C.writeChan eventChan (C.ViewFunction archNonce C.MacawRepr)
+      C.emitEvent eventChan (C.ViewFunction archNonce C.MacawRepr)
 
 showCrucibleFunctionC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showCrucibleFunctionC =
@@ -92,7 +92,7 @@ showCrucibleFunctionC =
     doc = "Show the crucible CFG for the currently-selected function"
     callback :: Callback s st '[]
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
-      C.writeChan eventChan (C.ViewFunction archNonce C.CrucibleRepr)
+      C.emitEvent eventChan (C.ViewFunction archNonce C.CrucibleRepr)
 
 
 showBaseFunctionC :: forall s st . (C.HasNonce st) => Command s st '[]
@@ -102,7 +102,7 @@ showBaseFunctionC =
     doc = "Show the base CFG of the currently-selected function"
     callback :: Callback s st '[]
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
-      C.writeChan eventChan (C.ViewFunction archNonce C.BaseRepr)
+      C.emitEvent eventChan (C.ViewFunction archNonce C.BaseRepr)
 
 showInstructionSemanticsC :: forall s st . (C.HasNonce st) => Command s st '[]
 showInstructionSemanticsC =
@@ -111,7 +111,7 @@ showInstructionSemanticsC =
     doc = "Show the semantics for the currently-selected base IR instruction"
     callback :: Callback s st '[]
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
-      C.writeChan eventChan (C.ViewInstructionSemantics archNonce)
+      C.emitEvent eventChan (C.ViewInstructionSemantics archNonce)
 
 hasMacawRepr :: C.SomeState (C.S e u) s -> Bool
 hasMacawRepr sst =

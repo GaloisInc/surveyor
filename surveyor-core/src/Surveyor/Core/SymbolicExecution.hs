@@ -322,7 +322,7 @@ setupProfiling ref chan sid = do
     profileAction table = do
       metrics <- CSP.readMetrics table
       IOR.writeIORef ref metrics
-      SCC.writeChan chan (SCE.ReportSymbolicExecutionMetrics sid metrics)
+      SCE.emitEvent chan (SCE.ReportSymbolicExecutionMetrics sid metrics)
 
 -- | This loop is copied from Crucible, but slightly modified to allow the GUI
 -- to interrupt the simulation cleanly (both to cancel and introspect)

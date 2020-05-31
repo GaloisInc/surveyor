@@ -47,13 +47,13 @@ import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Command as C
 import qualified Surveyor.Core.Context as CCX
-import           Surveyor.Core.Events ( Events(..) )
+import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.State as CS
 import qualified Surveyor.Core.SymbolicExecution as SymEx
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
-type Callback s st tps = C.Chan (Events s st)
+type Callback s st tps = C.Chan (SCE.Events s st)
                       -> AR.SomeState st s
                       -> PL.List (C.ArgumentType (AR.SurveyorCommand s st)) tps
                       -> IO ()
@@ -91,7 +91,7 @@ exitC =
   where
     doc = "Exit the application"
     callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan Exit
+    callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.Exit
 
 showSummaryC :: forall s st . Command s st '[]
 showSummaryC =
@@ -99,7 +99,7 @@ showSummaryC =
   where
     doc = "Show a summary of the information discovered about the binary"
     callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan ShowSummary
+    callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.ShowSummary
 
 showDiagnosticsC :: forall s st . Command s st '[]
 showDiagnosticsC =
@@ -107,7 +107,7 @@ showDiagnosticsC =
   where
     doc = "Show a log of the diagnostics produced by the analysis and UI"
     callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan ShowDiagnostics
+    callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.ShowDiagnostics
 
 listFunctionsC :: forall s st . (AR.HasNonce st) => Command s st '[]
 listFunctionsC =
@@ -116,7 +116,7 @@ listFunctionsC =
     doc = "List all of the discovered functions"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce nonce) PL.Nil ->
-      C.writeChan customEventChan (FindFunctionsContaining nonce Nothing)
+      SCE.emitEvent customEventChan (SCE.FindFunctionsContaining nonce Nothing)
 
 findBlockC :: forall s st . (AR.HasNonce st) => Command s st '[AR.AddressType]
 findBlockC =
@@ -127,7 +127,7 @@ findBlockC =
     rep = AR.AddressTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.AddressType]
     callback = \customEventChan _ (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
-      C.writeChan customEventChan (FindBlockContaining anonce addr)
+      SCE.emitEvent customEventChan (SCE.FindBlockContaining anonce addr)
 
 describeCommandC :: forall s st . Command s st '[AR.CommandType]
 describeCommandC =
@@ -138,7 +138,7 @@ describeCommandC =
     rep = AR.CommandTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.CommandType]
     callback = \customEventChan _ (AR.CommandArgument cmd PL.:< PL.Nil) ->
-      C.writeChan customEventChan (DescribeCommand cmd)
+      SCE.emitEvent customEventChan (SCE.DescribeCommand cmd)
 
 describeKeysC :: forall s st . Command s st '[]
 describeKeysC =
@@ -147,7 +147,7 @@ describeKeysC =
     doc = "Describe the keybindings active in the current mode"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
-      C.writeChan customEventChan DescribeKeys
+      SCE.emitEvent customEventChan SCE.DescribeKeys
 
 -- | This isn't part of 'allCommands' because we can never productively launch
 -- it from the minibuffer
@@ -157,7 +157,7 @@ minibufferC =
   where
     doc = "Open the minibuffer"
     callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil -> C.writeChan customEventChan OpenMinibuffer
+    callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.OpenMinibuffer
 
 selectNextInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextInstructionC =
@@ -166,7 +166,7 @@ selectNextInstructionC =
     doc = "Select the next instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
-      C.writeChan customEventChan (SelectNextInstruction archNonce)
+      SCE.emitEvent customEventChan (SCE.SelectNextInstruction archNonce)
 
 selectPreviousInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousInstructionC =
@@ -175,7 +175,7 @@ selectPreviousInstructionC =
     doc = "Select the previous instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
-      C.writeChan customEventChan (SelectPreviousInstruction archNonce)
+      SCE.emitEvent customEventChan (SCE.SelectPreviousInstruction archNonce)
 
 selectNextOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextOperandC =
@@ -184,7 +184,7 @@ selectNextOperandC =
     doc = "Select the next operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
-      C.writeChan customEventChan (SelectNextOperand archNonce)
+      SCE.emitEvent customEventChan (SCE.SelectNextOperand archNonce)
 
 selectPreviousOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousOperandC =
@@ -193,7 +193,7 @@ selectPreviousOperandC =
     doc = "Select the previous operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
-      C.writeChan customEventChan (SelectPreviousOperand archNonce)
+      SCE.emitEvent customEventChan (SCE.SelectPreviousOperand archNonce)
 
 resetInstructionSelectionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 resetInstructionSelectionC =
@@ -202,7 +202,7 @@ resetInstructionSelectionC =
     doc = "Clear the selection in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
-      C.writeChan customEventChan (ResetInstructionSelection archNonce)
+      SCE.emitEvent customEventChan (SCE.ResetInstructionSelection archNonce)
 
 contextBackC :: forall s st . Command s st '[]
 contextBackC =
@@ -211,7 +211,7 @@ contextBackC =
     doc = "Go backward (down) in the context stack"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
-      C.writeChan customEventChan ContextBack
+      SCE.emitEvent customEventChan SCE.ContextBack
 
 contextForwardC :: forall s st . Command s st '[]
 contextForwardC =
@@ -220,7 +220,7 @@ contextForwardC =
     doc = "Go forward (up) in the context stack"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
-      C.writeChan customEventChan ContextForward
+      SCE.emitEvent customEventChan SCE.ContextForward
 
 setLogFileC :: forall s st . Command s st '[AR.FilePathType]
 setLogFileC =
@@ -231,7 +231,7 @@ setLogFileC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      C.writeChan customEventChan (SetLogFile filepath)
+      SCE.emitEvent customEventChan (SCE.SetLogFile filepath)
 
 disableFileLoggingC :: forall s st . Command s st '[]
 disableFileLoggingC =
@@ -240,7 +240,7 @@ disableFileLoggingC =
     doc = "Disable logging to a file, if it is enabled"
     callback :: Callback s st '[]
     callback = \customEventChan _ _ ->
-      C.writeChan customEventChan DisableFileLogging
+      SCE.emitEvent customEventChan SCE.DisableFileLogging
 
 loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =
@@ -251,7 +251,7 @@ loadFileC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      C.writeChan customEventChan (LoadFile filepath)
+      SCE.emitEvent customEventChan (SCE.LoadFile filepath)
 
 loadELFC :: forall s st . Command s st '[AR.FilePathType]
 loadELFC =
@@ -262,7 +262,7 @@ loadELFC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      C.writeChan customEventChan (LoadELF filepath)
+      SCE.emitEvent customEventChan (SCE.LoadELF filepath)
 
 loadLLVMC :: forall s st . Command s st '[AR.FilePathType]
 loadLLVMC =
@@ -273,7 +273,7 @@ loadLLVMC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      C.writeChan customEventChan (LoadLLVM filepath)
+      SCE.emitEvent customEventChan (SCE.LoadLLVM filepath)
 
 loadJARC :: forall s st . Command s st '[AR.FilePathType]
 loadJARC =
@@ -284,7 +284,7 @@ loadJARC =
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan _ (AR.FilePathArgument filepath PL.:< PL.Nil) ->
-      C.writeChan customEventChan (LoadJAR filepath)
+      SCE.emitEvent customEventChan (SCE.LoadJAR filepath)
 
 initializeSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 initializeSymbolicExecutionC =
@@ -293,7 +293,7 @@ initializeSymbolicExecutionC =
     doc = "Initialize symbolic execution for the currently-selected function"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
-      C.writeChan customEventChan (InitializeSymbolicExecution archNonce Nothing Nothing)
+      SCE.emitEvent customEventChan (SCE.InitializeSymbolicExecution archNonce Nothing Nothing)
 
 beginSymbolicExecutionSetupC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 beginSymbolicExecutionSetupC =
@@ -312,7 +312,7 @@ beginSymbolicExecutionSetupC =
           case mcfg of
             Just (CCC.AnyCFG cfg) -> do
               let conf = SymEx.symbolicExecutionConfig symExecState
-              C.writeChan customEventChan (BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
+              SCE.emitEvent customEventChan (SCE.BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
             Nothing -> do
               CS.logMessage state (SCL.msgWith { SCL.logText = [Fmt.fmt ("Missing CFG for function "+||fh||+"")]
                                                , SCL.logLevel = SCL.Warn
@@ -337,7 +337,7 @@ startSymbolicExecutionC =
       -- , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
       -- , Some (SymEx.Initializing symExecState) <- curCtx ^. CCX.symExecStateL = do
           let ares = archState ^. CS.lAnalysisResult
-          C.writeChan customEventChan (StartSymbolicExecution nonce ares symExecState)
+          SCE.emitEvent customEventChan (SCE.StartSymbolicExecution nonce ares symExecState)
       | otherwise =
         -- If we weren't in an appropriate state, just don't do anything
         return ()
