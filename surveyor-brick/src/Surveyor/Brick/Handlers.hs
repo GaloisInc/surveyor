@@ -14,7 +14,6 @@
 -- by sending messages.  To facilitate this, no mutation functions are exported.
 module Surveyor.Brick.Handlers (
   appHandleEvent,
-  SBE.mkExtension,
   -- * State types
   SBE.BrickUIExtension,
   SBE.BrickUIState,
@@ -40,16 +39,17 @@ import qualified Graphics.Vty as V
 
 import           Prelude
 
-import qualified Surveyor.Core as C
 import qualified Surveyor.Brick.Extension as SBE
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
-import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
+import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
+import qualified Surveyor.Core as C
 
 import           Surveyor.Brick.Handlers.Context ( handleContextEvent )
+import           Surveyor.Brick.Handlers.Extension ( handleExtensionEvent )
 import           Surveyor.Brick.Handlers.Info ( handleInfoEvent )
 import           Surveyor.Brick.Handlers.Load ( handleLoadEvent )
 import           Surveyor.Brick.Handlers.Logging ( handleLoggingEvent )
@@ -124,6 +124,7 @@ handleVtyEvent s0@(C.State s) evt
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
+
 handleCustomEvent :: (C.Architecture arch s)
                   => C.S SBE.BrickUIExtension SBE.BrickUIState arch s
                   -> C.Events s (C.S SBE.BrickUIExtension SBE.BrickUIState)
@@ -135,15 +136,7 @@ handleCustomEvent s0 evt =
     C.LoggingEvent le -> handleLoggingEvent s0 le
     C.InfoEvent ie -> handleInfoEvent s0 ie
     C.ContextEvent ce -> handleContextEvent s0 ce
-
-    C.ShowSummary -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Summary)
-    C.ShowDiagnostics -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Diags)
-    C.OpenMinibuffer ->
-      case C.sUIMode s0 of
-        C.SomeMiniBuffer _ -> B.continue (C.State s0)
-        C.SomeUIMode mode -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer mode))
-
-
+    C.ExtensionEvent ee -> handleExtensionEvent s0 ee
 
     -- We discard async state updates if the type of the state has changed in
     -- the interim (i.e., if another binary has been loaded)

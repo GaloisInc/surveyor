@@ -1,7 +1,11 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE TypeFamilies #-}
 module Surveyor.Core.Events (
+  EventExtension,
   Events(..),
   LoadEvent(..),
   LoggingEvent(..),
@@ -122,6 +126,8 @@ data ContextEvent s st where
   SelectPreviousOperand :: PN.Nonce s (arch :: Type) -> ContextEvent s st
   ResetInstructionSelection :: PN.Nonce s (arch :: Type) -> ContextEvent s st
 
+type family EventExtension (st :: Type -> Type -> Type) :: Type -> (Type -> Type -> Type) -> Type
+
 -- | All of the events supported by Surveyor (with extensions for UI-specific events)
 data Events s st where
   LoadEvent :: LoadEvent s st -> Events s st
@@ -138,36 +144,32 @@ data Events s st where
   -- | Exit surveyor
   Exit :: Events s st
 
-  -- FIXME: These should be in a UI-specific event extension
-
-  -- UI Modes
-  ShowSummary :: Events s st
-  ShowDiagnostics :: Events s st
-  OpenMinibuffer :: Events s st
+  -- | UI-specific events
+  ExtensionEvent :: EventExtension st s st -> Events s st
 
 -- | This is an ugly ad-hoc class to provide sugar to transparently lift the
 -- various sub-event types into 'Events'
-class ToEvent e where
+class ToEvent s st e where
   toEvent :: e s st -> Events s st
 
-instance ToEvent Events where
+instance ToEvent s st Events where
   toEvent = id
 
-instance ToEvent ContextEvent where
+instance ToEvent s st ContextEvent where
   toEvent = ContextEvent
 
-instance ToEvent LoggingEvent where
+instance ToEvent s st LoggingEvent where
   toEvent = LoggingEvent
 
-instance ToEvent InfoEvent where
+instance ToEvent s st InfoEvent where
   toEvent = InfoEvent
 
-instance ToEvent LoadEvent where
+instance ToEvent s st LoadEvent where
   toEvent = LoadEvent
 
-instance ToEvent SymbolicExecutionEvent where
+instance ToEvent s st SymbolicExecutionEvent where
   toEvent = SymbolicExecutionEvent
 
 -- | A wrapper around 'SCC.writeChan' that lifts sub-events into the full 'Events' type
-emitEvent :: (ToEvent e) => SCC.Chan (Events s st) -> e s st -> IO ()
+emitEvent :: (ToEvent s st e) => SCC.Chan (Events s st) -> e s st -> IO ()
 emitEvent c e = SCC.writeChan c (toEvent e)

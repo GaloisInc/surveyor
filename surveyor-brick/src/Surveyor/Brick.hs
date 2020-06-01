@@ -27,9 +27,10 @@ import           Fmt ( (+|), (||+) )
 import qualified Fmt as Fmt
 import qualified Graphics.Vty as V
 
-import qualified Surveyor.Core as C
 import           Surveyor.Brick.Attributes
+import qualified Surveyor.Brick.Command as SBC
 import qualified Surveyor.Brick.Handlers as BH
+import qualified Surveyor.Brick.Keymap as SBK
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.BlockViewer as BV
@@ -38,6 +39,7 @@ import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.InstructionSemanticsViewer as ISV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
+import qualified Surveyor.Core as C
 
 drawSummary :: (C.Architecture arch s) => FilePath -> C.AnalysisResult arch s -> B.Widget Names
 drawSummary binFileName ares =
@@ -245,7 +247,7 @@ emptyState mfp mloader ng customEventChan = do
   -- We need a nonce for the minibuffer, but we don't have one here yet.  Just
   -- make one (that won't match anything else)
   n0 <- PN.freshNonce ng
-  let uiExt = BH.mkExtension (C.writeChan customEventChan) n0 addrParser "M-x"
+  let uiExt = SBC.mkExtension (C.writeChan customEventChan) n0 addrParser "M-x"
   return C.S { C.sInputFile = mfp
              , C.sLoader = mloader
              , C.sLogStore = mempty
@@ -258,7 +260,7 @@ emptyState mfp mloader ng customEventChan = do
              , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
              , C.sEventChannel = customEventChan
              , C.sNonceGenerator = ng
-             , C.sKeymap = C.defaultKeymap
+             , C.sKeymap = SBK.defaultKeymap
              , C.sUIExtension = uiExt
              , C.sArchState = Nothing
              , C.sArchNonce = n0

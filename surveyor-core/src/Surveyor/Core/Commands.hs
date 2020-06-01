@@ -7,13 +7,10 @@
 {-# LANGUAGE ViewPatterns #-}
 module Surveyor.Core.Commands (
   exitC,
-  showSummaryC,
-  showDiagnosticsC,
   findBlockC,
   listFunctionsC,
   describeCommandC,
   describeKeysC,
-  minibufferC,
   loadFileC,
   loadLLVMC,
   loadJARC,
@@ -60,9 +57,7 @@ type Callback s st tps = C.Chan (SCE.Events s st)
 
 allCommands :: (AR.HasNonce st, st ~ CS.S e u) => [C.SomeCommand (AR.SurveyorCommand s st)]
 allCommands =
-  [ C.SomeCommand showSummaryC
-  , C.SomeCommand exitC
-  , C.SomeCommand showDiagnosticsC
+  [ C.SomeCommand exitC
   , C.SomeCommand findBlockC
   , C.SomeCommand listFunctionsC
   , C.SomeCommand describeCommandC
@@ -93,21 +88,6 @@ exitC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.Exit
 
-showSummaryC :: forall s st . Command s st '[]
-showSummaryC =
-  C.Command "summary" doc PL.Nil PL.Nil callback (const True)
-  where
-    doc = "Show a summary of the information discovered about the binary"
-    callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.ShowSummary
-
-showDiagnosticsC :: forall s st . Command s st '[]
-showDiagnosticsC =
-  C.Command "log" doc PL.Nil PL.Nil callback (const True)
-  where
-    doc = "Show a log of the diagnostics produced by the analysis and UI"
-    callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.ShowDiagnostics
 
 listFunctionsC :: forall s st . (AR.HasNonce st) => Command s st '[]
 listFunctionsC =
@@ -148,16 +128,6 @@ describeKeysC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.DescribeKeys
-
--- | This isn't part of 'allCommands' because we can never productively launch
--- it from the minibuffer
-minibufferC :: forall s st . Command s st '[]
-minibufferC =
-  C.Command "show-minibuffer" doc PL.Nil PL.Nil callback (const True)
-  where
-    doc = "Open the minibuffer"
-    callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.OpenMinibuffer
 
 selectNextInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextInstructionC =

@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RankNTypes #-}
@@ -136,7 +137,7 @@ data S e u (arch :: Type) s =
     }
   deriving (Generic)
 
-sEmitEvent :: forall evt e u arch s . (SCE.ToEvent evt) => S e u arch s -> evt s (S e u) -> IO ()
+sEmitEvent :: forall evt e u arch s . (SCE.ToEvent s (S e u) evt) => S e u arch s -> evt s (S e u) -> IO ()
 sEmitEvent s evt = SCE.emitEvent (sEventChannel s) evt
 
 lNonce :: L.Lens' (S e u arch s) (NG.Nonce s arch)

@@ -28,6 +28,7 @@ import           Text.Printf ( printf )
 import           Surveyor.Brick.Attributes ( focusedListAttr )
 import qualified Surveyor.Brick.Command as BC
 import qualified Surveyor.Brick.Extension as SBE
+import qualified Surveyor.Brick.Keymap as SBK
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.BlockViewer as BV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
@@ -202,7 +203,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                ]
     addModeKeys (mode, keys) modeKeymap =
       foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
-    keymap = foldr addModeKeys C.defaultKeymap modeKeys
+    keymap = foldr addModeKeys SBK.defaultKeymap modeKeys
 
 
 functionViewerKeys :: PN.Nonce s arch

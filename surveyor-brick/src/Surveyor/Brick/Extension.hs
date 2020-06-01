@@ -1,12 +1,17 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | State extensions for the brick UI
 module Surveyor.Brick.Extension (
   BrickUIState(..),
   BrickUIExtension(..),
-  mkExtension,
+  BrickUIEvent(..),
   updateMinibufferCompletions,
   -- * Lenses
   minibufferL,
@@ -27,6 +32,7 @@ import           Control.Lens ( (^.), (&), (%~) )
 import qualified Control.Lens as L
 import qualified Control.NF as NF
 import qualified Data.Generics.Product as GL
+import           Data.Kind ( Type )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
@@ -36,7 +42,6 @@ import qualified Surveyor.Core as C
 
 import qualified Brick.Widget.Minibuffer as MBW
 
-import qualified Surveyor.Brick.Command as BC
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.BlockViewer as BV
@@ -44,6 +49,21 @@ import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
+
+type instance C.EventExtension (C.S BrickUIExtension BrickUIState) = BrickUIEvent
+
+-- | Events specific to the Brick UI
+--
+-- Note that it isn't parameterized by the @st@ type like the base event because
+-- we can actually mention the full state type here, so it doesn't need to be a
+-- parameter.
+data BrickUIEvent s (st :: Type -> Type -> Type) where
+  ShowSummary :: BrickUIEvent s st
+  ShowDiagnostics :: BrickUIEvent s st
+  OpenMinibuffer :: BrickUIEvent s st
+
+instance C.ToEvent s (C.S BrickUIExtension BrickUIState) BrickUIEvent where
+  toEvent = C.ExtensionEvent
 
 -- | State specific to the Brick UI
 --
@@ -70,14 +90,6 @@ data BrickUIExtension s =
                    }
   deriving (Generic)
 
-mkExtension :: (C.Events s (C.S BrickUIExtension BrickUIState) -> IO ())
-            -> PN.Nonce s arch
-            -> (String -> Maybe (C.SomeAddress s)) -> T.Text -> BrickUIExtension s
-mkExtension emitEvent archNonce addrParser prompt =
-  BrickUIExtension { sMinibuffer = MB.minibuffer addrParser updater MinibufferEditor MinibufferCompletionList prompt (C.allCommands ++ BC.extraCommands)
-                   }
-  where
-    updater = updateMinibufferCompletions emitEvent archNonce
 
 updateMinibufferCompletions :: (C.Events s (C.S BrickUIExtension BrickUIState) -> IO ())
                             -> PN.Nonce s arch

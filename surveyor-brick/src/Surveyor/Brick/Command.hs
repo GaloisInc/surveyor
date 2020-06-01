@@ -14,12 +14,22 @@ module Surveyor.Brick.Command (
   showCrucibleFunctionC,
   showBaseFunctionC,
   showInstructionSemanticsC,
-  extraCommands
+  showSummaryC,
+  showDiagnosticsC,
+  minibufferC,
+  extraCommands,
+  mkExtension
   ) where
 
+import           Data.Kind ( Type )
 import qualified Data.Parameterized.List as PL
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Proxy ( Proxy(..) )
+import qualified Data.Text as T
 
+import qualified Surveyor.Brick.Extension as SBE
+import           Surveyor.Brick.Names ( Names(..) )
+import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Core as C
 
 type Command s st (tps :: [C.ArgumentKind (C.SurveyorCommand s st)]) = C.Command (C.SurveyorCommand s st) tps
@@ -28,7 +38,17 @@ type Callback s st (tps :: [C.ArgumentKind (C.SurveyorCommand s st)]) = C.Chan (
                       -> PL.List (C.ArgumentType (C.SurveyorCommand s st)) tps
                       -> IO ()
 
-extraCommands :: (C.HasNonce st, st ~ C.S e u) => [C.SomeCommand (C.SurveyorCommand s st)]
+mkExtension :: forall (arch :: Type) s
+             . (C.Events s (C.S SBE.BrickUIExtension SBE.BrickUIState) -> IO ())
+            -> PN.Nonce s arch
+            -> (String -> Maybe (C.SomeAddress s)) -> T.Text -> SBE.BrickUIExtension s
+mkExtension emitEvent archNonce addrParser prompt =
+  SBE.BrickUIExtension { SBE.sMinibuffer = MB.minibuffer addrParser updater MinibufferEditor MinibufferCompletionList prompt (C.allCommands ++ extraCommands)
+                       }
+  where
+    updater = SBE.updateMinibufferCompletions emitEvent archNonce
+
+extraCommands :: (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => [C.SomeCommand (C.SurveyorCommand s st)]
 extraCommands = [ C.SomeCommand showMacawBlockC
                 , C.SomeCommand showCrucibleBlockC
                 , C.SomeCommand showBaseBlockC
@@ -36,6 +56,9 @@ extraCommands = [ C.SomeCommand showMacawBlockC
                 , C.SomeCommand showCrucibleFunctionC
                 , C.SomeCommand showBaseFunctionC
                 , C.SomeCommand showInstructionSemanticsC
+                , C.SomeCommand showSummaryC
+                , C.SomeCommand showDiagnosticsC
+                , C.SomeCommand minibufferC
                 ]
 
 showMacawBlockC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
@@ -112,6 +135,33 @@ showInstructionSemanticsC =
     callback :: Callback s st '[]
     callback = \eventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
       C.emitEvent eventChan (C.ViewInstructionSemantics archNonce)
+
+showSummaryC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
+showSummaryC =
+  C.Command "summary" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Show a summary of the information discovered about the binary"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil -> C.emitEvent customEventChan SBE.ShowSummary
+
+showDiagnosticsC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
+showDiagnosticsC =
+  C.Command "log" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Show a log of the diagnostics produced by the analysis and UI"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil -> C.emitEvent customEventChan SBE.ShowDiagnostics
+
+-- | This isn't part of 'allCommands' because we can never productively launch
+-- it from the minibuffer
+minibufferC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
+minibufferC =
+  C.Command "show-minibuffer" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Open the minibuffer"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil -> C.emitEvent customEventChan SBE.OpenMinibuffer
+
 
 hasMacawRepr :: C.SomeState (C.S e u) s -> Bool
 hasMacawRepr sst =

@@ -35,10 +35,12 @@ library
                        Brick.Widget.Minibuffer
   other-modules:       Surveyor.Brick.Command
                        Surveyor.Brick.Handlers.Context
+                       Surveyor.Brick.Handlers.Extension
                        Surveyor.Brick.Handlers.Info
                        Surveyor.Brick.Handlers.Load
                        Surveyor.Brick.Handlers.Logging
                        Surveyor.Brick.Handlers.SymbolicExecution
+                       Surveyor.Brick.Keymap
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
                        deepseq,
