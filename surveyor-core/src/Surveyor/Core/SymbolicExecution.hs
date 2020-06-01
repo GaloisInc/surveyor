@@ -87,6 +87,7 @@ import qualified What4.Utils.StringLiteral as WUS
 import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.Chan as SCC
 import qualified Surveyor.Core.Events as SCE
+import qualified Surveyor.Core.Panic as SCP
 
 import           Surveyor.Core.SymbolicExecution.Config
 import           Surveyor.Core.SymbolicExecution.State
@@ -381,7 +382,8 @@ allocateSymbolicValue proxy sym rep =
         CT.NotBaseType ->
           case rep of
             CT.StructRepr reps -> FC.traverseFC (\tp -> CS.RV <$> allocateSymbolicValue proxy sym tp) reps
-            _ -> error ("Unsupported symbolic value type: " ++ show rep)
+            _ -> SCP.panic "Allocating symbolic values" ["Unsupported symbolic value type: " ++ show rep
+                                                        ]
   where
     name = WS.safeSymbol "argument"
 

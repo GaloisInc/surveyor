@@ -51,6 +51,7 @@ import           Text.Read ( readMaybe )
 import           Surveyor.Core.Architecture.Class
 import           Surveyor.Core.IRRepr ( Macaw )
 import qualified Surveyor.Core.OperandList as OL
+import qualified Surveyor.Core.Panic as SCP
 
 macawForBlocks :: forall arch s
                 . (MC.MemWidth (MC.ArchAddrWidth arch), Ord (Address arch s), MC.ArchConstraints arch, Show (Address arch s))
@@ -318,7 +319,7 @@ macawStmtOpcode stmt =
     MC.CondWriteMem {} -> MacawOpcode CondWriteMem
     MC.InstructionStart {} -> MacawOpcode Comment
 
-macawTermStmtOpcode :: MC.ParsedTermStmt arch ids -> Opcode (Macaw arch) s
+macawTermStmtOpcode :: (MC.MemWidth (MC.ArchAddrWidth arch)) => MC.ParsedTermStmt arch ids -> Opcode (Macaw arch) s
 macawTermStmtOpcode stmt =
   case stmt of
     MC.ParsedCall _ Nothing -> MacawOpcode TailCall
@@ -330,7 +331,10 @@ macawTermStmtOpcode stmt =
     MC.ParsedTranslateError t -> MacawOpcode (TranslateError t)
     MC.ClassifyFailure {} -> MacawOpcode ClassifyFailure
     MC.ParsedArchTermStmt t _regs _next -> MacawOpcode (ArchTermStmt t)
-    MC.PLTStub _regs _addr _relo -> error "Unhandled PLT stub"
+    MC.PLTStub _regs addr _relo ->
+      SCP.panic "Macaw Translation" [ "Unhandled PLT stub"
+                                    , show addr
+                                    ]
 
 -- FIXME: Nonces need to be memoized (i.e., the same operand appearing in
 -- multiple locations should get the same global nonce)

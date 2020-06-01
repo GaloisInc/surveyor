@@ -65,6 +65,7 @@ import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.TranslationCache as TC
 import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.OperandList as OL
+import qualified Surveyor.Core.Panic as SCP
 
 -- | A context focused (at some point) by the user, and used to inform drawing
 -- of various widgets.
@@ -443,7 +444,8 @@ modifyOperandSelection modz mbs = do
   bs <- mbs
   selIdx <- selectedIndex (bs ^. blockStateSelection)
   case (bs ^. blockStateList) V.!? selIdx of
-    Nothing -> error ("Index out of bounds in modifyOperandSelection: " ++ show selIdx)
+    Nothing -> SCP.panic "modifyOperandSelection" [ "Index out of bounds in modifyOperandSelection: " ++ show selIdx
+                                                  ]
     Just (_, _, insn) -> return (bs & blockStateSelection %~ modifyOperand insn)
   where
     modifyOperand insn i =

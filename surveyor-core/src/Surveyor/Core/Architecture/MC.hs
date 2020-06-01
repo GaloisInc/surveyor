@@ -72,11 +72,12 @@ import qualified What4.Interface as WI
 import qualified What4.Symbol as WS
 
 import           Surveyor.Core.Architecture.Class
-import qualified Surveyor.Core.Architecture.Macaw as AM
 import qualified Surveyor.Core.Architecture.Crucible as AC
+import qualified Surveyor.Core.Architecture.Macaw as AM
 import           Surveyor.Core.BinaryAnalysisResult
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr) )
 import qualified Surveyor.Core.OperandList as OL
+import qualified Surveyor.Core.Panic as SCP
 
 instance AC.CrucibleExtension PPC.PPC32 where
   type CrucibleExtensionOperand PPC.PPC32 = MacawOperand PPC.PPC32
@@ -640,7 +641,9 @@ instance Architecture PPC.PPC32 s where
         let PPC32Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> Just <$> AM.macawForBlocks PPC32Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+          Nothing ->
+            SCP.panic "PPC32 Macaw translation" ["Invalid address for function: " ++ show memAddr
+                                                ]
       CrucibleRepr -> do
         let mem = MBL.memoryImage img
         let blocks = [ (segOff, b)
@@ -651,7 +654,9 @@ instance Architecture PPC.PPC32 s where
         let PPC32Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC32Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+          Nothing ->
+            SCP.panic "PPC32 Crucible translation" ["Invalid address for function: " ++ show memAddr
+                                                   ]
   crucibleCFG (AnalysisResult (PPC32AnalysisResult bar) _) = mcCrucibleCFG ppcaddr32ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
   symbolicInitializers = mcSymbolicInitializers
@@ -660,19 +665,25 @@ ppcaddr32ToConcrete :: Address PPC.PPC32 s -> R.ConcreteAddress PPC.PPC32
 ppcaddr32ToConcrete (PPC32Address ma32) =
   case MM.asAbsoluteAddr ma32 of
     Just absAddr -> R.concreteFromAbsolute absAddr
-    Nothing -> error ("Unsupported address translation: " ++ show ma32)
+    Nothing ->
+      SCP.panic "PPC32 renovate address translation" ["Unsupported address translation: " ++ show ma32
+                                                     ]
 
 ppcaddr64ToConcrete :: Address PPC.PPC64 s -> R.ConcreteAddress PPC.PPC64
 ppcaddr64ToConcrete (PPC64Address ma64) =
   case MM.asAbsoluteAddr ma64 of
     Just absAddr -> R.concreteFromAbsolute absAddr
-    Nothing -> error ("Unsupported address translation: " ++ show ma64)
+    Nothing ->
+      SCP.panic "PPC64 renovate address translation" ["Unsupported address translation: " ++ show ma64
+                                                     ]
 
 x86addr64ToConcrete :: Address X86.X86_64 s -> R.ConcreteAddress X86.X86_64
 x86addr64ToConcrete (X86Address addr) =
   case MM.asAbsoluteAddr addr of
     Just absAddr -> R.concreteFromAbsolute absAddr
-    Nothing -> error ("Unsupported address translation: " ++ show addr)
+    Nothing ->
+      SCP.panic "X86 renovate address translation" ["Unsupported address translation: " ++ show addr
+                                                   ]
 
 mcCrucibleCFG :: (Address arch s -> R.ConcreteAddress arch)
               -> BinaryAnalysisResult s o arch
@@ -763,7 +774,9 @@ instance Architecture PPC.PPC64 s where
         let PPC64Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> Just <$> AM.macawForBlocks PPC64Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+          Nothing ->
+            SCP.panic "PPC64 Macaw translation" ["Invalid address for function: " ++ show memAddr
+                                                ]
       CrucibleRepr -> do
         let mem = MBL.memoryImage img
         let blocks = [ (segOff, b)
@@ -774,7 +787,9 @@ instance Architecture PPC.PPC64 s where
         let PPC64Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks PPC64Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+          Nothing ->
+            SCP.panic "PPC64 Crucible translation" ["Invalid address for function: " ++ show memAddr
+                                                   ]
   crucibleCFG (AnalysisResult (PPC64AnalysisResult bar) _) = mcCrucibleCFG ppcaddr64ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
   symbolicInitializers = mcSymbolicInitializers
@@ -884,7 +899,9 @@ instance Architecture X86.X86_64 s where
         let X86Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> Just <$> AM.macawForBlocks X86Address (rNonceGen bar) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+          Nothing ->
+            SCP.panic "X86 Macaw translation" ["Invalid address for function: " ++ show memAddr
+                                              ]
       CrucibleRepr -> do
         let mem = MBL.memoryImage img
         let blocks = [ (segOff, b)
@@ -895,7 +912,9 @@ instance Architecture X86.X86_64 s where
         let X86Address memAddr = fhAddress fh
         case MM.asAbsoluteAddr memAddr of
           Just memAbsAddr -> AC.crucibleForMCBlocks (rNonceGen bar) (indexCrucibleMCBlocks X86Address) (rBlockInfo bar) (R.concreteFromAbsolute memAbsAddr) blocks
-          Nothing -> error ("Invalid address for function: " ++ show memAddr)
+          Nothing ->
+            SCP.panic "X86 Crucible translation" ["Invalid address for function: " ++ show memAddr
+                                                 ]
   crucibleCFG (AnalysisResult (X86AnalysisResult bar) _) = mcCrucibleCFG x86addr64ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
   symbolicInitializers = mcSymbolicInitializers

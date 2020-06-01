@@ -16,6 +16,7 @@ import qualified Surveyor.Core as C
 
 import           Surveyor.Brick.Attributes ( focusedListAttr )
 import qualified Surveyor.Brick.Extension as SBE
+import qualified Surveyor.Brick.Panic as SBP
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.BlockViewer as BV
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
@@ -51,7 +52,8 @@ handleContextEvent s0 evt =
            , Just PC.Refl <- PC.testEquality archNonce vnonce
            , Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. SBE.blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
+               Nothing ->
+                 SBP.panic "SelectNextInstruction" ["Inconsistent block viewer"]
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectNextInstruction repr cstk
                  B.continue $! C.State s1
@@ -63,7 +65,8 @@ handleContextEvent s0 evt =
            , Just PC.Refl <- PC.testEquality archNonce vnonce
            , Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. SBE.blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
+               Nothing ->
+                 SBP.panic "SelectPreviousInstruction" ["Inconsistent block viewers"]
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectPreviousInstruction repr cstk
                  B.continue $! C.State s1
@@ -75,7 +78,7 @@ handleContextEvent s0 evt =
            , Just PC.Refl <- PC.testEquality archNonce vnonce
            , Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. SBE.blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
+               Nothing -> SBP.panic "SelectNextOperand" ["Inconsistent block viewers"]
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectNextOperand repr cstk
                  B.continue $! C.State s1
@@ -87,7 +90,7 @@ handleContextEvent s0 evt =
            , Just PC.Refl <- PC.testEquality archNonce vnonce
            , Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. SBE.blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
+               Nothing -> SBP.panic "SelectPreviousOperand" ["Inconsistent block viewers"]
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.selectPreviousOperand repr cstk
                  B.continue $! C.State s1
@@ -99,7 +102,7 @@ handleContextEvent s0 evt =
            , Just PC.Refl <- PC.testEquality archNonce vnonce
            , Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce) ->
              case archState ^. SBE.blockViewerG repr of
-               Nothing -> error "Inconsistent block viewers"
+               Nothing -> SBP.panic "ResetInstructionSelection" ["Inconsistent block viewers"]
                Just bv -> BV.withBlockViewerConstraints bv $ do
                  let s1 = s0 & C.lArchState ._Just . C.contextL .~ C.resetBlockSelection cstk
                  B.continue $! C.State s1

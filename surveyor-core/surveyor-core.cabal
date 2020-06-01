@@ -46,6 +46,7 @@ library
                        Surveyor.Core.Logging.Message
                        Surveyor.Core.Mode
                        Surveyor.Core.OperandList
+                       Surveyor.Core.Panic
                        Surveyor.Core.State
                        Surveyor.Core.TranslationCache
   -- other-extensions:    
@@ -56,6 +57,7 @@ library
                        async,
                        exceptions,
                        directory >= 1.3 && < 1.4,
+                       panic >= 0.4 && < 0.5,
                        bytestring,
                        text,
                        fmt >= 0.6 && < 0.7,
