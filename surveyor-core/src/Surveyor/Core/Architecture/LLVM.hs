@@ -441,6 +441,8 @@ prettyLLVMApp a =
     LE.LLVM_PointerIte {} -> "llvm.pointer-ite"
     -- FIXME: Probably need to examine the x86.ExtX86 here
     LE.X86Expr {} -> "llvm.x86-expr"
+    LE.LLVM_SideConditions {} -> "llvm.side-conditions"
+
 
 llvmExtensionExprOperands :: AC.NonceCache s ctx
                           -> NG.NonceGenerator IO s
@@ -472,6 +474,14 @@ llvmExtensionExprOperands cache ng e =
              , AC.toRegisterOperand cache r1
              , AC.toRegisterOperand cache r2
              , AC.toRegisterOperand cache r3
+             ]
+    -- FIXME: Display side conditions somehow
+    --
+    -- There could be a lot of them, so it might need the ability to interactively elaborate terms
+    LE.LLVM_SideConditions tp _conds r -> do
+      n1 <- NG.freshNonce ng
+      return [ AC.CrucibleOperand n1 (AC.TypeRepr tp)
+             , AC.toRegisterOperand cache r
              ]
 
 llvmExtensionStmtOperands :: AC.NonceCache s ctx
