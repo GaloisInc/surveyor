@@ -18,9 +18,12 @@ module Surveyor.Brick.Command (
   showDiagnosticsC,
   minibufferC,
   extraCommands,
+  findBlockC,
+  listFunctionsC,
   mkExtension
   ) where
 
+import qualified Data.Functor.Const as C
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as PN
@@ -59,7 +62,31 @@ extraCommands = [ C.SomeCommand showMacawBlockC
                 , C.SomeCommand showSummaryC
                 , C.SomeCommand showDiagnosticsC
                 , C.SomeCommand minibufferC
+                , C.SomeCommand findBlockC
+                , C.SomeCommand listFunctionsC
                 ]
+
+
+
+listFunctionsC :: forall s st . (C.HasNonce st, st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
+listFunctionsC =
+  C.Command "list-functions" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "List all of the discovered functions"
+    callback :: Callback s st '[]
+    callback = \customEventChan (C.getNonce -> C.SomeNonce nonce) PL.Nil ->
+      C.emitEvent customEventChan (SBE.FindFunctionsContaining nonce Nothing)
+
+findBlockC :: forall s st . (C.HasNonce st, st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[C.AddressType]
+findBlockC =
+  C.Command "find-block" doc names rep callback (const True)
+  where
+    doc = "Find the block(s) containing the given address and list them"
+    names = C.Const "address" PL.:< PL.Nil
+    rep = C.AddressTypeRepr PL.:< PL.Nil
+    callback :: Callback s st '[C.AddressType]
+    callback = \customEventChan _ (C.AddressArgument (C.SomeAddress anonce addr) PL.:< PL.Nil) ->
+      C.emitEvent customEventChan (SBE.FindBlockContaining anonce addr)
 
 showMacawBlockC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showMacawBlockC =

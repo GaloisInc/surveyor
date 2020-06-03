@@ -149,6 +149,10 @@ module Surveyor.Core (
   EA.getEchoAreaText,
   EA.setEchoAreaText,
   EA.resetEchoArea,
+  -- * Handlers
+  HC.handleContextEvent,
+  HI.handleInfoEvent,
+  HL.handleLoggingEvent,
   -- * Keymap
   K.Keymap,
   K.Key(..),
@@ -186,9 +190,11 @@ import qualified Surveyor.Core.Chan as CS
 import qualified Surveyor.Core.Command as CC
 import           Surveyor.Core.Commands
 import qualified Surveyor.Core.Context as CCX
-import qualified Surveyor.Core.SymbolicExecution as SymEx
 import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.Events as CE
+import qualified Surveyor.Core.Handlers.Context as HC
+import qualified Surveyor.Core.Handlers.Info as HI
+import qualified Surveyor.Core.Handlers.Logging as HL
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.Loader as CL
@@ -196,5 +202,5 @@ import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.Mode as M
 import qualified Surveyor.Core.OperandList as OL
 import           Surveyor.Core.State
+import qualified Surveyor.Core.SymbolicExecution as SymEx
 import qualified Surveyor.Core.TranslationCache as TC
-

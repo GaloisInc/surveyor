@@ -163,6 +163,10 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                          : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
                                            | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                                            ]
+                        let archDicts =   MapF.Pair C.BaseRepr C.ArchDict
+                                        : [ MapF.Pair rep C.ArchDict
+                                          | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                                          ]
                         let funcViewerCallback :: forall ir . (C.ArchConstraints ir s) => C.IRRepr arch ir -> C.FunctionHandle arch s -> C.Block ir s -> IO ()
                             funcViewerCallback rep fh b = do
                               C.sEmitEvent s0 (C.PushContext (C.archNonce ares) fh rep b)
@@ -182,6 +186,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                            , C.sUIState = uiState
                                            , C.sContext = C.emptyContextStack
                                            , C.sSymExState = mempty
+                                           , C.sArchDicts = MapF.fromList archDicts
                                            , C.sIRCache = tcache
                                            }
              }

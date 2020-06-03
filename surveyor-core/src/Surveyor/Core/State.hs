@@ -12,6 +12,7 @@ module Surveyor.Core.State (
   ArchState(..),
   AppState(..),
   sEmitEvent,
+  ArchDict(..),
   -- * Logging
   logMessage,
   -- * Lenses
@@ -36,6 +37,8 @@ module Surveyor.Core.State (
   contextL,
   contextG,
   symExStateL,
+  archDictsL,
+  archDictsG,
   irCacheL
   ) where
 
@@ -45,19 +48,21 @@ import qualified Control.Concurrent.Async as CA
 import qualified Control.Lens as L
 import qualified Data.Generics.Product as GL
 import           Data.Kind ( Type )
+import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as NG
 
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Context as CC
-import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.Events as SCE
+import qualified Surveyor.Core.IRRepr as IR
 import           Surveyor.Core.Keymap ( Keymap )
 import           Surveyor.Core.Loader ( AsyncLoader )
 import qualified Surveyor.Core.Logging as SCL
 import           Surveyor.Core.Mode
+import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.TranslationCache as TC
 
 -- | This is a wrapper around the state type suitable for the UI core.  It hides
@@ -190,6 +195,12 @@ lUIExtension = GL.field @"sUIExtension"
 lArchState :: L.Lens' (S e u arch s) (Maybe (ArchState u arch s))
 lArchState = GL.field @"sArchState"
 
+-- | A data type to capture some dictionaries for architectures and IRs
+--
+-- Pattern match on it to bring the captured dictionaries into scope.
+data ArchDict arch s ir where
+  ArchDict :: (A.Architecture arch s, A.IR ir s) => ArchDict arch s ir
+
 -- | A sub-component of the state dependent on the arch type variable
 --
 -- This is split out so that it is easier to see these arch-dependent components
@@ -218,6 +229,13 @@ data ArchState u arch s =
             -- alternative architectures.  We need a cache, as the
             -- translation can be expensive (and we don't want to have to
             -- re-do it for each block we need to access)
+            , sArchDicts :: !(MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
+            -- ^ Captured dictionaries for each IR; given an 'IR.IRRepr', this
+            -- allows the client code to recover some class constraints.
+            --
+            -- It would be nice to just capture these in each 'IR.IRRepr', but
+            -- that would introduce some circular dependencies unless everything
+            -- was defined in the same file.
             , sUIState :: !(u arch s)
             -- ^ The state required for the UI extension
             }
@@ -234,6 +252,12 @@ contextL = GL.field @"sContext"
 
 contextG :: L.Getter (ArchState u arch s) (CC.ContextStack arch s)
 contextG = L.to (L.^. contextL)
+
+archDictsL :: L.Lens' (ArchState u arch s) (MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
+archDictsL = GL.field @"sArchDicts"
+
+archDictsG :: L.Getter (ArchState u arch s) (MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
+archDictsG = L.to (L.^. archDictsL)
 
 symExStateL :: L.Lens' (ArchState u arch s) (SE.SessionState arch s)
 symExStateL = GL.field @"sSymExState"

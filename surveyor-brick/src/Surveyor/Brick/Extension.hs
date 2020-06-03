@@ -62,6 +62,11 @@ data BrickUIEvent s (st :: Type -> Type -> Type) where
   ShowDiagnostics :: BrickUIEvent s st
   OpenMinibuffer :: BrickUIEvent s st
 
+  ListBlocks :: PN.Nonce s arch -> [C.Block arch s] -> BrickUIEvent s st
+  ListFunctions :: PN.Nonce s arch -> [C.FunctionHandle arch s] -> BrickUIEvent s st
+  FindFunctionsContaining :: PN.Nonce s arch -> Maybe (C.Address arch s) -> BrickUIEvent s st
+  FindBlockContaining :: PN.Nonce s arch -> C.Address arch s -> BrickUIEvent s st
+
 instance C.ToEvent s (C.S BrickUIExtension BrickUIState) BrickUIEvent where
   toEvent = C.ExtensionEvent
 

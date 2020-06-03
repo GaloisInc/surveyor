@@ -110,14 +110,10 @@ data ContextEvent s st where
 
 
   -- Function-related events
-  FindFunctionsContaining :: PN.Nonce s arch -> Maybe (A.Address arch s) -> ContextEvent s st
-  ListFunctions :: PN.Nonce s arch -> [A.FunctionHandle arch s] -> ContextEvent s st
   ViewFunction :: PN.Nonce s (arch :: Type) -> IR.IRRepr arch ir -> ContextEvent s st
 
 
   -- Block-related events
-  FindBlockContaining :: PN.Nonce s arch -> A.Address arch s -> ContextEvent s st
-  ListBlocks :: PN.Nonce s arch -> [A.Block arch s] -> ContextEvent s st
   ViewBlock :: PN.Nonce s arch -> IR.IRRepr arch ir -> ContextEvent s st
   ViewInstructionSemantics :: PN.Nonce s arch -> ContextEvent s st
   SelectNextInstruction :: PN.Nonce s (arch :: Type) -> ContextEvent s st

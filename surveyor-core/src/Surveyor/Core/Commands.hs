@@ -7,8 +7,6 @@
 {-# LANGUAGE ViewPatterns #-}
 module Surveyor.Core.Commands (
   exitC,
-  findBlockC,
-  listFunctionsC,
   describeCommandC,
   describeKeysC,
   loadFileC,
@@ -58,8 +56,6 @@ type Callback s st tps = C.Chan (SCE.Events s st)
 allCommands :: (AR.HasNonce st, st ~ CS.S e u) => [C.SomeCommand (AR.SurveyorCommand s st)]
 allCommands =
   [ C.SomeCommand exitC
-  , C.SomeCommand findBlockC
-  , C.SomeCommand listFunctionsC
   , C.SomeCommand describeCommandC
   , C.SomeCommand describeKeysC
   , C.SomeCommand loadFileC
@@ -88,26 +84,6 @@ exitC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.Exit
 
-
-listFunctionsC :: forall s st . (AR.HasNonce st) => Command s st '[]
-listFunctionsC =
-  C.Command "list-functions" doc PL.Nil PL.Nil callback (const True)
-  where
-    doc = "List all of the discovered functions"
-    callback :: Callback s st '[]
-    callback = \customEventChan (AR.getNonce -> AR.SomeNonce nonce) PL.Nil ->
-      SCE.emitEvent customEventChan (SCE.FindFunctionsContaining nonce Nothing)
-
-findBlockC :: forall s st . (AR.HasNonce st) => Command s st '[AR.AddressType]
-findBlockC =
-  C.Command "find-block" doc names rep callback (const True)
-  where
-    doc = "Find the block(s) containing the given address and list them"
-    names = C.Const "address" PL.:< PL.Nil
-    rep = AR.AddressTypeRepr PL.:< PL.Nil
-    callback :: Callback s st '[AR.AddressType]
-    callback = \customEventChan _ (AR.AddressArgument (AR.SomeAddress anonce addr) PL.:< PL.Nil) ->
-      SCE.emitEvent customEventChan (SCE.FindBlockContaining anonce addr)
 
 describeCommandC :: forall s st . Command s st '[AR.CommandType]
 describeCommandC =

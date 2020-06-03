@@ -48,11 +48,8 @@ import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
 import qualified Surveyor.Core as C
 
-import           Surveyor.Brick.Handlers.Context ( handleContextEvent )
 import           Surveyor.Brick.Handlers.Extension ( handleExtensionEvent )
-import           Surveyor.Brick.Handlers.Info ( handleInfoEvent )
 import           Surveyor.Brick.Handlers.Load ( handleLoadEvent )
-import           Surveyor.Brick.Handlers.Logging ( handleLoggingEvent )
 import           Surveyor.Brick.Handlers.SymbolicExecution ( handleSymbolicExecutionEvent )
 
 appHandleEvent :: C.State SBE.BrickUIExtension SBE.BrickUIState s -> B.BrickEvent Names (C.Events s (C.S SBE.BrickUIExtension SBE.BrickUIState)) -> B.EventM Names (B.Next (C.State SBE.BrickUIExtension SBE.BrickUIState s))
@@ -133,9 +130,15 @@ handleCustomEvent s0 evt =
   case evt of
     C.LoadEvent le -> handleLoadEvent s0 le
     C.SymbolicExecutionEvent se -> handleSymbolicExecutionEvent s0 se
-    C.LoggingEvent le -> handleLoggingEvent s0 le
-    C.InfoEvent ie -> handleInfoEvent s0 ie
-    C.ContextEvent ce -> handleContextEvent s0 ce
+    C.LoggingEvent le -> do
+      s1 <- C.handleLoggingEvent s0 le
+      B.continue s1
+    C.InfoEvent ie -> do
+      s1 <- C.handleInfoEvent s0 ie
+      B.continue s1
+    C.ContextEvent ce -> do
+      s1 <- C.handleContextEvent s0 ce
+      B.continue s1
     C.ExtensionEvent ee -> handleExtensionEvent s0 ee
 
     -- We discard async state updates if the type of the state has changed in
