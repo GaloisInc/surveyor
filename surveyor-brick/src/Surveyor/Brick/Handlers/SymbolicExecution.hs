@@ -36,7 +36,7 @@ handleSymbolicExecutionEvent s0 evt =
           let manager = SEM.symbolicExecutionManager (Some newState)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
                       & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
-                      & C.lArchState . _Just . SBE.symbolicExecutionManagerL .~ manager
+                      & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
 
@@ -46,7 +46,7 @@ handleSymbolicExecutionEvent s0 evt =
           symExSt <- liftIO $ C.initializingSymbolicExecution ng symExConfig cfg
           let manager = SEM.symbolicExecutionManager (Some symExSt)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                      & C.lArchState . _Just . SBE.symbolicExecutionManagerL .~ manager
+                      & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
                       & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState symExSt)
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
@@ -59,7 +59,7 @@ handleSymbolicExecutionEvent s0 evt =
           let updateSymExecState _ st =
                 let manager = SEM.symbolicExecutionManager (Some inspectState)
                 in st & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
-                      & C.lArchState . _Just . SBE.symbolicExecutionManagerL .~ manager
+                      & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
                       & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
           -- We pass () as the value of the update state and capture the real
           -- value (the new state) because there isn't an easy way to get an
@@ -68,7 +68,7 @@ handleSymbolicExecutionEvent s0 evt =
           C.writeChan eventChan (C.AsyncStateUpdate archNonce (NF.nf ()) updateSymExecState)
         let manager = SEM.symbolicExecutionManager (Some newState)
         let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                    & C.lArchState . _Just . SBE.symbolicExecutionManagerL .~ manager
+                    & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
                     & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
         B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)

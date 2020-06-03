@@ -91,16 +91,16 @@ handleVtyEvent s0@(C.State s) evt
               B.continue $! C.State s'
       | otherwise -> B.continue s0
     C.SomeUIMode C.BlockSelector
-      | Just bsel <- s ^? C.lArchState . _Just . SBE.blockSelectorL -> do
+      | Just bsel <- s ^? C.lArchState . _Just . C.lUIState . SBE.blockSelectorL -> do
           bsel' <- BS.handleBlockSelectorEvent evt bsel
-          let s' = s & C.lArchState . _Just . SBE.blockSelectorL .~ bsel'
+          let s' = s & C.lArchState . _Just . C.lUIState . SBE.blockSelectorL .~ bsel'
           B.continue $! C.State s'
       | otherwise -> B.continue s0
     C.SomeUIMode (C.BlockViewer _archNonce _rep) -> B.continue s0
     C.SomeUIMode C.FunctionSelector
-      | Just fsel <- s ^? C.lArchState . _Just . SBE.functionSelectorL -> do
+      | Just fsel <- s ^? C.lArchState . _Just . C.lUIState . SBE.functionSelectorL -> do
           fsel' <- FS.handleFunctionSelectorEvent evt fsel
-          let s' = s & C.lArchState . _Just . SBE.functionSelectorL .~ fsel'
+          let s' = s & C.lArchState . _Just . C.lUIState . SBE.functionSelectorL .~ fsel'
           B.continue $! C.State s'
       | otherwise -> B.continue s0
     C.SomeUIMode (C.FunctionViewer fvNonce rep)
@@ -113,10 +113,10 @@ handleVtyEvent s0@(C.State s) evt
           B.continue $! C.State s'
     C.SomeUIMode C.SymbolicExecutionManager
       | Just archState <- s ^. C.lArchState -> do
-          let manager0 = archState ^. SBE.symbolicExecutionManagerL
+          let manager0 = archState ^. C.lUIState . SBE.symbolicExecutionManagerL
           manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
           let st1 = SEM.symbolicExecutionManagerState manager1
-          let s' = s & C.lArchState . _Just . SBE.symbolicExecutionManagerL .~ manager1
+          let s' = s & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager1
                      & C.lArchState . _Just . C.symExStateL %~ (<> viewSome C.singleSessionState st1)
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
