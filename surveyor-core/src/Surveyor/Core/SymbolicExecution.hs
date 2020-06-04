@@ -14,7 +14,7 @@
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.SymbolicExecution (
   -- * Configuration
-  SymbolicExecutionConfig,
+  SymbolicExecutionConfig(..),
   SomeFloatModeRepr(..),
   defaultSymbolicExecutionConfig,
   Solver(..),
@@ -23,6 +23,7 @@ module Surveyor.Core.SymbolicExecution (
   solverInteractionFileL,
   SessionID,
   sessionID,
+  newSessionID,
   symbolicSessionID,
   SessionState,
   singleSessionState,
@@ -33,6 +34,7 @@ module Surveyor.Core.SymbolicExecution (
   SetupArgs,
   Execute,
   Inspect,
+  Suspend,
   SymbolicExecutionState(..),
   symbolicExecutionConfig,
   initialSymbolicExecutionState,
@@ -95,12 +97,13 @@ import           Surveyor.Core.SymbolicExecution.State
 -- Setup of the symbolic execution engine (parameters and globals)
 
 -- | Data kind for the symbolic execution state machine
-data SymExK = Config | SetupArgs | Execute | Inspect
+data SymExK = Config | SetupArgs | Execute | Inspect | Suspend
 
 type Config = 'Config
 type SetupArgs = 'SetupArgs
 type Execute = 'Execute
 type Inspect = 'Inspect
+type Suspend = 'Suspend
 
 data SymbolicExecutionState arch s (k :: SymExK) where
   -- | Holds the current configuration during symbolic execution setup
@@ -109,7 +112,8 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   -- incrementally modified via the UI/messages).  The type of the CFG fixes the
   -- shape of the initial registers.  It also contains initial values for global
   -- variables.
-  Initializing :: SymbolicState arch s solver fm init reg
+  Initializing :: (CB.IsSymInterface sym)
+               => SymbolicState arch s sym init reg
                -> SymbolicExecutionState arch s SetupArgs
   -- | Holds the state of the symbolic execution engine while it is executing.
   -- This includes incremental metrics and output, as well as the means to
@@ -117,14 +121,17 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   Executing :: ExecutionProgress s -> SymbolicExecutionState arch s Execute
   -- | The state after symbolic execution has completed.  This has enough
   -- information to start examining and querying the solver about the result
-  Inspecting :: (sym ~ CBO.OnlineBackend s solver (WEB.Flags fm))
+  Inspecting :: (CB.IsSymInterface sym)
              => CSP.Metrics I.Identity
-             -> SymbolicState arch s solver fm init reg
+             -> SymbolicState arch s sym init reg
              -> CSET.ExecResult (CA.CruciblePersonality arch sym)
                                 sym
                                 (CA.CrucibleExt arch)
                                 (CS.RegEntry sym reg)
              -> SymbolicExecutionState arch s Inspect
+  Suspended :: (CB.IsSymInterface sym)
+            => SymbolicState arch s sym init reg
+            -> SymbolicExecutionState arch s Suspend
 
 instance NFData (SymbolicExecutionState arch s k) where
   rnf s =
@@ -135,6 +142,7 @@ instance NFData (SymbolicExecutionState arch s k) where
         symState `seq` ()
       Executing progress -> progress `deepseq` ()
       Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
+      Suspended symState -> symState `seq` ()
 
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
@@ -208,6 +216,7 @@ symbolicExecutionConfig s =
     Initializing s' -> symbolicConfig s'
     Executing s' -> executionConfig s'
     Inspecting _ s' _ -> symbolicConfig s'
+    Suspended s' -> symbolicConfig s'
 
 symbolicSessionID :: SymbolicExecutionState arch s k -> SessionID s
 symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID
@@ -231,12 +240,7 @@ initializingSymbolicExecution :: forall s arch init reg
                               -> CCC.SomeCFG (CA.CrucibleExt arch) init reg
                               -> IO (SymbolicExecutionState arch s 'SetupArgs)
 initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solver floatRep solverFilePath) scfg@(CCC.SomeCFG cfg) = do
-  withOnlineBackend gen solver floatRep $ \_proxy sym -> do
-    sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
-    let interactionFilePath = T.strip solverFilePath
-    unless (T.null interactionFilePath) $ do
-      _ <- WC.setOption sifSetting (WCC.ConcreteString (WUS.UnicodeLiteral interactionFilePath))
-      return ()
+  withOnlineBackend gen solver floatRep solverFilePath $ \_proxy sym -> do
     regs <- FC.traverseFC (allocateSymbolicEntry (Proxy @(arch, s)) sym) (CCC.cfgArgTypes cfg)
     -- FIXME: We don't really have a good way to enumerate all of the
     -- possibly-needed globals in a CFG... for some backends we can do it...
@@ -263,10 +267,10 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solve
 -- The IO callback is necessary so that this code does not need to know the
 -- concrete state type (and therefore avoid import cycles).  The caller should
 -- provide a callback that just does an async state update.
-startSymbolicExecution :: (CA.Architecture arch s)
+startSymbolicExecution :: (CA.Architecture arch s, CB.IsSymInterface sym)
                        => SCC.Chan (SCE.Events s st)
                        -> CA.AnalysisResult arch s
-                       -> SymbolicState arch s solver fm init reg
+                       -> SymbolicState arch s sym init reg
                        -> IO ( SymbolicExecutionState arch s Execute
                              , IO (SymbolicExecutionState arch s Inspect)
                              )
@@ -397,6 +401,7 @@ cleanupSymbolicExecutionState s =
     Initializing {} -> return ()
     Executing {} -> return ()
     Inspecting {} -> return ()
+    Suspended {} -> return ()
 
 solverFeatures :: Solver -> WPF.ProblemFeatures
 solverFeatures s =
@@ -411,10 +416,12 @@ withOnlineBackend :: forall fm s a
                   => PN.NonceGenerator IO s
                   -> Solver
                   -> WEB.FloatModeRepr fm
+                  -> T.Text
                   -> (forall proxy solver sym . (sym ~ CBO.OnlineBackend s solver (WEB.Flags fm), WPO.OnlineSolver s solver, CB.IsSymInterface sym) => proxy solver -> sym -> IO a)
                   -> IO a
-withOnlineBackend gen solver floatRep k = do
+withOnlineBackend gen solver floatRep solverFilePath k = do
   let features = solverFeatures solver
+  let interactionFilePath = T.strip solverFilePath
   case solver of
     CVC4 -> do
       st <- CBO.initialOnlineBackendState gen features
@@ -422,6 +429,12 @@ withOnlineBackend gen solver floatRep k = do
       let proxy = Proxy @(SMT2.Writer WSC.CVC4)
       WC.extendConfig WSC.cvc4Options (WI.getConfiguration sym)
       WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
+
+      sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
+      unless (T.null interactionFilePath) $ do
+        _ <- WC.setOption sifSetting (WCC.ConcreteString (WUS.UnicodeLiteral interactionFilePath))
+        return ()
+
       k proxy sym
     Yices -> do
       st <- CBO.initialOnlineBackendState gen features
@@ -429,6 +442,12 @@ withOnlineBackend gen solver floatRep k = do
       let proxy = Proxy @(WSY.Connection s)
       WC.extendConfig WSY.yicesOptions (WI.getConfiguration sym)
       WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
+
+      sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
+      unless (T.null interactionFilePath) $ do
+        _ <- WC.setOption sifSetting (WCC.ConcreteString (WUS.UnicodeLiteral interactionFilePath))
+        return ()
+
       k proxy sym
     Z3 -> do
       st <- CBO.initialOnlineBackendState gen features
@@ -436,4 +455,10 @@ withOnlineBackend gen solver floatRep k = do
       let proxy = Proxy @(SMT2.Writer WSZ.Z3)
       WC.extendConfig WSZ.z3Options (WI.getConfiguration sym)
       WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
+
+      sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
+      unless (T.null interactionFilePath) $ do
+        _ <- WC.setOption sifSetting (WCC.ConcreteString (WUS.UnicodeLiteral interactionFilePath))
+        return ()
+
       k proxy sym

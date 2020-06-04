@@ -1,11 +1,17 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
-module Surveyor.Brick ( surveyor ) where
+module Surveyor.Brick (
+  surveyor,
+  DebuggerConfig(..),
+  debuggerFeature
+  ) where
 
 import qualified Brick as B
 import qualified Brick.BChan as B
@@ -14,10 +20,14 @@ import qualified Brick.Markup as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.Lens ( (^.) )
+import qualified Control.Lens as L
 import qualified Data.Foldable as F
 import           Data.Maybe ( fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
+import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..) )
+import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
@@ -27,8 +37,17 @@ import           Fmt ( (+|), (||+) )
 import qualified Fmt as Fmt
 import qualified Graphics.Vty as V
 
+import qualified Lang.Crucible.Backend as LCB
+import qualified Lang.Crucible.CFG.Extension as LCCE
+import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.Simulator.EvalStmt as LCS
+import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
+import qualified What4.Expr.Builder as WEB
+
+
 import           Surveyor.Brick.Attributes
 import qualified Surveyor.Brick.Command as SBC
+import qualified Surveyor.Brick.Extension as SBE
 import qualified Surveyor.Brick.Handlers as BH
 import qualified Surveyor.Brick.Keymap as SBK
 import           Surveyor.Brick.Names ( Names(..) )
@@ -222,20 +241,27 @@ surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   customEventChan <- B.newBChan 100
   let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
+  mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
+  s0 <- emptyState mExePath mloader ng chan
+  let sconf = DebuggerConfig (Proxy @Void) (Proxy @()) (error "Void loader")
+  surveyorWith sconf customEventChan s0
+
+surveyorWith :: DebuggerConfig s ext arch
+             -> B.BChan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
+             -> C.S BH.BrickUIExtension BH.BrickUIState arch s
+             -> IO ()
+surveyorWith (DebuggerConfig {}) chan s0 = do
   let app = B.App { B.appDraw = appDraw
                   , B.appChooseCursor = appChooseCursor
                   , B.appHandleEvent = BH.appHandleEvent
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
-  s0 <- emptyState mExePath mloader ng chan
   let initialState = C.State s0
   let mkVty = V.mkVty V.defaultConfig
   initialVty <- mkVty
-  _finalState <- B.customMain initialVty mkVty (Just customEventChan) app initialState
+  _finalState <- B.customMain initialVty mkVty (Just chan) app initialState
   return ()
-
 
 emptyState :: Maybe FilePath
            -> Maybe C.AsyncLoader
@@ -265,3 +291,157 @@ emptyState mfp mloader ng customEventChan = do
              , C.sArchState = Nothing
              , C.sArchNonce = n0
              }
+
+stateFromContext :: forall arch s p sym ext rtp f a
+                  . (C.Architecture arch s, LCB.IsSymInterface sym)
+                 => PN.NonceGenerator IO s
+                 -> (PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s))
+                 -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
+                 -> LCSET.SimState p sym ext rtp f a
+                 -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
+stateFromContext ng mkAnalysisResult chan simState = do
+  let simCtx = simState ^. LCSET.stateContext
+  let halloc = simCtx ^. L.to LCSET.simHandleAllocator
+  let addrParser _s = Nothing
+  n0 <- PN.freshNonce ng
+  ares <- mkAnalysisResult ng n0 halloc
+  let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
+  let dicts = MapF.Pair C.BaseRepr C.ArchDict
+            : [ MapF.Pair rep C.ArchDict
+              | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+              ]
+  tc0 <- C.newTranslationCache
+  ses <- C.defaultSymbolicExecutionConfig ng
+  let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
+                     : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
+                       | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                       ]
+  let funcViewerCallback :: forall ir . (C.ArchConstraints ir s) => C.IRRepr arch ir -> C.FunctionHandle arch s -> C.Block ir s -> IO ()
+      funcViewerCallback rep fh b = do
+        C.emitEvent chan (C.PushContext (C.archNonce ares) fh rep b)
+        C.emitEvent chan (C.ViewBlock (C.archNonce ares) rep)
+  let funcViewers = (MapF.Pair C.BaseRepr (FV.functionViewer (funcViewerCallback C.BaseRepr) FunctionCFGViewer C.BaseRepr))
+                    : [ MapF.Pair rep (FV.functionViewer (funcViewerCallback rep) FunctionCFGViewer rep)
+                      | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                      ]
+  let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
+                                 , SBE.sBlockViewers = MapF.fromList blockViewers
+                                 , SBE.sFunctionViewer = MapF.fromList funcViewers
+                                 , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                 , SBE.sSymbolicExecutionManager =
+                                   SEM.symbolicExecutionManager (Some (C.Configuring ses))
+                                 }
+  sesID <- C.newSessionID ng
+  -- FIXME: Change this to a better ADT that reflects that we don't have this
+  -- config (we inherit it from the existing session)
+  let symCfg = C.SymbolicExecutionConfig sesID undefined WEB.FloatRealRepr undefined
+  let symSt = C.SymbolicState { C.symbolicConfig = symCfg
+                              , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
+                              , C.withSymConstraints = \a -> a
+                              -- FIXME: We should be able to pull these out of the 'ActiveTree' in simState
+                              , C.someCFG = undefined
+                              , C.symbolicRegs = undefined
+                              , C.symbolicGlobals = undefined
+                              }
+  let archState = C.ArchState { C.sAnalysisResult = ares
+                              -- FIXME: Pick a context based on the stack in the simulator
+                              , C.sContext = C.emptyContextStack
+                              -- FIXME: Construct a session for this with whatever we can pull out of simState
+                              , C.sSymExState = C.singleSessionState (C.Suspended symSt)
+                              , C.sIRCache = tc0
+                              , C.sArchDicts = MapF.fromList dicts
+                              , C.sUIState = uiState
+                              }
+  return C.S { C.sInputFile = Nothing
+             , C.sLoader = Nothing
+             , C.sLogStore = mempty
+             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState chan
+                                                , C.sFileLogger = Nothing
+                                                }
+             , C.sDiagnosticLevel = C.Debug
+             , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
+             , C.sAppState = C.Ready
+             , C.sNonceGenerator = ng
+             , C.sKeymap = SBK.defaultKeymap
+             , C.sArchNonce = n0
+             , C.sEventChannel = chan
+             , C.sUIExtension = uiExt
+             , C.sArchState = Just archState
+              -- FIXME: choose the most appropriate view given the crucible state?
+               --
+               -- If we have a SimState, show the symbolic execution suspended state viewer
+               --
+               -- Otherwise, show the term inspector
+             , C.sUIMode = C.SomeUIMode C.Diags
+             }
+
+
+
+-- | This crucible 'LCS.ExecutionFeature' captures the simulator state at a
+-- breakpoint and starts up Surveyor(-Brick) to interactively inspect it.
+--
+-- For now, it simply returns execution to Crucible with no modifications after
+-- Surveyor exits.  It could be extended in the future to persist state
+-- modifications.
+debuggerFeature :: forall ext sym p rtp arch
+                 . (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
+                => DebuggerConfig PN.GlobalNonceGenerator ext arch
+                -> LCS.ExecutionFeature p sym ext rtp
+debuggerFeature args = LCS.ExecutionFeature (debugger args)
+
+data DebuggerConfig s ext arch =
+  (C.Architecture arch s, ext ~ C.CrucibleExt arch) =>
+  DebuggerConfig { _debuggerArchProxy :: Proxy arch
+                 , _debuggerExtProxy :: Proxy ext
+                 , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
+                 }
+
+debugger :: (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
+         => DebuggerConfig PN.GlobalNonceGenerator ext arch
+         -> LCSET.ExecState p sym ext rtp
+         -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
+debugger args@(DebuggerConfig {}) execSt =
+  case execSt of
+    LCSET.ResultState eres ->
+      -- Surveyor can't really do much if the execution has already finished
+      --
+      -- We could provide a way to inspect the resulting term, but I think we'll
+      -- run into trouble with a lack of access to the 'sym'
+      case eres of
+        LCSET.FinishedResult simCtx _pres -> surveyorContext args simCtx
+        LCSET.AbortedResult simCtx _ares -> surveyorContext args simCtx
+        LCSET.TimeoutResult es -> debugger args es
+    LCSET.AbortState _rsn simState -> surveyorState args simState
+    LCSET.UnwindCallState _v _ares simState -> surveyorState args simState
+    LCSET.CallState _retHdlr _resolvedCall simState -> surveyorState args simState
+    LCSET.TailCallState _val _resolvedCall simState -> surveyorState args simState
+    LCSET.ReturnState _fn _val _retVal simState -> surveyorState args simState
+    LCSET.RunningState _running simState -> surveyorState args simState
+    LCSET.SymbolicBranchState _p _t _f _bt simState -> surveyorState args simState
+    LCSET.ControlTransferState _cr simState -> surveyorState args simState
+    LCSET.OverrideState _o simState -> surveyorState args simState
+    LCSET.BranchMergeState _bt simState -> surveyorState args simState
+    LCSET.InitialState simCtx _globState _hdlr _rtp _econt ->
+      surveyorContext args simCtx
+
+-- | Initialize surveyor to navigate a context, which is basically information
+-- about an inactive execution (e.g., looking at a result or terminated execution)
+--
+-- This has more limited functionality
+surveyorContext :: DebuggerConfig PN.GlobalNonceGenerator ext arch
+                -> LCSET.SimContext p sym ext
+                -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
+surveyorContext = undefined
+
+
+-- | Initialize Surveyor to navigate an active symbolic execution state
+surveyorState :: (C.Architecture arch PN.GlobalNonceGenerator, LCB.IsSymInterface sym)
+              => DebuggerConfig PN.GlobalNonceGenerator ext arch
+              -> LCSET.SimState p sym ext rtp f a
+              -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
+surveyorState args simCtx = do
+  customEventChan <- B.newBChan 100
+  let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
+  s0 <- stateFromContext PN.globalNonceGenerator (debuggerCon args) chan simCtx
+  surveyorWith args customEventChan s0
+  return LCS.ExecutionFeatureNoChange
