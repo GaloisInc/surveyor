@@ -38,8 +38,10 @@ import qualified Fmt as Fmt
 import qualified Graphics.Vty as V
 
 import qualified Lang.Crucible.Backend as LCB
+import qualified Lang.Crucible.CFG.Core as LCCC
 import qualified Lang.Crucible.CFG.Extension as LCCE
 import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.EvalStmt as LCS
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified What4.Expr.Builder as WEB
@@ -293,87 +295,98 @@ emptyState mfp mloader ng customEventChan = do
              }
 
 stateFromContext :: forall arch s p sym ext rtp f a
-                  . (C.Architecture arch s, LCB.IsSymInterface sym)
+                  . (C.Architecture arch s, LCB.IsSymInterface sym, ext ~ C.CrucibleExt arch)
                  => PN.NonceGenerator IO s
                  -> (PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s))
                  -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
                  -> LCSET.SimState p sym ext rtp f a
                  -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
 stateFromContext ng mkAnalysisResult chan simState = do
-  let simCtx = simState ^. LCSET.stateContext
-  let halloc = simCtx ^. L.to LCSET.simHandleAllocator
-  let addrParser _s = Nothing
-  n0 <- PN.freshNonce ng
-  ares <- mkAnalysisResult ng n0 halloc
-  let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
-  let dicts = MapF.Pair C.BaseRepr C.ArchDict
-            : [ MapF.Pair rep C.ArchDict
-              | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
-              ]
-  tc0 <- C.newTranslationCache
-  ses <- C.defaultSymbolicExecutionConfig ng
-  let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
-                     : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
-                       | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
-                       ]
-  let funcViewerCallback :: forall ir . (C.ArchConstraints ir s) => C.IRRepr arch ir -> C.FunctionHandle arch s -> C.Block ir s -> IO ()
-      funcViewerCallback rep fh b = do
-        C.emitEvent chan (C.PushContext (C.archNonce ares) fh rep b)
-        C.emitEvent chan (C.ViewBlock (C.archNonce ares) rep)
-  let funcViewers = (MapF.Pair C.BaseRepr (FV.functionViewer (funcViewerCallback C.BaseRepr) FunctionCFGViewer C.BaseRepr))
-                    : [ MapF.Pair rep (FV.functionViewer (funcViewerCallback rep) FunctionCFGViewer rep)
-                      | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
-                      ]
-  let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
-                                 , SBE.sBlockViewers = MapF.fromList blockViewers
-                                 , SBE.sFunctionViewer = MapF.fromList funcViewers
-                                 , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                 , SBE.sSymbolicExecutionManager =
-                                   SEM.symbolicExecutionManager (Some (C.Configuring ses))
-                                 }
-  sesID <- C.newSessionID ng
-  -- FIXME: Change this to a better ADT that reflects that we don't have this
-  -- config (we inherit it from the existing session)
-  let symCfg = C.SymbolicExecutionConfig sesID undefined WEB.FloatRealRepr undefined
-  let symSt = C.SymbolicState { C.symbolicConfig = symCfg
-                              , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
-                              , C.withSymConstraints = \a -> a
-                              -- FIXME: We should be able to pull these out of the 'ActiveTree' in simState
-                              , C.someCFG = undefined
-                              , C.symbolicRegs = undefined
-                              , C.symbolicGlobals = undefined
-                              }
-  let archState = C.ArchState { C.sAnalysisResult = ares
-                              -- FIXME: Pick a context based on the stack in the simulator
-                              , C.sContext = C.emptyContextStack
-                              -- FIXME: Construct a session for this with whatever we can pull out of simState
-                              , C.sSymExState = C.singleSessionState (C.Suspended symSt)
-                              , C.sIRCache = tc0
-                              , C.sArchDicts = MapF.fromList dicts
-                              , C.sUIState = uiState
-                              }
-  return C.S { C.sInputFile = Nothing
-             , C.sLoader = Nothing
-             , C.sLogStore = mempty
-             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState chan
-                                                , C.sFileLogger = Nothing
-                                                }
-             , C.sDiagnosticLevel = C.Debug
-             , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
-             , C.sAppState = C.Ready
-             , C.sNonceGenerator = ng
-             , C.sKeymap = SBK.defaultKeymap
-             , C.sArchNonce = n0
-             , C.sEventChannel = chan
-             , C.sUIExtension = uiExt
-             , C.sArchState = Just archState
-              -- FIXME: choose the most appropriate view given the crucible state?
-               --
-               -- If we have a SimState, show the symbolic execution suspended state viewer
-               --
-               -- Otherwise, show the term inspector
-             , C.sUIMode = C.SomeUIMode C.Diags
-             }
+  let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
+  case topFrame ^. LCSET.gpValue of
+    LCSC.RF {} -> error "Unexpected return value"
+    LCSC.OF {} -> error "Unexpected override frame"
+    LCSC.MF LCSC.CallFrame { LCSC._frameCFG = fcfg
+                           } -> do
+      let simCtx = simState ^. LCSET.stateContext
+      let halloc = simCtx ^. L.to LCSET.simHandleAllocator
+      let addrParser _s = Nothing
+      n0 <- PN.freshNonce ng
+      ares <- mkAnalysisResult ng n0 halloc
+      let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
+      let dicts = MapF.Pair C.BaseRepr C.ArchDict
+                : [ MapF.Pair rep C.ArchDict
+                  | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                  ]
+      tc0 <- C.newTranslationCache
+      ses <- C.defaultSymbolicExecutionConfig ng
+      let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
+                         : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
+                           | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                           ]
+      let funcViewerCallback :: forall ir . (C.ArchConstraints ir s) => C.IRRepr arch ir -> C.FunctionHandle arch s -> C.Block ir s -> IO ()
+          funcViewerCallback rep fh b = do
+            C.emitEvent chan (C.PushContext (C.archNonce ares) fh rep b)
+            C.emitEvent chan (C.ViewBlock (C.archNonce ares) rep)
+      let funcViewers = (MapF.Pair C.BaseRepr (FV.functionViewer (funcViewerCallback C.BaseRepr) FunctionCFGViewer C.BaseRepr))
+                        : [ MapF.Pair rep (FV.functionViewer (funcViewerCallback rep) FunctionCFGViewer rep)
+                          | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                          ]
+      let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
+                                     , SBE.sBlockViewers = MapF.fromList blockViewers
+                                     , SBE.sFunctionViewer = MapF.fromList funcViewers
+                                     , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                     , SBE.sSymbolicExecutionManager =
+                                       SEM.symbolicExecutionManager (Some (C.Configuring ses))
+                                     }
+      sesID <- C.newSessionID ng
+      -- FIXME: Change this to a better ADT that reflects that we don't have this
+      -- config (we inherit it from the existing session)
+      let symCfg = C.SymbolicExecutionConfig sesID undefined WEB.FloatRealRepr undefined
+
+      let symSt = C.SymbolicState { C.symbolicConfig = symCfg
+                                  , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
+                                  , C.withSymConstraints = \a -> a
+                                  , C.someCFG = LCCC.SomeCFG fcfg
+                                  , C.symbolicGlobals = topFrame ^. LCSET.gpGlobals
+                                  -- FIXME: We can't actually get these since
+                                  -- they are lost to the ether at this point
+                                  --
+                                  -- Need to refactor so that they aren't part
+                                  -- of this state
+                                  , C.symbolicRegs = error "Initial symbolic regs"
+                                  }
+      let archState = C.ArchState { C.sAnalysisResult = ares
+                                  -- FIXME: Pick a context based on the stack in the simulator
+                                  , C.sContext = C.emptyContextStack
+                                  -- FIXME: Construct a session for this with whatever we can pull out of simState
+                                  , C.sSymExState = C.singleSessionState (C.Suspended symSt)
+                                  , C.sIRCache = tc0
+                                  , C.sArchDicts = MapF.fromList dicts
+                                  , C.sUIState = uiState
+                                  }
+      return C.S { C.sInputFile = Nothing
+                 , C.sLoader = Nothing
+                 , C.sLogStore = mempty
+                 , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState chan
+                                                    , C.sFileLogger = Nothing
+                                                    }
+                 , C.sDiagnosticLevel = C.Debug
+                 , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
+                 , C.sAppState = C.Ready
+                 , C.sNonceGenerator = ng
+                 , C.sKeymap = SBK.defaultKeymap
+                 , C.sArchNonce = n0
+                 , C.sEventChannel = chan
+                 , C.sUIExtension = uiExt
+                 , C.sArchState = Just archState
+                  -- FIXME: choose the most appropriate view given the crucible state?
+                   --
+                   -- If we have a SimState, show the symbolic execution suspended state viewer
+                   --
+                   -- Otherwise, show the term inspector
+                 , C.sUIMode = C.SomeUIMode C.Diags
+                 }
 
 
 
@@ -406,8 +419,8 @@ classifyBreakpoint rc =
   case rc of
     LCSET.CrucibleCall {} -> Nothing
     LCSET.OverrideCall o _fr
-      | LCSET.overrideName o == "crux_breakpoint" -> Just UnconditionalBreakpoint
-      | LCSET.overrideName o == "crux_breakpoint_if" -> Just ConditionalBreakpoint
+      | LCSET.overrideName o == "crucible_breakpoint" -> Just UnconditionalBreakpoint
+      | LCSET.overrideName o == "crucible_breakpoint_if" -> Just ConditionalBreakpoint
       | otherwise -> Nothing
 
 debugger :: (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
@@ -429,7 +442,7 @@ surveyorState :: (C.Architecture arch PN.GlobalNonceGenerator, LCB.IsSymInterfac
               => DebuggerConfig PN.GlobalNonceGenerator ext arch
               -> LCSET.SimState p sym ext rtp f a
               -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-surveyorState args simCtx = do
+surveyorState args@(DebuggerConfig {}) simCtx = do
   customEventChan <- B.newBChan 100
   let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
   s0 <- stateFromContext PN.globalNonceGenerator (debuggerCon args) chan simCtx

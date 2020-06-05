@@ -1,0 +1,48 @@
+cabal-version:       >=1.10
+name:                crux-dbg
+version:             0.1.0.0
+synopsis:            A static verifier and symbolic debugger
+description:         This tool is a static assertion checker, like crux-llvm, but supports some additional primitives
+                     for interactive debugging (e.g., breakpoints).  When a breakpoint is triggered, it brings up an
+                     interactive UI for state exploration.
+-- bug-reports:
+license:             BSD3
+license-file:        LICENSE
+author:              Tristan Ravitch
+maintainer:          tristan@galois.com
+-- copyright:
+category:            Verification
+build-type:          Simple
+extra-source-files:  CHANGELOG.md
+
+library
+  exposed-modules:     Crux.Debug.Config
+                       Crux.Debug.LLVM
+  build-depends:       base >=4.10 && <5,
+                       containers,
+                       text,
+                       exceptions,
+                       lens,
+                       parameterized-utils,
+                       llvm-pretty,
+                       llvm-pretty-bc-parser,
+                       crucible,
+                       crucible-llvm,
+                       crux,
+                       crux-llvm,
+                       surveyor-core,
+                       surveyor-brick
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+  ghc-options:         -Wall -Wcompat
+
+executable crux-dbg
+  main-is:             Main.hs
+  build-depends:       base >=4.10 && <5,
+                       filepath,
+                       surveyor-brick,
+                       crux,
+                       crux-dbg
+  hs-source-dirs:      tools/crux-dbg
+  default-language:    Haskell2010
+  ghc-options:         -Wall -Wcompat -rtsopts -threaded "-with-rtsopts=-I0"

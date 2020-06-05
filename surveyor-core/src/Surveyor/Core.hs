@@ -39,6 +39,9 @@ module Surveyor.Core (
   CA.prettyParameterizedFormula,
   CA.SomeResult(..),
   CA.CruciblePersonality,
+  CA.LLVM,
+  CA.mkLLVMResult,
+  CA.llvmAnalysisResultFromModule,
   -- ** Operand lists
   OL.OperandList,
   OL.OperandListItem(..),

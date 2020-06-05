@@ -31,6 +31,8 @@ module Surveyor.Core.Architecture (
   MC.mkX86Result,
   J.mkInitialJVMResult,
   J.extendJVMResult,
+  LL.LLVM,
+  LL.llvmAnalysisResultFromModule,
   LL.mkLLVMResult,
   M.Macaw,
   ) where
