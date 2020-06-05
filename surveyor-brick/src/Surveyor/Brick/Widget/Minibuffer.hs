@@ -44,7 +44,13 @@ completeArgument cmds =
 
 completeFilename :: (Z.GenericTextZipper a) => a -> IO [FilePath]
 completeFilename t =
-  G.glob (L.intercalate "*" (words (Z.toList t)))
+  let inputGlob = L.intercalate "*" (words (Z.toList t))
+   in G.glob $
+      if L.null inputGlob
+        then "*"
+        else if L.last inputGlob /= '*'
+               then inputGlob ++ "*"
+               else inputGlob
 
 minibuffer :: (Z.GenericTextZipper t)
            => (String -> Maybe (C.SomeAddress s))
