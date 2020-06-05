@@ -396,43 +396,33 @@ data DebuggerConfig s ext arch =
                  , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
                  }
 
+data BreakpointType = UnconditionalBreakpoint | ConditionalBreakpoint
+
+-- | Classify a call as a known breakpoint (or not)
+--
+-- All of our breakpoints are overrides with distinguished names
+classifyBreakpoint :: LCSET.ResolvedCall p sym ext ret -> Maybe BreakpointType
+classifyBreakpoint rc =
+  case rc of
+    LCSET.CrucibleCall {} -> Nothing
+    LCSET.OverrideCall o _fr
+      | LCSET.overrideName o == "crux_breakpoint" -> Just UnconditionalBreakpoint
+      | LCSET.overrideName o == "crux_breakpoint_if" -> Just ConditionalBreakpoint
+      | otherwise -> Nothing
+
 debugger :: (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
          => DebuggerConfig PN.GlobalNonceGenerator ext arch
          -> LCSET.ExecState p sym ext rtp
          -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
 debugger args@(DebuggerConfig {}) execSt =
   case execSt of
-    LCSET.ResultState eres ->
-      -- Surveyor can't really do much if the execution has already finished
-      --
-      -- We could provide a way to inspect the resulting term, but I think we'll
-      -- run into trouble with a lack of access to the 'sym'
-      case eres of
-        LCSET.FinishedResult simCtx _pres -> surveyorContext args simCtx
-        LCSET.AbortedResult simCtx _ares -> surveyorContext args simCtx
-        LCSET.TimeoutResult es -> debugger args es
-    LCSET.AbortState _rsn simState -> surveyorState args simState
-    LCSET.UnwindCallState _v _ares simState -> surveyorState args simState
-    LCSET.CallState _retHdlr _resolvedCall simState -> surveyorState args simState
-    LCSET.TailCallState _val _resolvedCall simState -> surveyorState args simState
-    LCSET.ReturnState _fn _val _retVal simState -> surveyorState args simState
-    LCSET.RunningState _running simState -> surveyorState args simState
-    LCSET.SymbolicBranchState _p _t _f _bt simState -> surveyorState args simState
-    LCSET.ControlTransferState _cr simState -> surveyorState args simState
-    LCSET.OverrideState _o simState -> surveyorState args simState
-    LCSET.BranchMergeState _bt simState -> surveyorState args simState
-    LCSET.InitialState simCtx _globState _hdlr _rtp _econt ->
-      surveyorContext args simCtx
-
--- | Initialize surveyor to navigate a context, which is basically information
--- about an inactive execution (e.g., looking at a result or terminated execution)
---
--- This has more limited functionality
-surveyorContext :: DebuggerConfig PN.GlobalNonceGenerator ext arch
-                -> LCSET.SimContext p sym ext
-                -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-surveyorContext = undefined
-
+    LCSET.CallState _retHdlr resolvedCall simState
+      | Just UnconditionalBreakpoint <- classifyBreakpoint resolvedCall ->
+        surveyorState args simState
+    LCSET.TailCallState _v resolvedCall simState
+      | Just UnconditionalBreakpoint <- classifyBreakpoint resolvedCall->
+        surveyorState args simState
+    _ -> return LCS.ExecutionFeatureNoChange
 
 -- | Initialize Surveyor to navigate an active symbolic execution state
 surveyorState :: (C.Architecture arch PN.GlobalNonceGenerator, LCB.IsSymInterface sym)
