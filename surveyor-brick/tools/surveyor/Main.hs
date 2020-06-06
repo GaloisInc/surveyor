@@ -4,7 +4,7 @@ import           Data.Monoid
 import qualified Options.Applicative as O
 import           Prelude
 
-import           Surveyor.Brick
+import qualified Surveyor.Brick as SB
 
 data Options =
   Options { oInputFile :: Maybe FilePath
@@ -26,4 +26,4 @@ main = O.execParser opts >>= mainWith
                          ]
 
 mainWith :: Options -> IO ()
-mainWith opts = surveyor (oInputFile opts)
+mainWith opts = SB.surveyor (oInputFile opts)

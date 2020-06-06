@@ -12,7 +12,11 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-module Surveyor.Core.Architecture.LLVM ( mkLLVMResult ) where
+module Surveyor.Core.Architecture.LLVM (
+  LLVM,
+  llvmAnalysisResultFromModule,
+  mkLLVMResult
+  ) where
 
 import           Control.DeepSeq ( NFData, rnf )
 import qualified Control.Exception as X
@@ -162,6 +166,22 @@ blockPosition ltc bb0 =
     lookupMetadata :: (?lc :: LTC.TypeContext) => Int -> Maybe LL.ValMd
     lookupMetadata x = L.view (L.at x) (LTC.llvmMetadataMap ?lc)
 
+llvmAnalysisResultFromModule :: NG.NonceGenerator IO s
+                             -> NG.Nonce s LLVM
+                             -> CFH.HandleAllocator
+                             -> LL.Module
+                             -> Some LT.ModuleTranslation
+                             -> SomeResult s LLVM
+llvmAnalysisResultFromModule ng nonce hdlAlloc m sm =
+  SomeResult (AnalysisResult (LLVMAnalysisResult lr) (indexResult lr))
+  where
+    lr = LLVMResult { llvmNonce = nonce
+                    , llvmModule = m
+                    , llvmFunctionIndex = indexFunctions m
+                    , llvmHdlAlloc = hdlAlloc
+                    , llvmCrucibleTranslation = sm
+                    , llvmNonceGen = ng
+                    }
 
 mkLLVMResult :: NG.NonceGenerator IO s
              -> NG.Nonce s LLVM
@@ -171,14 +191,7 @@ mkLLVMResult :: NG.NonceGenerator IO s
 mkLLVMResult ng nonce hdlAlloc m = do
   let ?laxArith = True
   ct <- LT.translateModule hdlAlloc m
-  let lr = LLVMResult { llvmNonce = nonce
-                      , llvmModule = m
-                      , llvmFunctionIndex = indexFunctions m
-                      , llvmHdlAlloc = hdlAlloc
-                      , llvmCrucibleTranslation = ct
-                      , llvmNonceGen = ng
-                      }
-  return (SomeResult (AnalysisResult (LLVMAnalysisResult lr) (indexResult lr)))
+  return (llvmAnalysisResultFromModule ng nonce hdlAlloc m ct)
 
 indexResult :: LLVMResult s -> O.Once (ResultIndex LLVM s)
 indexResult lr = O.once idx

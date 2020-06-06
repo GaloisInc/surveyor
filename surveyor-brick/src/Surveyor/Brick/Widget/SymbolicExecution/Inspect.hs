@@ -12,11 +12,10 @@ import qualified Brick as B
 import           Control.Lens ( (^.) )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
-import qualified Lang.Crucible.Backend.Online as CBO
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Simulator as CS
 import qualified Lang.Crucible.Simulator.ExecutionTree as CSET
 import qualified Lang.Crucible.Simulator.RegMap as MCR
-import qualified What4.Expr as WEB
 import qualified What4.Interface as WI
 
 import           Surveyor.Brick.Names ( Names(..) )
@@ -39,7 +38,7 @@ renderSymbolicExecutionInspector st =
              , renderExecResult (Proxy @arch) execResult
              ]
 
-renderExecResult :: (sym ~ CBO.OnlineBackend s solver (WEB.Flags fm))
+renderExecResult :: (CB.IsSymInterface sym)
                  => proxy arch
                  -> CSET.ExecResult (C.CruciblePersonality arch sym) sym (C.CrucibleExt arch) (CS.RegEntry sym reg)
                  -> B.Widget Names

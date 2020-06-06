@@ -1,11 +1,18 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
-module Surveyor.Brick ( surveyor ) where
+module Surveyor.Brick (
+  surveyor,
+  DebuggerConfig(..),
+  debuggerFeature
+  ) where
 
 import qualified Brick as B
 import qualified Brick.BChan as B
@@ -14,10 +21,16 @@ import qualified Brick.Markup as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.Lens ( (^.) )
+import qualified Control.Lens as L
+import           Control.Monad ( join )
 import qualified Data.Foldable as F
-import           Data.Maybe ( fromMaybe, mapMaybe )
-import           Data.Parameterized.Classes
+import           Data.Maybe ( fromMaybe, mapMaybe, isJust )
+import qualified Data.Parameterized.Classes as PC
+import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..) )
+import           Data.Proxy ( Proxy(..) )
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
@@ -27,8 +40,19 @@ import           Fmt ( (+|), (||+) )
 import qualified Fmt as Fmt
 import qualified Graphics.Vty as V
 
+import qualified Lang.Crucible.Backend as LCB
+import qualified Lang.Crucible.CFG.Core as LCCC
+import qualified Lang.Crucible.CFG.Extension as LCCE
+import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.Simulator.CallFrame as LCSC
+import qualified Lang.Crucible.Simulator.EvalStmt as LCS
+import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
+import qualified What4.Expr.Builder as WEB
+
+
 import           Surveyor.Brick.Attributes
 import qualified Surveyor.Brick.Command as SBC
+import qualified Surveyor.Brick.Extension as SBE
 import qualified Surveyor.Brick.Handlers as BH
 import qualified Surveyor.Brick.Keymap as SBK
 import           Surveyor.Brick.Names ( Names(..) )
@@ -146,17 +170,15 @@ isPlainKey (C.Key k ms) =
 
 appDraw :: C.State BH.BrickUIExtension BH.BrickUIState s -> [B.Widget Names]
 appDraw (C.State s) =
-  case C.sInputFile s of
+  case C.sArchState s of
     Nothing -> drawAppShell s introText
-    Just binFileName ->
-      case C.sArchState s of
-        Nothing -> drawAppShell s introText
-        Just archState ->
-          case C.sUIMode s of
-            C.SomeMiniBuffer (C.MiniBuffer innerMode) ->
-              drawUIMode binFileName archState s innerMode
-            C.SomeUIMode mode ->
-              drawUIMode binFileName archState s mode
+    Just archState ->
+      let binFileName = fromMaybe "No Input File" (C.sInputFile s)
+      in case C.sUIMode s of
+           C.SomeMiniBuffer (C.MiniBuffer innerMode) ->
+             drawUIMode binFileName archState s innerMode
+           C.SomeUIMode mode ->
+             drawUIMode binFileName archState s mode
   where
     introText = B.str $ unlines ["Surveyor: an interactive program exploration tool"
                                 , " * Press M-x to bring up the command prompt"
@@ -177,12 +199,12 @@ drawUIMode binFileName archState s uim =
     C.FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. BH.functionSelectorG))
     C.BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. BH.blockSelectorG))
     C.BlockViewer archNonce repr
-      | Just Refl <- testEquality archNonce (s ^. C.lNonce)
+      | Just PC.Refl <- PC.testEquality archNonce (s ^. C.lNonce)
       , Just bview <- archState ^. BH.blockViewerG repr ->
           drawAppShell s (BV.renderBlockViewer binfo (archState ^. C.contextG) bview)
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing block viewer for IR: " ++ show repr)))
     C.FunctionViewer archNonce repr
-      | Just Refl <- testEquality archNonce (s ^. C.lNonce)
+      | Just PC.Refl <- PC.testEquality archNonce (s ^. C.lNonce)
       , Just fv <- archState ^. BH.functionViewerG repr ->
         FV.withConstraints fv $ do
           drawAppShell s (FV.renderFunctionViewer binfo (archState ^. C.contextG) fv)
@@ -222,20 +244,27 @@ surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   customEventChan <- B.newBChan 100
   let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
+  mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
+  s0 <- emptyState mExePath mloader ng chan
+  let sconf = DebuggerConfig (Proxy @Void) (Proxy @()) (error "Void loader")
+  surveyorWith sconf customEventChan s0
+
+surveyorWith :: DebuggerConfig s ext arch
+             -> B.BChan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
+             -> C.S BH.BrickUIExtension BH.BrickUIState arch s
+             -> IO ()
+surveyorWith (DebuggerConfig {}) chan s0 = do
   let app = B.App { B.appDraw = appDraw
                   , B.appChooseCursor = appChooseCursor
                   , B.appHandleEvent = BH.appHandleEvent
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
-  s0 <- emptyState mExePath mloader ng chan
   let initialState = C.State s0
   let mkVty = V.mkVty V.defaultConfig
   initialVty <- mkVty
-  _finalState <- B.customMain initialVty mkVty (Just customEventChan) app initialState
+  _finalState <- B.customMain initialVty mkVty (Just chan) app initialState
   return ()
-
 
 emptyState :: Maybe FilePath
            -> Maybe C.AsyncLoader
@@ -265,3 +294,203 @@ emptyState mfp mloader ng customEventChan = do
              , C.sArchState = Nothing
              , C.sArchNonce = n0
              }
+
+stateFromContext :: forall arch s p sym ext rtp f a
+                  . (C.Architecture arch s, LCB.IsSymInterface sym, ext ~ C.CrucibleExt arch)
+                 => PN.NonceGenerator IO s
+                 -> (PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s))
+                 -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
+                 -> LCSET.SimState p sym ext rtp f a
+                 -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
+stateFromContext ng mkAnalysisResult chan simState = do
+  let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
+  case topFrame ^. LCSET.gpValue of
+    LCSC.RF {} -> error "Unexpected return value"
+    LCSC.OF {} -> error "Unexpected override frame"
+    LCSC.MF LCSC.CallFrame { LCSC._frameCFG = fcfg
+                           } -> do
+      let simCtx = simState ^. LCSET.stateContext
+      let halloc = simCtx ^. L.to LCSET.simHandleAllocator
+      let addrParser _s = Nothing
+      n0 <- PN.freshNonce ng
+      ares <- mkAnalysisResult ng n0 halloc
+      let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
+      let dicts = MapF.Pair C.BaseRepr C.ArchDict
+                : [ MapF.Pair rep C.ArchDict
+                  | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                  ]
+      tc0 <- C.newTranslationCache
+      let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
+                         : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
+                           | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                           ]
+      let funcViewerCallback :: forall ir . (C.ArchConstraints ir s) => C.IRRepr arch ir -> C.FunctionHandle arch s -> C.Block ir s -> IO ()
+          funcViewerCallback rep fh b = do
+            C.emitEvent chan (C.PushContext (C.archNonce ares) fh rep b)
+            C.emitEvent chan (C.ViewBlock (C.archNonce ares) rep)
+      let funcViewers = (MapF.Pair C.BaseRepr (FV.functionViewer (funcViewerCallback C.BaseRepr) FunctionCFGViewer C.BaseRepr))
+                        : [ MapF.Pair rep (FV.functionViewer (funcViewerCallback rep) FunctionCFGViewer rep)
+                          | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
+                          ]
+
+      sesID <- C.newSessionID ng
+      -- FIXME: Change this to a better ADT that reflects that we don't have this
+      -- config (we inherit it from the existing session)
+      let symCfg = C.SymbolicExecutionConfig sesID undefined WEB.FloatRealRepr undefined
+
+      let symSt = C.SymbolicState { C.symbolicConfig = symCfg
+                                  , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
+                                  , C.withSymConstraints = \a -> a
+                                  , C.someCFG = LCCC.SomeCFG fcfg
+                                  , C.symbolicGlobals = topFrame ^. LCSET.gpGlobals
+                                  -- FIXME: We can't actually get these since
+                                  -- they are lost to the ether at this point
+                                  --
+                                  -- Need to refactor so that they aren't part
+                                  -- of this state
+                                  , C.symbolicRegs = error "Initial symbolic regs"
+                                  }
+      ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
+      let symbolicExecutionState = C.Suspended symSt simState
+      let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
+                                     , SBE.sBlockViewers = MapF.fromList blockViewers
+                                     , SBE.sFunctionViewer = MapF.fromList funcViewers
+                                     , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                     , SBE.sSymbolicExecutionManager =
+                                       SEM.symbolicExecutionManager (Some symbolicExecutionState)
+                                     }
+      let archState = C.ArchState { C.sAnalysisResult = ares
+                                  -- FIXME: Pick a context based on the stack in the simulator
+                                  , C.sContext = ctxStk
+                                  -- FIXME: Construct a session for this with whatever we can pull out of simState
+                                  , C.sSymExState = C.singleSessionState symbolicExecutionState
+                                  , C.sIRCache = tc0
+                                  , C.sArchDicts = MapF.fromList dicts
+                                  , C.sUIState = uiState
+                                  }
+      return C.S { C.sInputFile = Nothing
+                 , C.sLoader = Nothing
+                 , C.sLogStore = mempty
+                 , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState chan
+                                                    , C.sFileLogger = Nothing
+                                                    }
+                 , C.sDiagnosticLevel = C.Debug
+                 , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
+                 , C.sAppState = C.Ready
+                 , C.sNonceGenerator = ng
+                 , C.sKeymap = SBK.defaultKeymap
+                 , C.sArchNonce = n0
+                 , C.sEventChannel = chan
+                 , C.sUIExtension = uiExt
+                 , C.sArchState = Just archState
+                 , C.sUIMode = C.SomeUIMode C.SymbolicExecutionManager
+                 }
+
+-- | Construct a context stack from a 'LCSET.SimState' and current CFG
+--
+-- NOTE: This needs to be made more robust against failure.  If no matching
+-- functions in our 'C.AnalysisResult' is found, we'll return the empty
+-- 'C.ContextStack'.
+--
+-- FIXME: It would be great to fully populate the context stack with all of the
+-- functions in the active simulation tree.  The SimState argument will be
+-- needed for this
+--
+-- FIXME: The search for our function corresponding to the CFG is currently very
+-- inefficient (linear) - we need to index everything sufficiently to make this
+-- efficient for all architectures.
+contextStackFromState :: forall arch s p sym ext rtp f a blocks initialArgs ret
+                       . (C.Architecture arch s, LCB.IsSymInterface sym, ext ~ C.CrucibleExt arch)
+                      => PN.NonceGenerator IO s
+                      -> C.TranslationCache arch s
+                      -> C.AnalysisResult arch s
+                      -> C.SessionID s
+                      -> LCSET.SimState p sym ext rtp f a
+                      -> LCCC.CFG ext blocks initialArgs ret
+                      -> IO (C.ContextStack arch s)
+contextStackFromState ng tc ares sesID _simState cfg = do
+  allCfgs <- mapM toCFG (C.functions ares)
+  case join (F.find (matchesCFG cfg) allCfgs) of
+    Nothing -> return C.emptyContextStack
+    Just (fh, LCCC.AnyCFG _) -> do
+      mAltIR <- C.asAlternativeIR C.CrucibleRepr ares fh
+      case mAltIR of
+        Nothing -> return C.emptyContextStack
+        Just ([], _) -> return C.emptyContextStack
+        Just (b0:_, _blockMap) -> do
+          -- 'makeContext' returns a symbolic execution context; we actually
+          -- have our own we want to use instead
+          (curCtx, _sid) <- C.makeContext ng tc ares fh C.CrucibleRepr b0
+          let curCtx' = curCtx { C.cSymExecSessionID = sesID }
+          return C.ContextStack { C.cStack = Seq.singleton curCtx'
+                                , C.cStackIndex = Nothing
+                                }
+  where
+    withCfgNonce c k = k (CFH.handleID (LCCC.cfgHandle c))
+
+    matchesCFG _ Nothing = False
+    matchesCFG targetCfg (Just (_fh, LCCC.AnyCFG thisCfg)) =
+      withCfgNonce targetCfg $ \targetNonce ->
+        withCfgNonce thisCfg $ \thisNonce -> isJust (PC.testEquality thisNonce targetNonce)
+
+    toCFG fh = do
+      mcfg <- C.crucibleCFG ares fh
+      return ((fh,) <$> mcfg)
+-- | This crucible 'LCS.ExecutionFeature' captures the simulator state at a
+-- breakpoint and starts up Surveyor(-Brick) to interactively inspect it.
+--
+-- For now, it simply returns execution to Crucible with no modifications after
+-- Surveyor exits.  It could be extended in the future to persist state
+-- modifications.
+debuggerFeature :: forall ext sym p rtp arch
+                 . (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
+                => DebuggerConfig PN.GlobalNonceGenerator ext arch
+                -> LCS.ExecutionFeature p sym ext rtp
+debuggerFeature args = LCS.ExecutionFeature (debugger args)
+
+data DebuggerConfig s ext arch =
+  (C.Architecture arch s, ext ~ C.CrucibleExt arch) =>
+  DebuggerConfig { _debuggerArchProxy :: Proxy arch
+                 , _debuggerExtProxy :: Proxy ext
+                 , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
+                 }
+
+data BreakpointType = UnconditionalBreakpoint | ConditionalBreakpoint
+
+-- | Classify a call as a known breakpoint (or not)
+--
+-- All of our breakpoints are overrides with distinguished names
+classifyBreakpoint :: LCSET.ResolvedCall p sym ext ret -> Maybe BreakpointType
+classifyBreakpoint rc =
+  case rc of
+    LCSET.CrucibleCall {} -> Nothing
+    LCSET.OverrideCall o _fr
+      | LCSET.overrideName o == "crucible_breakpoint" -> Just UnconditionalBreakpoint
+      | LCSET.overrideName o == "crucible_breakpoint_if" -> Just ConditionalBreakpoint
+      | otherwise -> Nothing
+
+debugger :: (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
+         => DebuggerConfig PN.GlobalNonceGenerator ext arch
+         -> LCSET.ExecState p sym ext rtp
+         -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
+debugger args@(DebuggerConfig {}) execSt =
+  case execSt of
+    LCSET.CallState _retHdlr resolvedCall simState
+      | Just UnconditionalBreakpoint <- classifyBreakpoint resolvedCall ->
+        surveyorState args simState
+    LCSET.TailCallState _v resolvedCall simState
+      | Just UnconditionalBreakpoint <- classifyBreakpoint resolvedCall->
+        surveyorState args simState
+    _ -> return LCS.ExecutionFeatureNoChange
+
+-- | Initialize Surveyor to navigate an active symbolic execution state
+surveyorState :: (C.Architecture arch PN.GlobalNonceGenerator, LCB.IsSymInterface sym)
+              => DebuggerConfig PN.GlobalNonceGenerator ext arch
+              -> LCSET.SimState p sym ext rtp f a
+              -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
+surveyorState args@(DebuggerConfig {}) simCtx = do
+  customEventChan <- B.newBChan 100
+  let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
+  s0 <- stateFromContext PN.globalNonceGenerator (debuggerCon args) chan simCtx
+  surveyorWith args customEventChan s0
+  return LCS.ExecutionFeatureNoChange

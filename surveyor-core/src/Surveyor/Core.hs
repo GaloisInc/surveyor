@@ -39,6 +39,9 @@ module Surveyor.Core (
   CA.prettyParameterizedFormula,
   CA.SomeResult(..),
   CA.CruciblePersonality,
+  CA.LLVM,
+  CA.mkLLVMResult,
+  CA.llvmAnalysisResultFromModule,
   -- ** Operand lists
   OL.OperandList,
   OL.OperandListItem(..),
@@ -94,7 +97,9 @@ module Surveyor.Core (
   CCX.selectedIndex,
   -- ** Symbolic Execution
   SymEx.Solver(..),
-  SymEx.SymbolicExecutionConfig,
+  SymEx.SymbolicExecutionConfig(..),
+  SymEx.SessionID,
+  SymEx.newSessionID,
   SymEx.SomeFloatModeRepr(..),
   SymEx.defaultSymbolicExecutionConfig,
   SymEx.SymbolicState(..),
@@ -107,6 +112,7 @@ module Surveyor.Core (
   SymEx.SetupArgs,
   SymEx.Execute,
   SymEx.Inspect,
+  SymEx.Suspend,
   SymEx.ExecutionProgress,
   SymEx.executionMetrics,
   SymEx.symbolicExecutionConfig,

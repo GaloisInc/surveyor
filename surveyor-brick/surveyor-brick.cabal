@@ -29,6 +29,7 @@ library
                        Surveyor.Brick.Widget.SymbolicExecution.Inspect
                        Surveyor.Brick.Widget.SymbolicExecution.Monitor
                        Surveyor.Brick.Widget.SymbolicExecution.Setup
+                       Surveyor.Brick.Widget.SymbolicExecution.StateExplorer
                        Brick.Match.Subword
                        Brick.Widget.FilterList
                        Brick.Widget.Graph

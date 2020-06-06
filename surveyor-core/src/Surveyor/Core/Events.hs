@@ -24,6 +24,7 @@ import           Data.Int ( Int64 )
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.Simulator.Profiling as CSP
 
@@ -95,9 +96,10 @@ data SymbolicExecutionEvent s st where
                               -> SE.SymbolicExecutionConfig s
                               -> CCC.SomeCFG (A.CrucibleExt arch) init reg
                               -> SymbolicExecutionEvent s st
-  StartSymbolicExecution :: PN.Nonce s arch
+  StartSymbolicExecution :: (CB.IsSymInterface sym)
+                         => PN.Nonce s arch
                          -> A.AnalysisResult arch s
-                         -> SES.SymbolicState arch s solver fm init reg
+                         -> SES.SymbolicState arch s sym init reg
                          -> SymbolicExecutionEvent s st
   ReportSymbolicExecutionMetrics :: CSS.SessionID s -> CSP.Metrics I.Identity -> SymbolicExecutionEvent s st
 

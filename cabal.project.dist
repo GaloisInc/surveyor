@@ -1,5 +1,6 @@
 packages: surveyor-core
           surveyor-brick
+          crux-dbg
           deps/llvm-pretty
           deps/llvm-pretty-bc-parser
           deps/elf-edit
@@ -11,6 +12,7 @@ packages: surveyor-core
           deps/crucible/crucible-llvm
           deps/crucible/crucible-jvm
           deps/crucible/crux
+          deps/crucible/crux-llvm
           deps/dismantle/dismantle-tablegen
           deps/dismantle/dismantle-ppc
           deps/dismantle/dismantle-arm-xml
