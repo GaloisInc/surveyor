@@ -129,8 +129,9 @@ data SymbolicExecutionState arch s (k :: SymExK) where
                                 (CA.CrucibleExt arch)
                                 (CS.RegEntry sym reg)
              -> SymbolicExecutionState arch s Inspect
-  Suspended :: (CB.IsSymInterface sym)
+  Suspended :: (CB.IsSymInterface sym, ext ~ CA.CrucibleExt arch, CA.Architecture arch s)
             => SymbolicState arch s sym init reg
+            -> CSET.SimState p sym ext rtp f a
             -> SymbolicExecutionState arch s Suspend
 
 instance NFData (SymbolicExecutionState arch s k) where
@@ -142,7 +143,7 @@ instance NFData (SymbolicExecutionState arch s k) where
         symState `seq` ()
       Executing progress -> progress `deepseq` ()
       Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
-      Suspended symState -> symState `seq` ()
+      Suspended symState _ -> symState `seq` ()
 
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
@@ -216,7 +217,7 @@ symbolicExecutionConfig s =
     Initializing s' -> symbolicConfig s'
     Executing s' -> executionConfig s'
     Inspecting _ s' _ -> symbolicConfig s'
-    Suspended s' -> symbolicConfig s'
+    Suspended s' _ -> symbolicConfig s'
 
 symbolicSessionID :: SymbolicExecutionState arch s k -> SessionID s
 symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID

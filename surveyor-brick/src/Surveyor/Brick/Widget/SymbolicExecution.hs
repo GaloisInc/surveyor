@@ -17,6 +17,7 @@ import qualified Surveyor.Brick.Widget.SymbolicExecution.Configuration as SEC
 import qualified Surveyor.Brick.Widget.SymbolicExecution.Monitor as SEM
 import qualified Surveyor.Brick.Widget.SymbolicExecution.Setup as SES
 import qualified Surveyor.Brick.Widget.SymbolicExecution.Inspect as SEI
+import qualified Surveyor.Brick.Widget.SymbolicExecution.StateExplorer as SEE
 import qualified Surveyor.Core as C
 
 
@@ -40,6 +41,7 @@ renderSymbolicExecutionManager sem@(managerState -> Some st) =
     C.Initializing {} -> SES.renderSymbolicExecutionSetup st
     C.Executing {} -> SEM.renderSymbolicExecutionMonitor st
     C.Inspecting {} -> SEI.renderSymbolicExecutionInspector st
+    C.Suspended {} -> SEE.renderSymbolicExecutionStateExplorer st
 
 handleSymbolicExecutionManagerEvent :: B.BrickEvent Names e
                                     -> SymbolicExecutionManager e arch s
@@ -59,6 +61,9 @@ handleSymbolicExecutionManagerEvent evt sem@(managerState -> Some st) =
       return sem { managerState = Some st' }
     C.Inspecting {} -> do
       st' <- SEI.handleSymbolicExecutionInspectorEvent evt st
+      return sem { managerState = Some st' }
+    C.Suspended {} -> do
+      st' <- SEE.handleSymbolicExecutionStateExplorerEvent evt st
       return sem { managerState = Some st' }
 
 

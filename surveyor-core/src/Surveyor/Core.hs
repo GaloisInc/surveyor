@@ -98,6 +98,7 @@ module Surveyor.Core (
   -- ** Symbolic Execution
   SymEx.Solver(..),
   SymEx.SymbolicExecutionConfig(..),
+  SymEx.SessionID,
   SymEx.newSessionID,
   SymEx.SomeFloatModeRepr(..),
   SymEx.defaultSymbolicExecutionConfig,

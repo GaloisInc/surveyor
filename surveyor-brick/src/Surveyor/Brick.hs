@@ -6,6 +6,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Brick (
   surveyor,
@@ -21,13 +22,15 @@ import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.Lens ( (^.) )
 import qualified Control.Lens as L
+import           Control.Monad ( join )
 import qualified Data.Foldable as F
-import           Data.Maybe ( fromMaybe, mapMaybe )
-import           Data.Parameterized.Classes
+import           Data.Maybe ( fromMaybe, mapMaybe, isJust )
+import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
@@ -198,12 +201,12 @@ drawUIMode binFileName archState s uim =
     C.FunctionSelector -> drawAppShell s (FS.renderFunctionSelector (archState ^. BH.functionSelectorG))
     C.BlockSelector -> drawAppShell s (BS.renderBlockSelector (archState ^. BH.blockSelectorG))
     C.BlockViewer archNonce repr
-      | Just Refl <- testEquality archNonce (s ^. C.lNonce)
+      | Just PC.Refl <- PC.testEquality archNonce (s ^. C.lNonce)
       , Just bview <- archState ^. BH.blockViewerG repr ->
           drawAppShell s (BV.renderBlockViewer binfo (archState ^. C.contextG) bview)
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing block viewer for IR: " ++ show repr)))
     C.FunctionViewer archNonce repr
-      | Just Refl <- testEquality archNonce (s ^. C.lNonce)
+      | Just PC.Refl <- PC.testEquality archNonce (s ^. C.lNonce)
       , Just fv <- archState ^. BH.functionViewerG repr ->
         FV.withConstraints fv $ do
           drawAppShell s (FV.renderFunctionViewer binfo (archState ^. C.contextG) fv)
@@ -319,7 +322,6 @@ stateFromContext ng mkAnalysisResult chan simState = do
                   | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                   ]
       tc0 <- C.newTranslationCache
-      ses <- C.defaultSymbolicExecutionConfig ng
       let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
                          : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
                            | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
@@ -332,13 +334,7 @@ stateFromContext ng mkAnalysisResult chan simState = do
                         : [ MapF.Pair rep (FV.functionViewer (funcViewerCallback rep) FunctionCFGViewer rep)
                           | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                           ]
-      let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
-                                     , SBE.sBlockViewers = MapF.fromList blockViewers
-                                     , SBE.sFunctionViewer = MapF.fromList funcViewers
-                                     , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                     , SBE.sSymbolicExecutionManager =
-                                       SEM.symbolicExecutionManager (Some (C.Configuring ses))
-                                     }
+
       sesID <- C.newSessionID ng
       -- FIXME: Change this to a better ADT that reflects that we don't have this
       -- config (we inherit it from the existing session)
@@ -356,11 +352,20 @@ stateFromContext ng mkAnalysisResult chan simState = do
                                   -- of this state
                                   , C.symbolicRegs = error "Initial symbolic regs"
                                   }
+      ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
+      let symbolicExecutionState = C.Suspended symSt simState
+      let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
+                                     , SBE.sBlockViewers = MapF.fromList blockViewers
+                                     , SBE.sFunctionViewer = MapF.fromList funcViewers
+                                     , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                     , SBE.sSymbolicExecutionManager =
+                                       SEM.symbolicExecutionManager (Some symbolicExecutionState)
+                                     }
       let archState = C.ArchState { C.sAnalysisResult = ares
                                   -- FIXME: Pick a context based on the stack in the simulator
-                                  , C.sContext = C.emptyContextStack
+                                  , C.sContext = ctxStk
                                   -- FIXME: Construct a session for this with whatever we can pull out of simState
-                                  , C.sSymExState = C.singleSessionState (C.Suspended symSt)
+                                  , C.sSymExState = C.singleSessionState symbolicExecutionState
                                   , C.sIRCache = tc0
                                   , C.sArchDicts = MapF.fromList dicts
                                   , C.sUIState = uiState
@@ -380,16 +385,59 @@ stateFromContext ng mkAnalysisResult chan simState = do
                  , C.sEventChannel = chan
                  , C.sUIExtension = uiExt
                  , C.sArchState = Just archState
-                  -- FIXME: choose the most appropriate view given the crucible state?
-                   --
-                   -- If we have a SimState, show the symbolic execution suspended state viewer
-                   --
-                   -- Otherwise, show the term inspector
-                 , C.sUIMode = C.SomeUIMode C.Diags
+                 , C.sUIMode = C.SomeUIMode C.SymbolicExecutionManager
                  }
 
+-- | Construct a context stack from a 'LCSET.SimState' and current CFG
+--
+-- NOTE: This needs to be made more robust against failure.  If no matching
+-- functions in our 'C.AnalysisResult' is found, we'll return the empty
+-- 'C.ContextStack'.
+--
+-- FIXME: It would be great to fully populate the context stack with all of the
+-- functions in the active simulation tree.  The SimState argument will be
+-- needed for this
+--
+-- FIXME: The search for our function corresponding to the CFG is currently very
+-- inefficient (linear) - we need to index everything sufficiently to make this
+-- efficient for all architectures.
+contextStackFromState :: forall arch s p sym ext rtp f a blocks initialArgs ret
+                       . (C.Architecture arch s, LCB.IsSymInterface sym, ext ~ C.CrucibleExt arch)
+                      => PN.NonceGenerator IO s
+                      -> C.TranslationCache arch s
+                      -> C.AnalysisResult arch s
+                      -> C.SessionID s
+                      -> LCSET.SimState p sym ext rtp f a
+                      -> LCCC.CFG ext blocks initialArgs ret
+                      -> IO (C.ContextStack arch s)
+contextStackFromState ng tc ares sesID _simState cfg = do
+  allCfgs <- mapM toCFG (C.functions ares)
+  case join (F.find (matchesCFG cfg) allCfgs) of
+    Nothing -> return C.emptyContextStack
+    Just (fh, LCCC.AnyCFG _) -> do
+      mAltIR <- C.asAlternativeIR C.CrucibleRepr ares fh
+      case mAltIR of
+        Nothing -> return C.emptyContextStack
+        Just ([], _) -> return C.emptyContextStack
+        Just (b0:_, _blockMap) -> do
+          -- 'makeContext' returns a symbolic execution context; we actually
+          -- have our own we want to use instead
+          (curCtx, _sid) <- C.makeContext ng tc ares fh C.CrucibleRepr b0
+          let curCtx' = curCtx { C.cSymExecSessionID = sesID }
+          return C.ContextStack { C.cStack = Seq.singleton curCtx'
+                                , C.cStackIndex = Nothing
+                                }
+  where
+    withCfgNonce c k = k (CFH.handleID (LCCC.cfgHandle c))
 
+    matchesCFG _ Nothing = False
+    matchesCFG targetCfg (Just (_fh, LCCC.AnyCFG thisCfg)) =
+      withCfgNonce targetCfg $ \targetNonce ->
+        withCfgNonce thisCfg $ \thisNonce -> isJust (PC.testEquality thisNonce targetNonce)
 
+    toCFG fh = do
+      mcfg <- C.crucibleCFG ares fh
+      return ((fh,) <$> mcfg)
 -- | This crucible 'LCS.ExecutionFeature' captures the simulator state at a
 -- breakpoint and starts up Surveyor(-Brick) to interactively inspect it.
 --
