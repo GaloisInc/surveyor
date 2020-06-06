@@ -170,17 +170,15 @@ isPlainKey (C.Key k ms) =
 
 appDraw :: C.State BH.BrickUIExtension BH.BrickUIState s -> [B.Widget Names]
 appDraw (C.State s) =
-  case C.sInputFile s of
+  case C.sArchState s of
     Nothing -> drawAppShell s introText
-    Just binFileName ->
-      case C.sArchState s of
-        Nothing -> drawAppShell s introText
-        Just archState ->
-          case C.sUIMode s of
-            C.SomeMiniBuffer (C.MiniBuffer innerMode) ->
-              drawUIMode binFileName archState s innerMode
-            C.SomeUIMode mode ->
-              drawUIMode binFileName archState s mode
+    Just archState ->
+      let binFileName = fromMaybe "No Input File" (C.sInputFile s)
+      in case C.sUIMode s of
+           C.SomeMiniBuffer (C.MiniBuffer innerMode) ->
+             drawUIMode binFileName archState s innerMode
+           C.SomeUIMode mode ->
+             drawUIMode binFileName archState s mode
   where
     introText = B.str $ unlines ["Surveyor: an interactive program exploration tool"
                                 , " * Press M-x to bring up the command prompt"
