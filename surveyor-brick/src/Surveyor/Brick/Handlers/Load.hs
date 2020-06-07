@@ -17,8 +17,8 @@ import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import           Fmt ( (+|), (|+), (||+) )
-import qualified Fmt as Fmt
+import qualified Data.Text.Prettyprint.Doc as PP
+import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 import qualified Graphics.Vty as V
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
@@ -53,7 +53,7 @@ handleLoadEvent s0 evt =
     C.AnalysisFailure exn -> do
       liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
                                           , C.logSource = C.EventHandler "Analysis Failure"
-                                          , C.logText = [Fmt.fmt ("Analysis failure: " +| exn ||+ "")]
+                                          , C.logText = [PPT.renderStrict (PP.layoutCompact ("Analysis failure:" PP.<+> PP.viaShow exn))]
                                           })
       B.continue $! C.State s0
     C.ErrorLoadingELFHeader off msg -> do
@@ -65,13 +65,13 @@ handleLoadEvent s0 evt =
     C.ErrorLoadingELF errs -> do
       liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
                                           , C.logSource = C.EventHandler "ELF Loader"
-                                          , C.logText = map (\d -> Fmt.fmt ("ELF Loading error: " +| d ||+ "")) errs
+                                          , C.logText = map (\d -> PPT.renderStrict (PP.layoutCompact ("ELF Loading error:" PP.<+> PP.viaShow d))) errs
                                           })
       B.continue $! C.State s0
     C.ErrorLoadingLLVM s -> do
       liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
                                           , C.logSource = C.EventHandler "LLVM Loader"
-                                          , C.logText = [Fmt.fmt ("Error loading LLVM bitcode: " +| s |+ "")]
+                                          , C.logText = [PPT.renderStrict (PP.layoutCompact ("Error loading LLVM bitcode:" PP.<+> PP.pretty s))]
                                           })
       B.continue $! C.State s0
     C.LoadFile filename -> do
