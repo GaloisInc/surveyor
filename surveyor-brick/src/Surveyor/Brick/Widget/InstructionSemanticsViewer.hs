@@ -14,8 +14,8 @@ import qualified Brick as B
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Lens ( (^?), (^.) )
 import qualified Data.Vector as V
-import qualified Fmt as Fmt
-import           Fmt ( (+|), (|+) )
+import qualified Data.Text.Prettyprint.Doc as PP
+import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 
 import qualified Surveyor.Core as C
 import           Surveyor.Brick.Names ( Names(..) )
@@ -48,9 +48,9 @@ renderInstructionSemanticsViewer ares cs _
         C.SingleSelection ix _addr _ ->
           let insns = blkState ^. C.blockStateList
           in case insns V.!? ix of
-            Nothing -> B.txt (Fmt.fmt ("ERROR: Instruction index out of range: " +| ix |+ ""))
+            Nothing -> B.txt (PPT.renderStrict (PP.layoutCompact ("ERROR: Instruction index out of range:" PP.<+> PP.pretty ix)))
             Just (_, addr, i) ->
               case C.genericSemantics ares i of
-                Nothing -> B.txt (Fmt.fmt ("No semantics for instruction: " +| C.prettyInstruction addr i |+ ""))
+                Nothing -> B.txt (PPT.renderStrict (PP.layoutCompact ("No semantics for instruction:" PP.<+> PP.pretty (C.prettyInstruction addr i))))
                 Just sem -> B.txt (C.prettyParameterizedFormula sem)
   | otherwise = B.txt "No current block"

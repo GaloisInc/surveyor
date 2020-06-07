@@ -28,8 +28,8 @@ import           Control.Lens ( (^?), (^.) )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Graph.Haggle as H
 import qualified Data.Text as T
-import qualified Fmt as Fmt
-import           Fmt ( (+|), (|+) )
+import qualified Data.Text.Prettyprint.Doc as PP
+import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 import qualified Graphics.Vty as V
 
 import qualified Brick.Widget.Graph as BG
@@ -95,7 +95,7 @@ renderFunctionViewer _ares cstk fv
 renderNode :: (C.IR arch s) => Bool -> C.Block arch s -> B.Widget Names
 renderNode isFocused b =
   xfrm $ B.vBox [ B.txt (C.prettyAddress (C.blockAddress b))
-                , B.txt (Fmt.fmt ("("+|length (C.blockInstructions b)|+")"))
+                , B.txt (PPT.renderStrict (PP.layoutCompact ("(" PP.<+> PP.pretty (length (C.blockInstructions b)) PP.<+> ")")))
                 ]
   where
     xfrm = if isFocused then B.withAttr B.listSelectedFocusedAttr else id

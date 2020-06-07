@@ -1,12 +1,12 @@
 name:                surveyor-brick
 version:             0.1.0.0
 synopsis:            An interactive binary explorer
--- description:         
+-- description:
 license:             BSD3
 license-file:        LICENSE
 author:              Tristan Ravitch
 maintainer:          tristan@ravit.ch, tristan@galois.com
--- copyright:           
+-- copyright:
 category:            Reverse-Engineering
 build-type:          Simple
 extra-source-files:  ChangeLog.md
@@ -40,7 +40,7 @@ library
                        Surveyor.Brick.Handlers.SymbolicExecution
                        Surveyor.Brick.Keymap
                        Surveyor.Brick.Panic
-  -- other-extensions:    
+  -- other-extensions:
   build-depends:       base >=4.10 && <5,
                        deepseq,
                        containers,
@@ -52,7 +52,6 @@ library
                        Glob >= 0.10 && < 0.11,
                        prettyprinter,
                        pretty,
-                       fmt,
                        split >= 0.2 && < 0.3,
                        lens >= 4.15 && < 5,
                        generic-lens >= 0.5.1.0 && < 1.3,
