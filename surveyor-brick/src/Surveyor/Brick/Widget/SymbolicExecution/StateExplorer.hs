@@ -10,6 +10,7 @@ module Surveyor.Brick.Widget.SymbolicExecution.StateExplorer (
 
 import qualified Brick as B
 import           Control.Lens ( (^.) )
+import           Data.Maybe ( fromMaybe )
 import qualified Data.Text as T
 import qualified Lang.Crucible.CFG.Core as LCCC
 import qualified Lang.Crucible.Simulator.CallFrame as LCSC
@@ -27,7 +28,7 @@ renderSymbolicExecutionStateExplorer :: forall arch s
                                      -> B.Widget Names
 renderSymbolicExecutionStateExplorer st =
   case st of
-    C.Suspended _surveyorSimState crucSimState ->
+    C.Suspended _surveyorSimState crucSimState mbp ->
       let topFrame = crucSimState ^. CSET.stateTree . CSET.actFrame
       in case topFrame ^. CSET.gpValue of
         LCSC.RF {} -> B.txt "Unexpected Return Frame"
@@ -36,6 +37,7 @@ renderSymbolicExecutionStateExplorer st =
                                    }) ->
           B.vBox [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
                  , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
+                 , B.txt "Breakpoint name:" B.<+> B.txt (fromMaybe "<Unnamed Breakpoint>" (C.breakpointName =<< mbp))
                  ]
 
 handleSymbolicExecutionStateExplorerEvent :: B.BrickEvent Names e

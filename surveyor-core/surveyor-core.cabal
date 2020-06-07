@@ -27,6 +27,7 @@ library
                        Surveyor.Core.Arguments
                        Surveyor.Core.Async
                        Surveyor.Core.BinaryAnalysisResult
+                       Surveyor.Core.Breakpoint
                        Surveyor.Core.Chan
                        Surveyor.Core.Command
                        Surveyor.Core.Commands

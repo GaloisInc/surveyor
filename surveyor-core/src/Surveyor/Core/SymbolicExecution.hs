@@ -87,6 +87,7 @@ import qualified What4.Symbol as WS
 import qualified What4.Utils.StringLiteral as WUS
 
 import qualified Surveyor.Core.Architecture as CA
+import qualified Surveyor.Core.Breakpoint as SCB
 import qualified Surveyor.Core.Chan as SCC
 import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.Panic as SCP
@@ -132,6 +133,7 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   Suspended :: (CB.IsSymInterface sym, ext ~ CA.CrucibleExt arch, CA.Architecture arch s)
             => SymbolicState arch s sym init reg
             -> CSET.SimState p sym ext rtp f a
+            -> Maybe (SCB.Breakpoint sym)
             -> SymbolicExecutionState arch s Suspend
 
 instance NFData (SymbolicExecutionState arch s k) where
@@ -143,7 +145,7 @@ instance NFData (SymbolicExecutionState arch s k) where
         symState `seq` ()
       Executing progress -> progress `deepseq` ()
       Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
-      Suspended symState _ -> symState `seq` ()
+      Suspended symState _ _ -> symState `seq` ()
 
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
@@ -217,7 +219,7 @@ symbolicExecutionConfig s =
     Initializing s' -> symbolicConfig s'
     Executing s' -> executionConfig s'
     Inspecting _ s' _ -> symbolicConfig s'
-    Suspended s' _ -> symbolicConfig s'
+    Suspended s' _ _ -> symbolicConfig s'
 
 symbolicSessionID :: SymbolicExecutionState arch s k -> SessionID s
 symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID
