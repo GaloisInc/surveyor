@@ -46,6 +46,7 @@ library
                        deepseq,
                        containers,
                        async,
+                       mtl,
                        bytestring,
                        text,
                        vector,
