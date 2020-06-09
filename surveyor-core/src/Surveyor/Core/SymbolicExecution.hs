@@ -130,7 +130,11 @@ data SymbolicExecutionState arch s (k :: SymExK) where
                                 (CA.CrucibleExt arch)
                                 (CS.RegEntry sym reg)
              -> SymbolicExecutionState arch s Inspect
-  Suspended :: (CB.IsSymInterface sym, ext ~ CA.CrucibleExt arch, CA.Architecture arch s)
+  Suspended :: ( CB.IsSymInterface sym
+               , CA.Architecture arch s
+               , ext ~ CA.CrucibleExt arch
+               , sym ~ WEB.ExprBuilder s st fs
+               )
             => SymbolicState arch s sym init reg
             -> CSET.SimState p sym ext rtp f a
             -> Maybe (SCB.Breakpoint sym)

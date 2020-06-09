@@ -29,6 +29,7 @@ import qualified Data.Text as T
 import qualified System.Exit as SE
 import qualified System.IO as IO
 import qualified Text.LLVM as TL
+import qualified What4.Expr.Builder as WEB
 
 import qualified Crux as C
 import qualified Crux.LLVM.Overrides as CLO
@@ -138,7 +139,7 @@ simulateLLVMWithDebug _cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym 
                 case SC.llvmAnalysisResultFromModule ng nonce hdlAlloc llvmModule (Some translation) of
                   SC.SomeResult ares -> return ares
           let debuggerConfig = SB.DebuggerConfig (Proxy @SC.LLVM) (Proxy @(SC.CrucibleExt SC.LLVM)) llvmCon
-          let debugger = SB.debuggerFeature debuggerConfig
+          let debugger = SB.debuggerFeature debuggerConfig (WEB.exprCounter sym)
           return (C.RunnableStateWithExtensions initSt [debugger])
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
 
