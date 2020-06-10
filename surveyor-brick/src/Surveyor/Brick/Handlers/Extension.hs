@@ -68,7 +68,7 @@ handleExtensionEvent s0 evt =
                 C.sEmitEvent s0 (C.PushContext archNonce fh C.BaseRepr b)
                 C.sEmitEvent s0 (C.ViewBlock archNonce C.BaseRepr)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.BlockSelector
-                      & C.lArchState . _Just . SBE.blockSelectorL .~ BS.blockSelector callback focusedListAttr blocks
+                      & C.lArchState . _Just . C.lUIState . SBE.blockSelectorL .~ BS.blockSelector callback focusedListAttr blocks
           B.continue $! C.State s1
       | otherwise -> B.continue (C.State s0)
 
@@ -90,6 +90,6 @@ handleExtensionEvent s0 evt =
                     C.sEmitEvent s0 (C.PushContext archNonce f C.BaseRepr entryBlock)
                     C.sEmitEvent s0 (C.ViewFunction archNonce C.BaseRepr)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.FunctionSelector
-                      & C.lArchState . _Just . SBE.functionSelectorL .~ FS.functionSelector callback focusedListAttr funcs
+                      & C.lArchState . _Just . C.lUIState . SBE.functionSelectorL .~ FS.functionSelector callback focusedListAttr funcs
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)

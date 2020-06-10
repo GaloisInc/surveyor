@@ -5,6 +5,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | State extensions for the brick UI
@@ -31,7 +32,6 @@ module Surveyor.Brick.Extension (
 import           Control.Lens ( (^.), (&), (%~) )
 import qualified Control.Lens as L
 import qualified Control.NF as NF
-import qualified Data.Generics.Product as GL
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
@@ -49,6 +49,43 @@ import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
+
+-- | Extra UI extensions for the Brick UI
+--
+-- This differs from 'BrickUIState' in that it is not parameterized by the
+-- architecture (@arch@).  That is important, as there is not always an active
+-- architecture.  Objects in this extension state can always be available (e.g.,
+-- the minibuffer).
+data BrickUIExtension s =
+  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
+                   -- ^ The persistent state of the minibuffer
+                   }
+  deriving (Generic)
+
+-- | State specific to the Brick UI
+--
+-- This is mostly storage for widgets
+data BrickUIState arch s =
+  BrickUIState { sFunctionSelector :: !(FS.FunctionSelector arch s)
+               -- ^ Functions available in the function selector
+               , sBlockSelector :: !(BS.BlockSelector arch s)
+               , sBlockViewers :: !(MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
+               , sFunctionViewer :: !(MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
+               , sSymbolicExecutionManager :: !(SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
+               }
+  deriving (Generic)
+
+L.makeLensesFor
+  [("sMinibuffer", "minibufferL")]
+  ''BrickUIExtension
+
+L.makeLensesFor
+  [ ("sFunctionSelector", "functionSelectorL")
+  , ("sBlockSelector", "blockSelectorL")
+  , ("sBlockViewers", "blockViewersL")
+  , ("sFunctionViewer", "functionViewersL")
+  , ("sSymbolicExecutionManager", "symbolicExecutionManagerL") ]
+  ''BrickUIState
 
 type instance C.EventExtension (C.S BrickUIExtension BrickUIState) = BrickUIEvent
 
@@ -70,32 +107,6 @@ data BrickUIEvent s (st :: Type -> Type -> Type) where
 instance C.ToEvent s (C.S BrickUIExtension BrickUIState) BrickUIEvent where
   toEvent = C.ExtensionEvent
 
--- | State specific to the Brick UI
---
--- This is mostly storage for widgets
-data BrickUIState arch s =
-  BrickUIState { sFunctionSelector :: !(FS.FunctionSelector arch s)
-               -- ^ Functions available in the function selector
-               , sBlockSelector :: !(BS.BlockSelector arch s)
-               , sBlockViewers :: !(MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
-               , sFunctionViewer :: !(MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
-               , sSymbolicExecutionManager :: !(SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
-               }
-  deriving (Generic)
-
--- | Extra UI extensions for the Brick UI
---
--- This differs from 'BrickUIState' in that it is not parameterized by the
--- architecture (@arch@).  That is important, as there is not always an active
--- architecture.  Objects in this extension state can always be available (e.g.,
--- the minibuffer).
-data BrickUIExtension s =
-  BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
-                   -- ^ The persistent state of the minibuffer
-                   }
-  deriving (Generic)
-
-
 updateMinibufferCompletions :: (C.Events s (C.S BrickUIExtension BrickUIState) -> IO ())
                             -> PN.Nonce s arch
                             -> (T.Text -> V.Vector T.Text -> IO ())
@@ -107,39 +118,20 @@ updateMinibufferCompletions emitEvent archNonce = \t matches -> do
         | otherwise = state
   emitEvent (C.AsyncStateUpdate archNonce (NF.nf matches) stateTransformer)
 
-
-minibufferL :: L.Lens' (BrickUIExtension s) (MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
-minibufferL = GL.field @"sMinibuffer"
-
 minibufferG :: L.Getter (BrickUIExtension s) (MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
 minibufferG = L.to (^. minibufferL)
 
-functionSelectorL :: L.Lens' (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)
-functionSelectorL = C.lUIState . GL.field @"sFunctionSelector"
-
 functionSelectorG :: L.Getter (C.ArchState BrickUIState arch s) (FS.FunctionSelector arch s)
-functionSelectorG = L.to (^. functionSelectorL)
-
-blockSelectorL :: L.Lens' (C.ArchState BrickUIState arch s) (BS.BlockSelector arch s)
-blockSelectorL = C.lUIState . GL.field @"sBlockSelector"
+functionSelectorG = L.to (^. C.lUIState . functionSelectorL)
 
 blockSelectorG :: L.Getter (C.ArchState BrickUIState arch s) (BS.BlockSelector arch s)
-blockSelectorG = L.to (^. blockSelectorL)
-
-blockViewersL :: L.Lens' (C.ArchState BrickUIState arch s) (MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
-blockViewersL = C.lUIState . GL.field @"sBlockViewers"
+blockSelectorG = L.to (^. C.lUIState . blockSelectorL)
 
 blockViewerG :: C.IRRepr arch ir -> L.Getter (C.ArchState BrickUIState arch s) (Maybe (BV.BlockViewer arch s ir))
-blockViewerG rep = L.to (\as -> MapF.lookup rep (as ^. blockViewersL))
-
-functionViewersL :: L.Lens' (C.ArchState BrickUIState arch s) (MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
-functionViewersL = C.lUIState . GL.field @"sFunctionViewer"
+blockViewerG rep = L.to (\as -> MapF.lookup rep (as ^. C.lUIState . blockViewersL))
 
 functionViewerG :: C.IRRepr arch ir -> L.Getter (C.ArchState BrickUIState arch s) (Maybe (FV.FunctionViewer arch s ir))
-functionViewerG rep = L.to (\as -> MapF.lookup rep (as ^. functionViewersL))
-
-symbolicExecutionManagerL :: L.Lens' (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
-symbolicExecutionManagerL = C.lUIState . GL.field @"sSymbolicExecutionManager"
+functionViewerG rep = L.to (\as -> MapF.lookup rep (as ^. C.lUIState . functionViewersL))
 
 symbolicExecutionManagerG :: L.Getter (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
-symbolicExecutionManagerG = L.to (^. symbolicExecutionManagerL)
+symbolicExecutionManagerG = L.to (^. C.lUIState . symbolicExecutionManagerL)

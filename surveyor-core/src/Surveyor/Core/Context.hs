@@ -5,6 +5,7 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Surveyor.Core.Context (
@@ -47,7 +48,6 @@ import           Control.Lens ( (&), (^.), (.~), (%~), (^?) )
 import qualified Control.Lens as L
 import           Control.Monad ( guard )
 import qualified Data.Foldable as F
-import qualified Data.Generics.Product as GL
 import qualified Data.Graph.Haggle as H
 import qualified Data.Map as Map
 import           Data.Maybe ( catMaybes, fromMaybe, listToMaybe, mapMaybe, maybeToList )
@@ -66,6 +66,59 @@ import qualified Surveyor.Core.TranslationCache as TC
 import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.OperandList as OL
 import qualified Surveyor.Core.Panic as SCP
+
+data InstructionSelection ir s = NoSelection
+                               | SingleSelection Int (CA.Address ir s) (Maybe (OL.Zipper (Int, CA.Operand ir s)))
+                               -- ^ A single instruction is selected and it may have an operand selected
+                               | MultipleSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
+                               -- ^ Multiple instructions are selected; operands may
+                               -- not be selected in this case.  The primary
+                               -- selection is the first Int.  The other selected
+                               -- instructions are *tagged*
+                               | TransientSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
+                               -- ^ A transient selection that was created by an
+                               -- automatic action, but that goes away
+                               -- (degenerates to a single selection) as soon as
+                               -- the user moves the cursor
+  deriving (Generic)
+
+instance (NFData (CA.Address ir s), NFData (CA.Operand ir s)) => NFData (InstructionSelection ir s)
+
+data BlockState arch s ir =
+  BlockState { bsBlock :: CA.Block ir s
+             , bsSelection :: InstructionSelection ir s
+             , bsList :: V.Vector (Int, CA.Address ir s, CA.Instruction ir s)
+             -- ^ The list is the index of each instruction, the instruction
+             -- address, and the instruction itself.
+             --
+             -- The index is there to make identifying selected instructions
+             -- easier
+             , bsBlockMapping :: Maybe (CA.BlockMapping arch ir s)
+             -- ^ We keep the whole block mapping here so that we can sync up
+             -- block selection states across IRs.  We won't necessarily have a
+             -- block map for two reasons:
+             --
+             -- 1) The Base IR won't have one
+             --
+             -- 2) Translation could fail for a block
+             , bsWithConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
+             -- ^ A way to recover the 'CA.ArchConstraints' dictionary
+             , bsRepr :: IR.IRRepr arch ir
+             }
+
+data FunctionState arch s ir =
+  FunctionState { fsSelectedBlock :: Maybe H.Vertex
+                -- ^ The currently-selected block for this IR, if any
+                , fsCFG :: H.PatriciaTree (CA.Block ir s) ()
+                -- ^ The CFG of the current function
+                --
+                -- FIXME: Try to cache these somewhere
+                , fsVertexMap :: Map.Map (CA.Address ir s) H.Vertex
+                -- ^ A mapping from block addresses to vertices
+                , fsBaseFunction :: CA.FunctionHandle arch s
+                -- ^ The base function that this block corresponds to
+                , fsWithConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
+                }
 
 -- | A context focused (at some point) by the user, and used to inform drawing
 -- of various widgets.
@@ -102,26 +155,11 @@ data Context arch s =
           }
   deriving (Generic)
 
-
-data FunctionState arch s ir =
-  FunctionState { fsSelectedBlock :: Maybe H.Vertex
-                -- ^ The currently-selected block for this IR, if any
-                , fsCFG :: H.PatriciaTree (CA.Block ir s) ()
-                -- ^ The CFG of the current function
-                --
-                -- FIXME: Try to cache these somewhere
-                , fsVertexMap :: Map.Map (CA.Address ir s) H.Vertex
-                -- ^ A mapping from block addresses to vertices
-                , fsBaseFunction :: CA.FunctionHandle arch s
-                -- ^ The base function that this block corresponds to
-                , fsWithConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
-                }
-
-symExecSessionIDL :: L.Lens' (Context arch s) (SE.SessionID s)
-symExecSessionIDL = GL.field @"cSymExecSessionID"
-
-functionStateL :: L.Lens' (Context arch s) (MapF.MapF (IR.IRRepr arch) (FunctionState arch s))
-functionStateL = GL.field @"cFunctionState"
+L.makeLensesFor
+  [ ("cSymExecSessionID", "symExecSessionIDL")
+  , ("cFunctionState", "functionStateL")
+  , ("cBlockState", "blockStateL") ]
+  ''Context
 
 vertexMapG :: L.Getter (FunctionState arch s ir) (Map.Map (CA.Address ir s) H.Vertex)
 vertexMapG = L.to fsVertexMap
@@ -142,28 +180,6 @@ forceBlockState bs@BlockState { bsWithConstraints = withC } =
 forceFunctionState :: FunctionState arch s ir -> ()
 forceFunctionState fs@(FunctionState { fsWithConstraints = withC }) =
   withC (fsSelectedBlock fs `deepseq` fsCFG fs `deepseq` fsVertexMap fs `deepseq` ())
-
-data BlockState arch s ir =
-  BlockState { bsBlock :: CA.Block ir s
-             , bsSelection :: InstructionSelection ir s
-             , bsList :: V.Vector (Int, CA.Address ir s, CA.Instruction ir s)
-             -- ^ The list is the index of each instruction, the instruction
-             -- address, and the instruction itself.
-             --
-             -- The index is there to make identifying selected instructions
-             -- easier
-             , bsBlockMapping :: Maybe (CA.BlockMapping arch ir s)
-             -- ^ We keep the whole block mapping here so that we can sync up
-             -- block selection states across IRs.  We won't necessarily have a
-             -- block map for two reasons:
-             --
-             -- 1) The Base IR won't have one
-             --
-             -- 2) Translation could fail for a block
-             , bsWithConstraints :: forall a . (CA.ArchConstraints ir s => a) -> a
-             -- ^ A way to recover the 'CA.ArchConstraints' dictionary
-             , bsRepr :: IR.IRRepr arch ir
-             }
 
 -- | Make a 'CA.Context' given a 'CA.FunctionHandle' and a 'CA.Block'
 --
@@ -315,9 +331,6 @@ makeBlockState tcache ares fh origBlock rep = do
 baseFunctionG :: L.Getter (Context arch s) (CA.FunctionHandle arch s)
 baseFunctionG = L.to cBaseFunction
 
-blockStateL :: L.Lens' (Context arch s) (MapF.MapF (IR.IRRepr arch) (BlockState arch s))
-blockStateL = GL.field @"cBlockState"
-
 blockStateBlock :: L.Getter (BlockState arch s ir) (CA.Block ir s)
 blockStateBlock = L.to bsBlock
 
@@ -326,23 +339,6 @@ blockStateList = L.to bsList
 
 blockStateSelection :: L.Lens' (BlockState arch s ir) (InstructionSelection ir s)
 blockStateSelection f bs = fmap (\sel' -> bs { bsSelection = sel' }) (f (bsSelection bs))
-
-data InstructionSelection ir s = NoSelection
-                               | SingleSelection Int (CA.Address ir s) (Maybe (OL.Zipper (Int, CA.Operand ir s)))
-                               -- ^ A single instruction is selected and it may have an operand selected
-                               | MultipleSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
-                               -- ^ Multiple instructions are selected; operands may
-                               -- not be selected in this case.  The primary
-                               -- selection is the first Int.  The other selected
-                               -- instructions are *tagged*
-                               | TransientSelection Int (CA.Address ir s) (Set.Set (Int, CA.Address ir s))
-                               -- ^ A transient selection that was created by an
-                               -- automatic action, but that goes away
-                               -- (degenerates to a single selection) as soon as
-                               -- the user moves the cursor
-  deriving (Generic)
-
-instance (NFData (CA.Address ir s), NFData (CA.Operand ir s)) => NFData (InstructionSelection ir s)
 
 selectedIndex :: InstructionSelection ir s -> Maybe Int
 selectedIndex i =
