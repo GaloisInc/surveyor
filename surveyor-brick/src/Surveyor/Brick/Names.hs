@@ -22,4 +22,5 @@ data Names = DiagnosticView
            | SolverRadioSelection C.Solver
            | FloatModeRadioSelection T.Text
            | SolverInteractionFileEdit
+           | SelectedBreakpointValue Int
   deriving (Eq, Ord, Show)

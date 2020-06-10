@@ -356,7 +356,8 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                                   , C.symbolicRegs = error "Initial symbolic regs"
                                   }
       ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
-      let symbolicExecutionState = C.Suspended symSt simState (Just bp)
+      -- NOTE: This can throw an exception, but that is fine: the TUI is not yet up
+      symbolicExecutionState <- C.suspendedState symSt simState (Just bp)
       let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
                                      , SBE.sBlockViewers = MapF.fromList blockViewers
                                      , SBE.sFunctionViewer = MapF.fromList funcViewers

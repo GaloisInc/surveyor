@@ -108,6 +108,8 @@ module Surveyor.Core (
   SymEx.singleSessionState,
   SymEx.updateSessionMetrics,
   SymEx.SymbolicExecutionState(..),
+  SymEx.SuspendedState(..),
+  SymEx.suspendedState,
   SymEx.Config,
   SymEx.SetupArgs,
   SymEx.Execute,
