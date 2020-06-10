@@ -4,6 +4,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.State (
   State(..),
@@ -46,7 +47,6 @@ import           GHC.Generics ( Generic )
 
 import qualified Control.Concurrent.Async as CA
 import qualified Control.Lens as L
-import qualified Data.Generics.Product as GL
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as NG
@@ -65,15 +65,6 @@ import           Surveyor.Core.Mode
 import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.TranslationCache as TC
 
--- | This is a wrapper around the state type suitable for the UI core.  It hides
--- the architecture so that the architecture can change during run-time (i.e.,
--- when a new binary is loaded).
-data State e u s where
-  State :: (A.Architecture arch s) => !(S e u arch s) -> State e u s
-
-instance AR.HasNonce (S e u) where
-  getNonce (AR.SomeState s) = AR.SomeNonce (sArchNonce s)
-
 -- | There are multiple supported logging actions: internal state and file
 --
 -- We keep them separate so that the file logger can be replaced or redirected
@@ -89,11 +80,75 @@ data LoggingActions =
                  }
   deriving (Generic)
 
-lStateLogger :: L.Lens' LoggingActions SCL.LogAction
-lStateLogger = GL.field @"sStateLogger"
+L.makeLensesFor
+  [ ("sStateLogger", "lStateLogger")
+  , ("sFileLogger", "lFileLogger") ]
+  ''LoggingActions
 
-lFileLogger :: L.Lens' LoggingActions (Maybe (CA.Async (), SCL.LogAction))
-lFileLogger = GL.field @"sFileLogger"
+data AppState = Loading
+              | Ready
+              | AwaitingFile
+
+-- | A data type to capture some dictionaries for architectures and IRs
+--
+-- Pattern match on it to bring the captured dictionaries into scope.
+data ArchDict arch s ir where
+  ArchDict :: (A.Architecture arch s, A.IR ir s) => ArchDict arch s ir
+
+-- | A sub-component of the state dependent on the arch type variable
+--
+-- This is split out so that it is easier to see these arch-dependent components
+-- and replace them all at once with only one dynamic test during incremental
+-- updates.
+data ArchState u arch s =
+  ArchState { sAnalysisResult :: !(A.AnalysisResult arch s)
+            -- ^ Information returned by the binary analysis
+            --
+            -- We keep it around so that it doesn't have to re-index the commands
+            , sContext :: !(CC.ContextStack arch s)
+            -- ^ A stack of the contexts that have been focused by the user.
+            --
+            -- For now, we are just looking at the most recent context (i.e.,
+            -- each viewer will consult the most recent context to draw).
+            -- Later, there will be context-manipulation commands to allow
+            -- the user to explicitly manage the stack by popping things.
+            , sSymExState :: !(SE.SessionState arch s)
+            -- ^ Dynamically updated state for the symbolic execution engine
+            --
+            -- This is referenced from the context stack, but stored separately
+            -- because updates can be generated asynchronously and updating deep
+            -- into the context stack structure is difficult.
+            , sIRCache :: !(TC.TranslationCache arch s)
+            -- ^ A cache of blocks translated from the base architecture to
+            -- alternative architectures.  We need a cache, as the
+            -- translation can be expensive (and we don't want to have to
+            -- re-do it for each block we need to access)
+            , sArchDicts :: !(MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
+            -- ^ Captured dictionaries for each IR; given an 'IR.IRRepr', this
+            -- allows the client code to recover some class constraints.
+            --
+            -- It would be nice to just capture these in each 'IR.IRRepr', but
+            -- that would introduce some circular dependencies unless everything
+            -- was defined in the same file.
+            , sUIState :: !(u arch s)
+            -- ^ The state required for the UI extension
+            }
+  deriving (Generic)
+
+L.makeLensesFor
+  [ ("sUIState", "lUIState")
+  , ("sAnalysisResult", "lAnalysisResult")
+  , ("sContext", "contextL")
+  , ("sArchDicts", "archDictsL")
+  , ("sSymExState", "symExStateL")
+  , ("sIRCache", "irCacheL") ]
+  ''ArchState
+
+contextG :: L.Getter (ArchState u arch s) (CC.ContextStack arch s)
+contextG = L.to (L.^. contextL)
+
+archDictsG :: L.Getter (ArchState u arch s) (MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
+archDictsG = L.to (L.^. archDictsL)
 
 -- | This is the core application state
 --
@@ -142,14 +197,28 @@ data S e u (arch :: Type) s =
     }
   deriving (Generic)
 
+L.makeLensesFor
+  [ ("sArchNonce", "lNonce")
+  , ("sLogActions", "lLogActions")
+  , ("sInputFile", "lInputFile")
+  , ("sLogStore", "lLogStore")
+  , ("sDiagnosticLevel", "diagnosticLevelL")
+  , ("sEchoArea", "lEchoArea")
+  , ("sUIMode", "lUIMode")
+  , ("sEventChannel", "lEventChannel")
+  , ("sAppState", "lAppState")
+  , ("sNonceGenerator", "lNonceGenerator")
+  , ("sLoader", "lLoader")
+  , ("sKeymap", "lKeymap")
+  , ("sUIExtension", "lUIExtension")
+  , ("sArchState", "lArchState") ]
+  ''S
+
+instance AR.HasNonce (S e u) where
+  getNonce (AR.SomeState s) = AR.SomeNonce (sArchNonce s)
+
 sEmitEvent :: forall evt e u arch s . (SCE.ToEvent s (S e u) evt) => S e u arch s -> evt s (S e u) -> IO ()
 sEmitEvent s evt = SCE.emitEvent (sEventChannel s) evt
-
-lNonce :: L.Lens' (S e u arch s) (NG.Nonce s arch)
-lNonce = GL.field @"sArchNonce"
-
-lLogActions :: L.Lens' (S e u arch s) LoggingActions
-lLogActions = GL.field @"sLogActions"
 
 logMessage :: S e u arch s -> SCL.LogMessage -> IO ()
 logMessage s msg = do
@@ -159,112 +228,8 @@ logMessage s msg = do
   let logAct = maybe (sStateLogger actions) (sStateLogger actions <>) (fmap snd (sFileLogger actions))
   SCL.logMessage logAct msg
 
-lInputFile :: L.Lens' (S e u arch s) (Maybe FilePath)
-lInputFile = GL.field @"sInputFile"
-
-lLogStore :: L.Lens' (S e u arch s) SCL.LogStore
-lLogStore = GL.field @"sLogStore"
-
-diagnosticLevelL :: L.Lens' (S e u arch s) SCL.Severity
-diagnosticLevelL = GL.field @"sDiagnosticLevel"
-
-lEchoArea :: L.Lens' (S e u arch s) EA.EchoArea
-lEchoArea = GL.field @"sEchoArea"
-
-lUIMode :: L.Lens' (S e u arch s) (SomeUIMode s)
-lUIMode = GL.field @"sUIMode"
-
-lEventChannel :: L.Lens' (S e u arch s) (C.Chan (SCE.Events s (S e u)))
-lEventChannel = GL.field @"sEventChannel"
-
-lAppState :: L.Lens' (S e u arch s) AppState
-lAppState = GL.field @"sAppState"
-
-lNonceGenerator :: L.Lens' (S e u arch s) (NG.NonceGenerator IO s)
-lNonceGenerator = GL.field @"sNonceGenerator"
-
-lLoader :: L.Lens' (S e u arch s) (Maybe AsyncLoader)
-lLoader = GL.field @"sLoader"
-
-lKeymap :: L.Lens' (S e u arch s) (Keymap (AR.SurveyorCommand s (S e u)) (SomeUIMode s))
-lKeymap = GL.field @"sKeymap"
-
-lUIExtension :: L.Lens' (S e u arch s) (e s)
-lUIExtension = GL.field @"sUIExtension"
-
-lArchState :: L.Lens' (S e u arch s) (Maybe (ArchState u arch s))
-lArchState = GL.field @"sArchState"
-
--- | A data type to capture some dictionaries for architectures and IRs
---
--- Pattern match on it to bring the captured dictionaries into scope.
-data ArchDict arch s ir where
-  ArchDict :: (A.Architecture arch s, A.IR ir s) => ArchDict arch s ir
-
--- | A sub-component of the state dependent on the arch type variable
---
--- This is split out so that it is easier to see these arch-dependent components
--- and replace them all at once with only one dynamic test during incremental
--- updates.
-data ArchState u arch s =
-  ArchState { sAnalysisResult :: !(A.AnalysisResult arch s)
-            -- ^ Information returned by the binary analysis
-            --
-            -- We keep it around so that it doesn't have to re-index the commands
-            , sContext :: !(CC.ContextStack arch s)
-            -- ^ A stack of the contexts that have been focused by the user.
-            --
-            -- For now, we are just looking at the most recent context (i.e.,
-            -- each viewer will consult the most recent context to draw).
-            -- Later, there will be context-manipulation commands to allow
-            -- the user to explicitly manage the stack by popping things.
-            , sSymExState :: !(SE.SessionState arch s)
-            -- ^ Dynamically updated state for the symbolic execution engine
-            --
-            -- This is referenced from the context stack, but stored separately
-            -- because updates can be generated asynchronously and updating deep
-            -- into the context stack structure is difficult.
-            , sIRCache :: !(TC.TranslationCache arch s)
-            -- ^ A cache of blocks translated from the base architecture to
-            -- alternative architectures.  We need a cache, as the
-            -- translation can be expensive (and we don't want to have to
-            -- re-do it for each block we need to access)
-            , sArchDicts :: !(MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
-            -- ^ Captured dictionaries for each IR; given an 'IR.IRRepr', this
-            -- allows the client code to recover some class constraints.
-            --
-            -- It would be nice to just capture these in each 'IR.IRRepr', but
-            -- that would introduce some circular dependencies unless everything
-            -- was defined in the same file.
-            , sUIState :: !(u arch s)
-            -- ^ The state required for the UI extension
-            }
-  deriving (Generic)
-
-lUIState :: L.Lens' (ArchState u arch s) (u arch s)
-lUIState = GL.field @"sUIState"
-
-lAnalysisResult :: L.Lens' (ArchState u arch s) (A.AnalysisResult arch s)
-lAnalysisResult = GL.field @"sAnalysisResult"
-
-contextL :: L.Lens' (ArchState u arch s) (CC.ContextStack arch s)
-contextL = GL.field @"sContext"
-
-contextG :: L.Getter (ArchState u arch s) (CC.ContextStack arch s)
-contextG = L.to (L.^. contextL)
-
-archDictsL :: L.Lens' (ArchState u arch s) (MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
-archDictsL = GL.field @"sArchDicts"
-
-archDictsG :: L.Getter (ArchState u arch s) (MapF.MapF (IR.IRRepr arch) (ArchDict arch s))
-archDictsG = L.to (L.^. archDictsL)
-
-symExStateL :: L.Lens' (ArchState u arch s) (SE.SessionState arch s)
-symExStateL = GL.field @"sSymExState"
-
-irCacheL :: L.Lens' (ArchState u arch s) (TC.TranslationCache arch s)
-irCacheL = GL.field @"sIRCache"
-
-data AppState = Loading
-              | Ready
-              | AwaitingFile
+-- | This is a wrapper around the state type suitable for the UI core.  It hides
+-- the architecture so that the architecture can change during run-time (i.e.,
+-- when a new binary is loaded).
+data State e u s where
+  State :: (A.Architecture arch s) => !(S e u arch s) -> State e u s

@@ -36,8 +36,6 @@ import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 import qualified Data.Traversable as T
 import           Data.Void ( Void )
-import           Fmt ( (+|), (||+) )
-import qualified Fmt as Fmt
 import qualified Graphics.Vty as V
 
 import qualified Lang.Crucible.Backend as LCB
@@ -101,8 +99,8 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
       case comp of
         C.Unspecified -> ""
         C.Loader -> "Loader" @? "log-component"
-        C.EventHandler nm -> Fmt.fmt ("Event[" +| nm ||+ "]") @? "log-component"
-        C.CommandCallback nm -> Fmt.fmt ("Command[" +| nm ||+ "]") @? "log-component"
+        C.EventHandler nm -> PPT.renderStrict (PP.layoutCompact ("Event[" PP.<+> PP.pretty nm PP.<+> "]")) @? "log-component"
+        C.CommandCallback nm -> PPT.renderStrict (PP.layoutCompact ("Command[" PP.<+> PP.pretty nm PP.<+> "]")) @? "log-component"
         C.EchoAreaUpdate -> ""
 
     renderTime tm = PPT.renderStrict (PP.layoutCompact (PP.pretty tm)) @? "log-time"

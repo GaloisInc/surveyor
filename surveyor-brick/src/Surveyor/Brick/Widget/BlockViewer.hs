@@ -31,8 +31,8 @@ import           Data.Parameterized.Classes
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as S
 import qualified Data.Vector as V
-import qualified Fmt as Fmt
-import           Fmt ( (+|), (|+) )
+import qualified Data.Text.Prettyprint.Doc as PP
+import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 import           Text.Printf ( printf )
 
 import qualified Surveyor.Core as C
@@ -75,7 +75,7 @@ renderBlockViewer _ares cs (BlockViewer names repr)
   | Just ctx <- cs ^? C.currentContext
   , Just blkState <- ctx ^. C.blockStateFor repr =
       let blk = blkState ^. C.blockStateBlock
-          header = B.txt (Fmt.fmt ("Basic Block " +| C.prettyAddress (C.blockAddress blk) |+ ""))
+          header = B.txt (PPT.renderStrict (PP.layoutCompact ("Basic Block" PP.<+> PP.pretty (C.prettyAddress (C.blockAddress blk)) PP.<+> ")")))
           bl = mkBlockListState names blkState
           body = B.renderList (renderListItem (blkState ^. C.blockStateSelection)) False bl
       in B.borderWithLabel (B.hBox (map pad (irIndicators ++ [header]))) body
@@ -85,8 +85,8 @@ renderBlockViewer _ares cs (BlockViewer names repr)
     irIndicators = map toIRLabel (C.SomeIRRepr C.BaseRepr : C.alternativeIRs (Proxy @(arch, s)))
     toIRLabel (C.SomeIRRepr r)
       | Just Refl <- testEquality r repr =
-          B.withAttr B.listSelectedFocusedAttr (B.txt (Fmt.fmt ("[" +| showF r |+ "]")))
-      | otherwise = B.txt (Fmt.fmt ("[" +| showF r |+ "]"))
+          B.withAttr B.listSelectedFocusedAttr (B.txt (PPT.renderStrict (PP.layoutCompact ("[" PP.<+> PP.viaShow (showF r) PP.<+> "]"))))
+      | otherwise = B.txt (PPT.renderStrict (PP.layoutCompact ("[" PP.<+> PP.viaShow (showF r) PP.<+> "]")))
 
 -- | Construct a state for the block list widget on-demand based on the state in
 -- the context
