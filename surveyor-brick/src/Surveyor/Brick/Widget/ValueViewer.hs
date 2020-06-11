@@ -24,6 +24,7 @@ import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as LCT
 import qualified What4.BaseTypes as WT
 import qualified What4.Expr.Builder as WEB
+import qualified What4.Interface as WI
 
 import           Surveyor.Brick.Names ( Names(..) )
 
@@ -54,7 +55,7 @@ valueViewer p tp re =
 data RenderWidget = RenderInline (B.Widget Names)
                   | RenderBound (B.Widget Names) (B.Widget Names)
 
-newtype ConstWidget (tp :: WT.BaseType) = ConstWidget RenderWidget
+newtype ConstWidget (tp :: WT.BaseType) = ConstWidget { unConstWidget :: RenderWidget }
 
 newtype ViewerBuilder s sym a =
   ViewerBuilder { unViewBuilder :: St.State (MapF.MapF (PN.Nonce s) ConstWidget) a
@@ -91,6 +92,7 @@ buildTermWidget tp re =
         LCT.UnitRepr ->
           -- We don't update the cache here because we don't have a nonce for these
           return (RenderInline (B.txt "()"))
+        _ -> return (RenderInline (B.txt ("Unhandled crucible type " <> T.pack (show tp))))
     LCT.AsBaseType _btp ->
       case re of
         WEB.BoolExpr b _ -> return (RenderInline (B.txt (T.pack (show b))))
@@ -121,6 +123,25 @@ buildTermWidget tp re =
                 WEB.RealCosh e -> bindUnaryExpr ae LCT.RealValRepr e "realCosh"
                 WEB.RealExp e -> bindUnaryExpr ae LCT.RealValRepr e "realExp"
                 WEB.RealLog e -> bindUnaryExpr ae LCT.RealValRepr e "realLog"
+
+                WEB.BVTestBit bitNum e -> do
+                  e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+                  bindExpr ae (B.hBox [B.txt "bvTestBit", B.txt (T.pack (show bitNum)), e'])
+
+                WEB.BVSlt e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvSlt"
+                WEB.BVUlt e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvUlt"
+
+                WEB.BVUdiv _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvUdiv"
+                WEB.BVUrem _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvUrem"
+                WEB.BVSdiv _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvSdiv"
+                WEB.BVSrem _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvSrem"
+                WEB.BVShl _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvShl"
+                WEB.BVLshr _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvLshr"
+                WEB.BVAshr _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvAshr"
+                WEB.BVRol _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvRol"
+                WEB.BVRor _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvRor"
+
+                _ -> return (RenderInline (B.txt "Unhandled app"))
 
 
 bindBinExpr :: (sym ~ WEB.ExprBuilder s st fs)
@@ -173,4 +194,10 @@ argRef widget =
     RenderBound r _ -> r
 
 renderValueViewer :: ValueViewer s -> B.Widget Names
-renderValueViewer vv = B.vBox []
+renderValueViewer (ValueViewer vs) =
+  B.vBox [ render w | MapF.Pair _ (ConstWidget w) <- MapF.toList (cache vs) ]
+  where
+    render rw =
+      case rw of
+        RenderInline _ -> error "Only bindings should exist in the map"
+        RenderBound name w -> name B.<+> w
