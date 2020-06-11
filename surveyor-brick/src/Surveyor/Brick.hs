@@ -280,11 +280,12 @@ emptyState mfp mloader ng customEventChan = do
   -- make one (that won't match anything else)
   n0 <- PN.freshNonce ng
   let uiExt = SBC.mkExtension (C.writeChan customEventChan) n0 addrParser "M-x"
+  fileLogger <- C.defaultLogFile >>= C.logToFile
   return C.S { C.sInputFile = mfp
              , C.sLoader = mloader
              , C.sLogStore = mempty
              , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState customEventChan
-                                                , C.sFileLogger = Nothing
+                                                , C.sFileLogger = Just fileLogger
                                                 }
              , C.sDiagnosticLevel = C.Debug
              , C.sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
