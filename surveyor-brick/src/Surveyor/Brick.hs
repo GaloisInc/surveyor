@@ -20,7 +20,7 @@ import           Brick.Markup ( (@?) )
 import qualified Brick.Markup as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
-import           Control.Lens ( (^.) )
+import           Control.Lens ( (&), (^.), (.~) )
 import qualified Control.Lens as L
 import           Control.Monad ( join )
 import qualified Data.Foldable as F
@@ -169,7 +169,8 @@ isPlainKey (C.Key k ms) =
 appDraw :: C.State BH.BrickUIExtension BH.BrickUIState s -> [B.Widget Names]
 appDraw (C.State s) =
   case C.sArchState s of
-    Nothing -> drawAppShell s introText
+    Nothing ->
+      drawAppShell s (drawDiagnostics (C.sLogStore s))
     Just archState ->
       let binFileName = fromMaybe "No Input File" (C.sInputFile s)
       in case C.sUIMode s of
@@ -177,12 +178,6 @@ appDraw (C.State s) =
              drawUIMode binFileName archState s innerMode
            C.SomeUIMode mode ->
              drawUIMode binFileName archState s mode
-  where
-    introText = B.str $ unlines ["Surveyor: an interactive program exploration tool"
-                                , " * Press M-x to bring up the command prompt"
-                                , " * Use the 'load-file' command to load a program and begin"
-                                , " * C-q to quit"
-                                ]
 
 drawUIMode :: (C.Architecture arch s)
            => FilePath
@@ -258,11 +253,21 @@ surveyorWith (DebuggerConfig {}) chan s0 = do
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  let initialState = C.State s0
+  nextLogStore <- F.foldlM (\ls t -> (\msg -> C.appendLog msg ls)
+                            <$> C.timestamp (C.msgWith { C.logText = [t] }))
+                 (s0 ^. C.lLogStore) introTexts
+  let initialState = C.State (s0 & C.lLogStore .~ nextLogStore)
   let mkVty = V.mkVty V.defaultConfig
   initialVty <- mkVty
   _finalState <- B.customMain initialVty mkVty (Just chan) app initialState
   return ()
+  where
+    introTexts = [ "Surveyor: an interactive program exploration tool"
+                 , " * Press M-x to bring up the command prompt"
+                 , " * Use the 'load-file' command to load a program and begin"
+                 , " * C-q to quit"
+                 ]
+
 
 emptyState :: Maybe FilePath
            -> Maybe C.AsyncLoader
