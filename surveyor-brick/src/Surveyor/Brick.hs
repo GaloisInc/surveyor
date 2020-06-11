@@ -331,10 +331,8 @@ stateFromContext ng mkAnalysisResult chan simState = do
                           | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                           ]
 
-      sesID <- C.newSessionID ng
-      -- FIXME: Change this to a better ADT that reflects that we don't have this
-      -- config (we inherit it from the existing session)
-      let symCfg = C.SymbolicExecutionConfig sesID undefined WEB.FloatRealRepr undefined
+      symCfg <- C.defaultSymbolicExecutionConfig ng
+      let sesID = symCfg ^. C.sessionID
 
       let symSt = C.SymbolicState { C.symbolicConfig = symCfg
                                   , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
