@@ -128,7 +128,8 @@ buildTermWidget tp re =
       case re of
         WEB.BoolExpr b _ -> return (RenderInline (B.txt (T.pack (show b))))
         WEB.SemiRingLiteral srep coeff _loc -> RenderInline <$> renderCoefficient srep coeff
-        WEB.BoundVarExpr bv -> return (RenderInline (B.txt (WS.solverSymbolAsText (WEB.bvarName bv))))
+        WEB.BoundVarExpr bv ->
+          return (RenderInline (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))))
         WEB.AppExpr ae -> do
           let nonce = WEB.appExprId ae
           m <- St.get
@@ -193,6 +194,8 @@ buildTermWidget tp re =
                 WEB.BVAshr _rep e1 e2 -> bindBinExpr ae e1 e2 "bvAshr"
                 WEB.BVRol _rep e1 e2 -> bindBinExpr ae e1 e2 "bvRol"
                 WEB.BVRor _rep e1 e2 -> bindBinExpr ae e1 e2 "bvRor"
+                WEB.BVZext _rep e -> bindUnaryExpr ae e "bvZext"
+                WEB.BVSext _rep e -> bindUnaryExpr ae e "bvSext"
 
                 _ -> return (RenderInline (B.txt "Unhandled app"))
 
@@ -243,7 +246,7 @@ returnCached nonce res = do
   return res
 
 thisRef :: WEB.AppExpr t tp -> B.Widget n
-thisRef ae = B.txt (T.pack (show (WEB.appExprId ae)))
+thisRef ae = B.str (printf "$%d" (PN.indexValue (WEB.appExprId ae)))
 
 -- | Extract a widget that should be used to refer to the given 'RenderWidget'
 -- as an operand
@@ -265,4 +268,4 @@ renderValueViewer (ValueViewer vs) =
     render rw =
       case rw of
         RenderInline _ -> error "Only bindings should exist in the map"
-        RenderBound name w -> name B.<+> w
+        RenderBound name w -> intersperse [name, B.txt "=", w]
