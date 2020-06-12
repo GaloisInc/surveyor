@@ -139,6 +139,7 @@ buildTermWidget tp re =
                 WEB.NotPred e -> bindUnaryExpr ae e "notPred"
 
                 WEB.SemiRingSum ws -> do
+                  -- FIXME: need to check the repr to determine the operators
                   let renderAdd e1 e2 = return $ intersperse [e1, B.txt "+", e2]
                   let scalarMult coef val = do
                         val' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType val)) val
@@ -147,6 +148,15 @@ buildTermWidget tp re =
                   let constEval = renderCoefficient (WSum.sumRepr ws)
                   sumTerm <- WSum.evalM renderAdd scalarMult constEval ws
                   bindExpr ae sumTerm
+
+                WEB.SemiRingProd rp -> do
+                  -- FIXME: Need to check the repr to determine the operators
+                  let mul e1 e2 = return $ intersperse [e1, B.txt "*", e2]
+                  let tm val = argRef <$> buildTermWidget (LCT.baseToType (WI.exprType val)) val
+                  mProdTerm <- WSum.prodEvalM mul tm rp
+                  case mProdTerm of
+                    Nothing -> error "Unit for this repr"
+                    Just t -> bindExpr ae t
 
                 WEB.RealIsInteger e -> bindUnaryExpr ae e "realIsInteger"
 
