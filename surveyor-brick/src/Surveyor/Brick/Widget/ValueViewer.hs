@@ -30,6 +30,7 @@ import qualified What4.Expr.Builder as WEB
 import qualified What4.Expr.WeightedSum as WSum
 import qualified What4.Interface as WI
 import qualified What4.SemiRing as SR
+import qualified What4.Symbol as WS
 
 import           Surveyor.Brick.Names ( Names(..) )
 
@@ -126,8 +127,8 @@ buildTermWidget tp re =
     LCT.AsBaseType _btp ->
       case re of
         WEB.BoolExpr b _ -> return (RenderInline (B.txt (T.pack (show b))))
-        WEB.SemiRingLiteral srep coeff _loc ->
-          renderCoefficient srep coeff
+        WEB.SemiRingLiteral srep coeff _loc -> RenderInline <$> renderCoefficient srep coeff
+        WEB.BoundVarExpr bv -> return (RenderInline (B.txt (WS.solverSymbolAsText (WEB.bvarName bv))))
         WEB.AppExpr ae -> do
           let nonce = WEB.appExprId ae
           m <- St.get
@@ -137,13 +138,15 @@ buildTermWidget tp re =
               case WEB.appExprApp ae of
                 WEB.NotPred e -> bindUnaryExpr ae e "notPred"
 
-                -- WEB.SemiRingSum ws -> do
-                --   let srep = WI.exprType re
-                --   let renderAdd = undefined
-                --   let scalarMult = undefined
-                --   let constEval = renderCoefficient srep
-                --   WSum.evalM renderAdd scalarMult constEval ws
-                --   undefined
+                WEB.SemiRingSum ws -> do
+                  let renderAdd e1 e2 = return $ intersperse [e1, B.txt "+", e2]
+                  let scalarMult coef val = do
+                        val' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType val)) val
+                        coefw <- renderCoefficient (WSum.sumRepr ws) coef
+                        return (intersperse [coefw, B.txt "*", val'])
+                  let constEval = renderCoefficient (WSum.sumRepr ws)
+                  sumTerm <- WSum.evalM renderAdd scalarMult constEval ws
+                  bindExpr ae sumTerm
 
                 WEB.RealIsInteger e -> bindUnaryExpr ae e "realIsInteger"
 
@@ -183,16 +186,16 @@ buildTermWidget tp re =
 
                 _ -> return (RenderInline (B.txt "Unhandled app"))
 
-renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m RenderWidget
+renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m (B.Widget n)
 renderCoefficient srep coeff =
   case srep of
-    SR.SemiRingNatRepr -> return (RenderInline (B.str (show coeff)))
-    SR.SemiRingIntegerRepr -> return (RenderInline (B.str (show coeff)))
-    SR.SemiRingRealRepr -> return (RenderInline (B.str (show coeff)))
+    SR.SemiRingNatRepr -> return (B.str (show coeff))
+    SR.SemiRingIntegerRepr -> return (B.str (show coeff))
+    SR.SemiRingRealRepr -> return (B.str (show coeff))
     SR.SemiRingBVRepr bvFlv nr ->
       case bvFlv of
-        SR.BVArithRepr -> return (RenderInline (B.str (show coeff)))
-        SR.BVBitsRepr -> return (RenderInline (B.str (printf "0x%x" coeff)))
+        SR.BVArithRepr -> return (B.str (show coeff))
+        SR.BVBitsRepr -> return (B.str (printf "0x%x" coeff))
 
 -- | Concatenate widgets with spaces in between
 intersperse :: [B.Widget n] -> B.Widget n
