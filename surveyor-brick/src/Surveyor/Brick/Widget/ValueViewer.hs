@@ -34,6 +34,9 @@ data ValueViewerState s sym tp =
                    , cache :: MapF.MapF (PN.Nonce s) ConstWidget
                    -- ^ Previous translations of terms into widgets, cached to
                    -- avoid recomputation
+                   , rootWidget :: B.Widget Names
+                   -- ^ The top-level widget that demands the values defined in
+                   -- the cache
                    , vsProxy :: Proxy sym
                    }
 
@@ -55,7 +58,17 @@ valueViewer p tp re =
 data RenderWidget = RenderInline (B.Widget Names)
                   | RenderBound (B.Widget Names) (B.Widget Names)
 
-newtype ConstWidget (tp :: WT.BaseType) = ConstWidget { unConstWidget :: RenderWidget }
+renderedWidget :: RenderWidget -> B.Widget Names
+renderedWidget rw =
+  case rw of
+    RenderInline w -> w
+    RenderBound _name w -> w
+
+-- | This is a simple wrapper around a 'RenderWidget' to throw away a type
+-- parameter so that we can store it in a 'MapF.MapF'.  We need a custom type
+-- instead of just using 'Data.Functor.Const' because that type is too
+-- polymorphic and causes some type inference problems.
+newtype ConstWidget (tp :: WT.BaseType) = ConstWidget RenderWidget
 
 newtype ViewerBuilder s sym a =
   ViewerBuilder { unViewBuilder :: St.State (MapF.MapF (PN.Nonce s) ConstWidget) a
@@ -77,9 +90,15 @@ buildViewer _p tp re = do
   --
   -- We'll use this same primitive for rendering later, but then we'll start it
   -- with a primed cache
-  _ <- buildTermWidget tp re
+  root <- buildTermWidget tp re
   c <- St.get
-  return (ValueViewer (ValueViewerState tp re c (Proxy @sym)))
+  let vvs = ValueViewerState { regType = tp
+                             , regValue = re
+                             , cache = c
+                             , rootWidget = renderedWidget root
+                             , vsProxy = Proxy @sym
+                             }
+  return (ValueViewer vvs)
 
 buildTermWidget :: (sym ~ WEB.ExprBuilder s st fs)
                 => LCT.TypeRepr tp
@@ -195,7 +214,7 @@ argRef widget =
 
 renderValueViewer :: ValueViewer s -> B.Widget Names
 renderValueViewer (ValueViewer vs) =
-  B.vBox [ render w | MapF.Pair _ (ConstWidget w) <- MapF.toList (cache vs) ]
+  B.vBox ([ render w | MapF.Pair _ (ConstWidget w) <- MapF.toList (cache vs) ] ++ [rootWidget vs])
   where
     render rw =
       case rw of
