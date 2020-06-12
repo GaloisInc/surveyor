@@ -16,15 +16,20 @@ module Surveyor.Brick.Widget.ValueViewer (
 
 import qualified Brick as B
 import qualified Control.Monad.State.Strict as St
+import qualified Data.List as L
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
+import qualified Lang.Crucible.LLVM.MemModel as CLM
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as LCT
+import           Text.Printf ( printf )
 import qualified What4.BaseTypes as WT
 import qualified What4.Expr.Builder as WEB
+import qualified What4.Expr.WeightedSum as WSum
 import qualified What4.Interface as WI
+import qualified What4.SemiRing as SR
 
 import           Surveyor.Brick.Names ( Names(..) )
 
@@ -111,10 +116,18 @@ buildTermWidget tp re =
         LCT.UnitRepr ->
           -- We don't update the cache here because we don't have a nonce for these
           return (RenderInline (B.txt "()"))
+        CLM.LLVMPointerRepr _w ->
+          case re of
+            CLM.LLVMPointer base off -> do
+              base' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType base)) base
+              off' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType off)) off
+              return (RenderInline (intersperse [B.txt "llvmPointer", base', off']))
         _ -> return (RenderInline (B.txt ("Unhandled crucible type " <> T.pack (show tp))))
     LCT.AsBaseType _btp ->
       case re of
         WEB.BoolExpr b _ -> return (RenderInline (B.txt (T.pack (show b))))
+        WEB.SemiRingLiteral srep coeff _loc ->
+          renderCoefficient srep coeff
         WEB.AppExpr ae -> do
           let nonce = WEB.appExprId ae
           m <- St.get
@@ -122,68 +135,88 @@ buildTermWidget tp re =
             Just (ConstWidget cached) -> return cached
             Nothing ->
               case WEB.appExprApp ae of
-                WEB.NotPred e -> bindUnaryExpr ae LCT.BoolRepr e "notPred"
+                WEB.NotPred e -> bindUnaryExpr ae e "notPred"
 
-                WEB.RealIsInteger e -> bindUnaryExpr ae LCT.RealValRepr e "realIsInteger"
+                -- WEB.SemiRingSum ws -> do
+                --   let srep = WI.exprType re
+                --   let renderAdd = undefined
+                --   let scalarMult = undefined
+                --   let constEval = renderCoefficient srep
+                --   WSum.evalM renderAdd scalarMult constEval ws
+                --   undefined
 
-                WEB.NatDiv e1 e2 -> bindBinExpr ae LCT.NatRepr e1 e2 "natDiv"
-                WEB.NatMod e1 e2 -> bindBinExpr ae LCT.NatRepr e1 e2 "natMod"
+                WEB.RealIsInteger e -> bindUnaryExpr ae e "realIsInteger"
 
-                WEB.IntDiv e1 e2 -> bindBinExpr ae LCT.IntegerRepr e1 e2 "intDiv"
-                WEB.IntMod e1 e2 -> bindBinExpr ae LCT.IntegerRepr e1 e2 "intMod"
+                WEB.NatDiv e1 e2 -> bindBinExpr ae e1 e2 "natDiv"
+                WEB.NatMod e1 e2 -> bindBinExpr ae e1 e2 "natMod"
 
-                WEB.RealDiv e1 e2 -> bindBinExpr ae LCT.RealValRepr e1 e2 "realDiv"
-                WEB.RealSqrt e -> bindUnaryExpr ae LCT.RealValRepr e "realSqrt"
+                WEB.IntDiv e1 e2 -> bindBinExpr ae e1 e2 "intDiv"
+                WEB.IntMod e1 e2 -> bindBinExpr ae e1 e2 "intMod"
 
-                WEB.RealSin e -> bindUnaryExpr ae LCT.RealValRepr e "realSin"
-                WEB.RealCos e -> bindUnaryExpr ae LCT.RealValRepr e "realCos"
-                WEB.RealATan2 e1 e2 -> bindBinExpr ae LCT.RealValRepr e1 e2 "realATan2"
-                WEB.RealSinh e -> bindUnaryExpr ae LCT.RealValRepr e "realSinh"
-                WEB.RealCosh e -> bindUnaryExpr ae LCT.RealValRepr e "realCosh"
-                WEB.RealExp e -> bindUnaryExpr ae LCT.RealValRepr e "realExp"
-                WEB.RealLog e -> bindUnaryExpr ae LCT.RealValRepr e "realLog"
+                WEB.RealDiv e1 e2 -> bindBinExpr ae e1 e2 "realDiv"
+                WEB.RealSqrt e -> bindUnaryExpr ae e "realSqrt"
+
+                WEB.RealSin e -> bindUnaryExpr ae e "realSin"
+                WEB.RealCos e -> bindUnaryExpr ae e "realCos"
+                WEB.RealATan2 e1 e2 -> bindBinExpr ae e1 e2 "realATan2"
+                WEB.RealSinh e -> bindUnaryExpr ae e "realSinh"
+                WEB.RealCosh e -> bindUnaryExpr ae e "realCosh"
+                WEB.RealExp e -> bindUnaryExpr ae e "realExp"
+                WEB.RealLog e -> bindUnaryExpr ae e "realLog"
 
                 WEB.BVTestBit bitNum e -> do
                   e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
-                  bindExpr ae (B.hBox [B.txt "bvTestBit", B.txt (T.pack (show bitNum)), e'])
+                  bindExpr ae (intersperse [B.txt "bvTestBit", B.str (show bitNum), e'])
 
-                WEB.BVSlt e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvSlt"
-                WEB.BVUlt e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvUlt"
+                WEB.BVSlt e1 e2 -> bindBinExpr ae e1 e2 "bvSlt"
+                WEB.BVUlt e1 e2 -> bindBinExpr ae e1 e2 "bvUlt"
 
-                WEB.BVUdiv _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvUdiv"
-                WEB.BVUrem _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvUrem"
-                WEB.BVSdiv _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvSdiv"
-                WEB.BVSrem _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvSrem"
-                WEB.BVShl _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvShl"
-                WEB.BVLshr _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvLshr"
-                WEB.BVAshr _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvAshr"
-                WEB.BVRol _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvRol"
-                WEB.BVRor _rep e1 e2 -> bindBinExpr ae (LCT.baseToType (WI.exprType e1)) e1 e2 "bvRor"
+                WEB.BVUdiv _rep e1 e2 -> bindBinExpr ae e1 e2 "bvUdiv"
+                WEB.BVUrem _rep e1 e2 -> bindBinExpr ae e1 e2 "bvUrem"
+                WEB.BVSdiv _rep e1 e2 -> bindBinExpr ae e1 e2 "bvSdiv"
+                WEB.BVSrem _rep e1 e2 -> bindBinExpr ae e1 e2 "bvSrem"
+                WEB.BVShl _rep e1 e2 -> bindBinExpr ae e1 e2 "bvShl"
+                WEB.BVLshr _rep e1 e2 -> bindBinExpr ae e1 e2 "bvLshr"
+                WEB.BVAshr _rep e1 e2 -> bindBinExpr ae e1 e2 "bvAshr"
+                WEB.BVRol _rep e1 e2 -> bindBinExpr ae e1 e2 "bvRol"
+                WEB.BVRor _rep e1 e2 -> bindBinExpr ae e1 e2 "bvRor"
 
                 _ -> return (RenderInline (B.txt "Unhandled app"))
 
+renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m RenderWidget
+renderCoefficient srep coeff =
+  case srep of
+    SR.SemiRingNatRepr -> return (RenderInline (B.str (show coeff)))
+    SR.SemiRingIntegerRepr -> return (RenderInline (B.str (show coeff)))
+    SR.SemiRingRealRepr -> return (RenderInline (B.str (show coeff)))
+    SR.SemiRingBVRepr bvFlv nr ->
+      case bvFlv of
+        SR.BVArithRepr -> return (RenderInline (B.str (show coeff)))
+        SR.BVBitsRepr -> return (RenderInline (B.str (printf "0x%x" coeff)))
+
+-- | Concatenate widgets with spaces in between
+intersperse :: [B.Widget n] -> B.Widget n
+intersperse = B.hBox . L.intersperse (B.txt " ")
 
 bindBinExpr :: (sym ~ WEB.ExprBuilder s st fs)
             => WEB.AppExpr s tp1
-            -> LCT.TypeRepr tp2
-            -> LCSR.RegValue sym tp2
-            -> LCSR.RegValue sym tp2
+            -> WI.SymExpr sym bt1
+            -> WI.SymExpr sym bt2
             -> T.Text
             -> ViewerBuilder s sym RenderWidget
-bindBinExpr ae repr e1 e2 name = do
-  e1' <- argRef <$> buildTermWidget repr e1
-  e2' <- argRef <$> buildTermWidget repr e2
-  bindExpr ae (B.txt name B.<+> e1' B.<+> e2')
+bindBinExpr ae e1 e2 name = do
+  e1' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e1)) e1
+  e2' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e2)) e2
+  bindExpr ae (intersperse [B.txt name, e1', e2'])
 
 bindUnaryExpr :: (sym ~ WEB.ExprBuilder s st fs)
               => WEB.AppExpr s tp1
-              -> LCT.TypeRepr tp2
-              -> LCSR.RegValue sym tp2
+              -> WI.SymExpr sym tp2
               -> T.Text
               -> ViewerBuilder s sym RenderWidget
-bindUnaryExpr ae repr e name = do
-  e' <- argRef <$> buildTermWidget repr e
-  bindExpr ae (B.txt name B.<+> e')
+bindUnaryExpr ae e name = do
+  e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+  bindExpr ae (intersperse [B.txt name, e'])
 
 bindExpr :: WEB.AppExpr t tp -> B.Widget Names -> ViewerBuilder t sym RenderWidget
 bindExpr ae w = returnCached (WEB.appExprId ae) $! RenderBound (thisRef ae) w
