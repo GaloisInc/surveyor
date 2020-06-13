@@ -214,6 +214,9 @@ buildTermWidget tp re =
                 WEB.BVRor _rep e1 e2 -> bindBinExpr ae e1 e2 "bvRor"
                 WEB.BVZext _rep e -> bindUnaryExpr ae e "bvZext"
                 WEB.BVSext _rep e -> bindUnaryExpr ae e "bvSext"
+                WEB.BVPopcount _rep e -> bindUnaryExpr ae e "bvPopcount"
+                WEB.BVCountTrailingZeros _rep e -> bindUnaryExpr ae e "bvCtz"
+                WEB.BVCountLeadingZeros _rep e -> bindUnaryExpr ae e "bvClz"
 
                 _ -> return (RenderInline (B.txt "Unhandled app"))
 
