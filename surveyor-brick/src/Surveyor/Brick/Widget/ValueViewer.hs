@@ -17,6 +17,7 @@ module Surveyor.Brick.Widget.ValueViewer (
 import qualified Brick as B
 import qualified Control.Monad.State.Strict as St
 import qualified Data.List as L
+import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Proxy ( Proxy(..) )
@@ -146,24 +147,35 @@ buildTermWidget tp re =
                 WEB.NotPred e -> bindUnaryExpr ae e "notPred"
 
                 WEB.SemiRingSum ws -> do
-                  -- FIXME: need to check the repr to determine the operators
-                  let renderAdd e1 e2 = return $ intersperse [e1, B.txt "+", e2]
+                  let (addOp, mulOp) = case WSum.sumRepr ws of
+                        SR.SemiRingRealRepr -> ("realSum", "realMul")
+                        SR.SemiRingIntegerRepr -> ("intSum", "intMul")
+                        SR.SemiRingNatRepr -> ("natSum", "natMul")
+                        SR.SemiRingBVRepr SR.BVArithRepr _w -> ("bvSum", "bvMul")
+                        SR.SemiRingBVRepr SR.BVBitsRepr _w -> ("bvXor", "bvAnd")
+                  let renderAdd e1 e2 = return $ intersperse [B.txt addOp, e1, e2]
                   let scalarMult coef val = do
                         val' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType val)) val
                         coefw <- renderCoefficient (WSum.sumRepr ws) coef
-                        return (intersperse [coefw, B.txt "*", val'])
+                        return (intersperse [B.txt mulOp, coefw, val'])
                   let constEval = renderCoefficient (WSum.sumRepr ws)
                   sumTerm <- WSum.evalM renderAdd scalarMult constEval ws
                   bindExpr ae sumTerm
 
                 WEB.SemiRingProd rp -> do
-                  -- FIXME: Need to check the repr to determine the operators
-                  let mul e1 e2 = return $ intersperse [e1, B.txt "*", e2]
-                  let tm val = argRef <$> buildTermWidget (LCT.baseToType (WI.exprType val)) val
-                  mProdTerm <- WSum.prodEvalM mul tm rp
-                  case mProdTerm of
-                    Nothing -> error "Unit for this repr"
-                    Just t -> bindExpr ae t
+                  let op = case WSum.prodRepr rp of
+                        SR.SemiRingRealRepr -> "realProd"
+                        SR.SemiRingIntegerRepr -> "intProd"
+                        SR.SemiRingNatRepr -> "natProd"
+                        SR.SemiRingBVRepr SR.BVArithRepr _w -> "bvProd"
+                        SR.SemiRingBVRepr SR.BVBitsRepr _w -> "bvAnd"
+                  let mul acc e = return (e ++ acc)
+                  let tm val = do
+                        rw <- buildTermWidget (LCT.baseToType (WI.exprType val)) val
+                        return [argRef rw]
+                  mProdTerms <- WSum.prodEvalM mul tm rp
+                  let prodTerms = fromMaybe [] mProdTerms
+                  bindExpr ae (intersperse (B.txt op : prodTerms))
 
                 WEB.RealIsInteger e -> bindUnaryExpr ae e "realIsInteger"
 
