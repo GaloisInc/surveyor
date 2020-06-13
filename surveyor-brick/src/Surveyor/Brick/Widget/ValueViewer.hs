@@ -153,11 +153,11 @@ buildTermWidget tp re =
                         SR.SemiRingNatRepr -> ("natSum", "natMul")
                         SR.SemiRingBVRepr SR.BVArithRepr _w -> ("bvSum", "bvMul")
                         SR.SemiRingBVRepr SR.BVBitsRepr _w -> ("bvXor", "bvAnd")
-                  let renderAdd e1 e2 = return $ intersperse [B.txt addOp, e1, e2]
+                  let renderAdd e1 e2 = return (B.txt "(" B.<+> intersperse [B.txt addOp, e1, e2] B.<+> B.txt ")")
                   let scalarMult coef val = do
                         val' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType val)) val
                         coefw <- renderCoefficient (WSum.sumRepr ws) coef
-                        return (intersperse [B.txt mulOp, coefw, val'])
+                        return (B.txt "(" B.<+> intersperse [B.txt mulOp, coefw, val'] B.<+> B.txt ")")
                   let constEval = renderCoefficient (WSum.sumRepr ws)
                   sumTerm <- WSum.evalM renderAdd scalarMult constEval ws
                   bindExpr ae sumTerm
