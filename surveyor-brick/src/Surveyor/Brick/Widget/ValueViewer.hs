@@ -31,6 +31,7 @@ import qualified What4.Expr.WeightedSum as WSum
 import qualified What4.Interface as WI
 import qualified What4.SemiRing as SR
 import qualified What4.Symbol as WS
+import qualified What4.Utils.StringLiteral as WUS
 
 import           Surveyor.Brick.Names ( Names(..) )
 
@@ -128,6 +129,11 @@ buildTermWidget tp re =
       case re of
         WEB.BoolExpr b _ -> return (RenderInline (B.txt (T.pack (show b))))
         WEB.SemiRingLiteral srep coeff _loc -> RenderInline <$> renderCoefficient srep coeff
+        WEB.StringExpr sl _loc ->
+          case sl of
+            WUS.UnicodeLiteral t -> return (RenderInline (B.txt "\"" B.<+> B.txt t B.<+> B.txt "\""))
+            WUS.Char8Literal bs -> return (RenderInline (B.str (show bs)))
+            WUS.Char16Literal ws -> return (RenderInline (B.str (show ws)))
         WEB.BoundVarExpr bv ->
           return (RenderInline (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))))
         WEB.AppExpr ae -> do
