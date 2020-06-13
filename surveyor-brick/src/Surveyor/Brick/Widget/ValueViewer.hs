@@ -118,23 +118,23 @@ buildTermWidget tp re =
       case tp of
         LCT.UnitRepr ->
           -- We don't update the cache here because we don't have a nonce for these
-          return (RenderInline (B.txt "()"))
+          inline (B.txt "()")
         CLM.LLVMPointerRepr _w ->
           case re of
             CLM.LLVMPointer base off -> do
               base' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType base)) base
               off' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType off)) off
-              return (RenderInline (intersperse [B.txt "llvmPointer", base', off']))
-        _ -> return (RenderInline (B.txt ("Unhandled crucible type " <> T.pack (show tp))))
+              inline (intersperse [B.txt "llvmPointer", base', off'])
+        _ -> inline (B.txt ("Unhandled crucible type " <> T.pack (show tp)))
     LCT.AsBaseType _btp ->
       case re of
-        WEB.BoolExpr b _ -> return (RenderInline (B.txt (T.pack (show b))))
+        WEB.BoolExpr b _ -> inline (B.txt (T.pack (show b)))
         WEB.SemiRingLiteral srep coeff _loc -> RenderInline <$> renderCoefficient srep coeff
         WEB.StringExpr sl _loc ->
           case sl of
-            WUS.UnicodeLiteral t -> return (RenderInline (B.txt "\"" B.<+> B.txt t B.<+> B.txt "\""))
-            WUS.Char8Literal bs -> return (RenderInline (B.str (show bs)))
-            WUS.Char16Literal ws -> return (RenderInline (B.str (show ws)))
+            WUS.UnicodeLiteral t -> inline (B.txt "\"" B.<+> B.txt t B.<+> B.txt "\"")
+            WUS.Char8Literal bs -> inline (B.str (show bs))
+            WUS.Char16Literal ws -> inline (B.str (show ws))
         WEB.BoundVarExpr bv ->
           return (RenderInline (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))))
         WEB.AppExpr ae -> do
@@ -218,7 +218,41 @@ buildTermWidget tp re =
                 WEB.BVCountTrailingZeros _rep e -> bindUnaryExpr ae e "bvCtz"
                 WEB.BVCountLeadingZeros _rep e -> bindUnaryExpr ae e "bvClz"
 
-                _ -> return (RenderInline (B.txt "Unhandled app"))
+                WEB.FloatPZero _rep -> inline (B.txt "+0")
+                WEB.FloatNZero _rep -> inline (B.txt "-0")
+                WEB.FloatNaN _rep -> inline (B.txt "NaN")
+                WEB.FloatPInf _rep -> inline (B.txt "+Inf")
+                WEB.FloatNInf _rep -> inline (B.txt "-Inf")
+                WEB.FloatNeg _rep e -> bindUnaryExpr ae e "floatNeg"
+                WEB.FloatAbs _rep e -> bindUnaryExpr ae e "floatAbs"
+                WEB.FloatSqrt _rep rm e -> bindUnaryFloatExpr ae rm e "floatSqrt"
+                WEB.FloatAdd _rep rm e1 e2 -> bindBinaryFloatExpr ae rm e1 e2 "floatAdd"
+                WEB.FloatSub _rep rm e1 e2 -> bindBinaryFloatExpr ae rm e1 e2 "floatSub"
+                WEB.FloatMul _rep rm e1 e2 -> bindBinaryFloatExpr ae rm e1 e2 "floatMul"
+                WEB.FloatDiv _rep rm e1 e2 -> bindBinaryFloatExpr ae rm e1 e2 "floatDiv"
+                WEB.FloatRem _rep e1 e2 -> bindBinExpr ae e1 e2 "floatRem"
+                WEB.FloatMin _rep e1 e2 -> bindBinExpr ae e1 e2 "floatMin"
+                WEB.FloatMax _rep e1 e2 -> bindBinExpr ae e1 e2 "floatMax"
+                WEB.FloatFpEq e1 e2 -> bindBinExpr ae e1 e2 "floatFpEq"
+                WEB.FloatFpNe e1 e2 -> bindBinExpr ae e1 e2 "floatFpNe"
+                WEB.FloatLe e1 e2 -> bindBinExpr ae e1 e2 "floatLe"
+                WEB.FloatLt e1 e2 -> bindBinExpr ae e1 e2 "floatLt"
+                WEB.FloatIsNaN e -> bindUnaryExpr ae e "floatIsNaN"
+                WEB.FloatIsInf e -> bindUnaryExpr ae e "floatIsInf"
+                WEB.FloatIsZero e -> bindUnaryExpr ae e "floatIsZero"
+                WEB.FloatIsPos e -> bindUnaryExpr ae e "floatIsPos"
+                WEB.FloatIsNeg e -> bindUnaryExpr ae e "floatIsNeg"
+                WEB.FloatIsSubnorm e -> bindUnaryExpr ae e "floatIsSubnorm"
+                WEB.FloatIsNorm e -> bindUnaryExpr ae e "floatIsNorm"
+
+
+
+                _ -> inline (B.txt "Unhandled app")
+
+inline :: (Monad m) => B.Widget Names -> m RenderWidget
+inline = return . RenderInline
+
+
 
 renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m (B.Widget n)
 renderCoefficient srep coeff =
@@ -230,6 +264,39 @@ renderCoefficient srep coeff =
       case bvFlv of
         SR.BVArithRepr -> return (B.str (show coeff))
         SR.BVBitsRepr -> return (B.str (printf "0x%x" coeff))
+
+renderRoundingMode :: WI.RoundingMode -> B.Widget n
+renderRoundingMode rm =
+  case rm of
+    WI.RNE -> B.txt "rne"
+    WI.RNA -> B.txt "rna"
+    WI.RTP -> B.txt "rtp"
+    WI.RTN -> B.txt "rtn"
+    WI.RTZ -> B.txt "rtz"
+
+bindUnaryFloatExpr :: (sym ~ WEB.ExprBuilder s st fs)
+                   => WEB.AppExpr s tp1
+                   -> WI.RoundingMode
+                   -> WI.SymExpr sym bt1
+                   -> T.Text
+                   -> ViewerBuilder s sym RenderWidget
+bindUnaryFloatExpr ae rm e name = do
+  e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+  let rmw = renderRoundingMode rm
+  bindExpr ae (intersperse [B.txt name, rmw, e'])
+
+bindBinaryFloatExpr :: (sym ~ WEB.ExprBuilder s st fs)
+                    => WEB.AppExpr s tp1
+                    -> WI.RoundingMode
+                    -> WI.SymExpr sym bt1
+                    -> WI.SymExpr sym bt2
+                    -> T.Text
+                    -> ViewerBuilder s sym RenderWidget
+bindBinaryFloatExpr ae rm e1 e2 name = do
+  e1' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e1)) e1
+  e2' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e2)) e2
+  let rmw = renderRoundingMode rm
+  bindExpr ae (intersperse [B.txt name, rmw, e1', e2'])
 
 -- | Concatenate widgets with spaces in between
 intersperse :: [B.Widget n] -> B.Widget n
