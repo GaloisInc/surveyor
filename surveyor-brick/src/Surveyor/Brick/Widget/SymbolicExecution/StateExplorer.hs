@@ -64,9 +64,20 @@ L.makeLenses ''ValueSelector
 -- | This wrapper quantifies out the ctx parameter from the form so that we can
 -- return it
 data ValueSelectorForm s ctx e where
+  -- | A degenerate constructor in the case where the breakpoint captured no
+  -- values.  We need this, as we cannot construct a value of type
+  -- 'ValueSelector' if there are no entries in the list (since we would not be
+  -- able to construct an 'Ctx.Index' into the empty 'Ctx.Assignment')
   NoValues :: ValueSelectorForm s ctx e
+  -- | A form that tracks the state of the currently selected value.  The data
+  -- payload of the form is the 'ValueSelector', which tells us the currently
+  -- selected index (which is a valid index into the list of 'WrappedViewer's in
+  -- the 'StateExplorer')
   ValueSelectorForm :: B.Form (ValueSelector s ctx) e Names -> ValueSelectorForm s ctx e
 
+-- | Another type wrapper that adds a phantom type parameter so that we can
+-- store 'WVV.ValueViewer's in 'Ctx.Assignment's.  It isn't strictly necessary
+-- to do so, but it gives us total indexing where a Map would not.
 data WrappedViewer s (tp :: LCCC.CrucibleType) where
   WrappedViewer :: WVV.ValueViewer s -> WrappedViewer s tp
 
@@ -80,6 +91,22 @@ data StateExplorer s e where
                 -> BF.FocusRing Names
                 -> StateExplorer s e
 
+-- | Construct the necessary explorer state from a suspended symbolic execution state
+--
+-- This is a little tricky because the values in the 'StateExplorer' capture and
+-- existentially quantify some types that are also quantified under the
+-- 'C.SymbolicExecutionState' constructor, hence some of the verbose type
+-- signatures below.
+--
+-- At a high level, this function examines all of the values captured by a
+-- breakpoint and builds viewers to inspect them.  We use 'Ctx.Assignment's here
+-- to provide total indexing, which unfortunately makes the types a bit
+-- complicated and involves a few wrapper types.
+--
+-- We construct a viewer for each value, as each viewer widget tracks its own
+-- state about which constituent values are currently selected.  We also track
+-- our own focus widget to determine if we should send events to the value
+-- selector widget or the value viewer widget.
 stateExplorer :: forall e arch s
                . C.SymbolicExecutionState arch s C.Suspend
               -> StateExplorer s e
@@ -139,14 +166,16 @@ renderSelectedValue :: forall s e
 renderSelectedValue (StateExplorer vsf viewers focus) =
   case vsf of
     NoValues -> B.emptyWidget
-    ValueSelectorForm f ->
-      case f ^. L.to B.formState . index of
-        Some idx ->
-          case viewers Ctx.! idx of
-            WrappedViewer vv ->
-              let isFocused = BF.focusGetCurrent focus == Just BreakpointValueViewer
-              in WVV.renderValueViewer isFocused vv
+    ValueSelectorForm f
+      | Some idx <- f ^. L.to B.formState . index
+      , WrappedViewer vv <- viewers Ctx.! idx ->
+          let isFocused = BF.focusGetCurrent focus == Just BreakpointValueViewer
+          in WVV.renderValueViewer isFocused vv
 
+-- | Handle events for the 'StateExplorer'
+--
+-- This handles changing focus between the two sub-widgets via tab.  Beyond
+-- that, it delegates all events to the currently focused sub-widget.
 handleSymbolicExecutionStateExplorerEvent :: B.BrickEvent Names e
                                           -> (C.SymbolicExecutionState arch s C.Suspend, StateExplorer s e)
                                           -> B.EventM Names (C.SymbolicExecutionState arch s C.Suspend, StateExplorer s e)
@@ -165,9 +194,9 @@ handleSymbolicExecutionStateExplorerEvent evt s0@(C.Suspended suspSt, StateExplo
             Just BreakpointValueSelectorForm -> do
               f' <- B.handleFormEvent evt f
               return (C.Suspended suspSt, StateExplorer (ValueSelectorForm f') viewers focus)
-            Just BreakpointValueViewer -> do
-              case f ^. L.to B.formState . index of
-                Some idx | WrappedViewer valView <- viewers Ctx.! idx -> do
+            Just BreakpointValueViewer
+              | Some idx <- f ^. L.to B.formState . index
+              , WrappedViewer valView <- viewers Ctx.! idx -> do
                   v' <- WVV.handleValueViewerEvent ve valView
                   let viewers' = L.set (PC.ixF idx) (WrappedViewer v') viewers
                   return (C.Suspended suspSt, StateExplorer vsf viewers' focus)
