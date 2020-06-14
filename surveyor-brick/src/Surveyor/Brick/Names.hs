@@ -23,4 +23,7 @@ data Names = DiagnosticView
            | FloatModeRadioSelection T.Text
            | SolverInteractionFileEdit
            | SelectedBreakpointValue Int
+           | ValueViewerList
+           | BreakpointValueSelectorForm
+           | BreakpointValueViewer
   deriving (Eq, Ord, Show)

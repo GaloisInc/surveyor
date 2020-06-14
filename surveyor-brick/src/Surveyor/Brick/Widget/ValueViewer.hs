@@ -11,10 +11,12 @@
 module Surveyor.Brick.Widget.ValueViewer (
   ValueViewer,
   valueViewer,
-  renderValueViewer
+  renderValueViewer,
+  handleValueViewerEvent
   ) where
 
 import qualified Brick as B
+import qualified Brick.Widgets.List as BL
 import qualified Control.Monad.State.Strict as St
 import qualified Data.List as L
 import           Data.Maybe ( fromMaybe )
@@ -22,6 +24,8 @@ import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
+import qualified Data.Vector as DV
+import qualified Graphics.Vty as GV
 import qualified Lang.Crucible.LLVM.MemModel as CLM
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as LCT
@@ -45,6 +49,10 @@ data ValueViewerState s sym tp =
                    , rootWidget :: B.Widget Names
                    -- ^ The top-level widget that demands the values defined in
                    -- the cache
+                   , valueList :: BL.GenericList Names DV.Vector RenderWidget
+                   -- ^ The state of the Brick list we use to render values
+                   --
+                   -- This tracks things like selection state
                    , vsProxy :: Proxy sym
                    }
 
@@ -100,11 +108,13 @@ buildViewer _p tp re = do
   -- with a primed cache
   root <- buildTermWidget tp re
   c <- St.get
+  let vals = DV.fromList ([ w | MapF.Pair _ (ConstWidget w) <- MapF.toList c ] ++ [root])
   let vvs = ValueViewerState { regType = tp
                              , regValue = re
                              , cache = c
                              , rootWidget = renderedWidget root
                              , vsProxy = Proxy @sym
+                             , valueList = BL.list ValueViewerList vals 1
                              }
   return (ValueViewer vvs)
 
@@ -349,11 +359,18 @@ argRef widget =
     RenderInline w -> w
     RenderBound r _ -> r
 
-renderValueViewer :: ValueViewer s -> B.Widget Names
-renderValueViewer (ValueViewer vs) =
-  B.vBox ([ render w | MapF.Pair _ (ConstWidget w) <- MapF.toList (cache vs) ] ++ [rootWidget vs])
+renderValueViewer :: Bool -> ValueViewer s -> B.Widget Names
+renderValueViewer viewerFocused (ValueViewer vs) =
+  BL.renderList render viewerFocused (valueList vs)
   where
-    render rw =
+    render _hasFocus rw =
       case rw of
-        RenderInline _ -> error "Only bindings should exist in the map"
+        RenderInline w -> w
         RenderBound name w -> intersperse [name, B.txt "=", w]
+
+handleValueViewerEvent :: GV.Event
+                       -> ValueViewer s
+                       -> B.EventM Names (ValueViewer s)
+handleValueViewerEvent evt (ValueViewer vs) = do
+  l' <- BL.handleListEvent evt (valueList vs)
+  return (ValueViewer vs { valueList = l' })
