@@ -20,7 +20,7 @@ import           Brick.Markup ( (@?) )
 import qualified Brick.Markup as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
-import           Control.Lens ( (^.) )
+import           Control.Lens ( (&), (^.), (.~) )
 import qualified Control.Lens as L
 import           Control.Monad ( join )
 import qualified Data.Foldable as F
@@ -169,7 +169,8 @@ isPlainKey (C.Key k ms) =
 appDraw :: C.State BH.BrickUIExtension BH.BrickUIState s -> [B.Widget Names]
 appDraw (C.State s) =
   case C.sArchState s of
-    Nothing -> drawAppShell s introText
+    Nothing ->
+      drawAppShell s (drawDiagnostics (C.sLogStore s))
     Just archState ->
       let binFileName = fromMaybe "No Input File" (C.sInputFile s)
       in case C.sUIMode s of
@@ -177,12 +178,6 @@ appDraw (C.State s) =
              drawUIMode binFileName archState s innerMode
            C.SomeUIMode mode ->
              drawUIMode binFileName archState s mode
-  where
-    introText = B.str $ unlines ["Surveyor: an interactive program exploration tool"
-                                , " * Press M-x to bring up the command prompt"
-                                , " * Use the 'load-file' command to load a program and begin"
-                                , " * C-q to quit"
-                                ]
 
 drawUIMode :: (C.Architecture arch s)
            => FilePath
@@ -258,11 +253,21 @@ surveyorWith (DebuggerConfig {}) chan s0 = do
                   , B.appStartEvent = appStartEvent
                   , B.appAttrMap = appAttrMap
                   }
-  let initialState = C.State s0
+  nextLogStore <- F.foldlM (\ls t -> (\msg -> C.appendLog msg ls)
+                            <$> C.timestamp (C.msgWith { C.logText = [t] }))
+                 (s0 ^. C.lLogStore) introTexts
+  let initialState = C.State (s0 & C.lLogStore .~ nextLogStore)
   let mkVty = V.mkVty V.defaultConfig
   initialVty <- mkVty
   _finalState <- B.customMain initialVty mkVty (Just chan) app initialState
   return ()
+  where
+    introTexts = [ "Surveyor: an interactive program exploration tool"
+                 , " * Press M-x to bring up the command prompt"
+                 , " * Use the 'load-file' command to load a program and begin"
+                 , " * C-q to quit"
+                 ]
+
 
 emptyState :: Maybe FilePath
            -> Maybe C.AsyncLoader
@@ -275,11 +280,12 @@ emptyState mfp mloader ng customEventChan = do
   -- make one (that won't match anything else)
   n0 <- PN.freshNonce ng
   let uiExt = SBC.mkExtension (C.writeChan customEventChan) n0 addrParser "M-x"
+  fileLogger <- C.defaultLogFile >>= C.logToFile
   return C.S { C.sInputFile = mfp
              , C.sLoader = mloader
              , C.sLogStore = mempty
              , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState customEventChan
-                                                , C.sFileLogger = Nothing
+                                                , C.sFileLogger = Just fileLogger
                                                 }
              , C.sDiagnosticLevel = C.Debug
              , C.sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
@@ -336,10 +342,8 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                           | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                           ]
 
-      sesID <- C.newSessionID ng
-      -- FIXME: Change this to a better ADT that reflects that we don't have this
-      -- config (we inherit it from the existing session)
-      let symCfg = C.SymbolicExecutionConfig sesID undefined WEB.FloatRealRepr undefined
+      symCfg <- C.defaultSymbolicExecutionConfig ng
+      let sesID = symCfg ^. C.sessionID
 
       let symSt = C.SymbolicState { C.symbolicConfig = symCfg
                                   , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
