@@ -12,14 +12,12 @@ import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Map as MapF
-import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
-import qualified Graphics.Vty as V
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
 import           Text.Printf ( printf )
@@ -195,46 +193,4 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
     uiExt = SBE.BrickUIExtension { SBE.sMinibuffer = MB.minibuffer addrParser (SBE.updateMinibufferCompletions (C.sEmitEvent s0) (C.archNonce ares)) MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands ++ BC.extraCommands)
                                  }
 
-    modeKeys = [ blockViewerKeys (C.archNonce ares) C.BaseRepr
-               , blockViewerKeys (C.archNonce ares) C.MacawRepr
-               , blockViewerKeys (C.archNonce ares) C.CrucibleRepr
-               , functionViewerKeys (C.archNonce ares) C.BaseRepr
-               , functionViewerKeys (C.archNonce ares) C.MacawRepr
-               , functionViewerKeys (C.archNonce ares) C.CrucibleRepr
-               , (C.SomeUIMode C.SymbolicExecutionManager,
-                  [ (C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)
-                  , (C.Key (V.KChar 's') [], C.SomeCommand C.startSymbolicExecutionC)
-                  ])
-               ]
-    addModeKeys (mode, keys) modeKeymap =
-      foldr (\(k, C.SomeCommand cmd) -> C.addModeKey mode k cmd) modeKeymap keys
-    keymap = foldr addModeKeys SBK.defaultKeymap modeKeys
-
-
-functionViewerKeys :: PN.Nonce s arch
-                   -> C.IRRepr arch ir
-                   -> (C.SomeUIMode s, [(C.Key, C.SomeCommand (C.SurveyorCommand s (C.S SBE.BrickUIExtension SBE.BrickUIState)))])
-functionViewerKeys nonce rep = ( C.SomeUIMode (C.FunctionViewer nonce rep)
-                               , [ (C.Key (V.KChar 'm') [], C.SomeCommand BC.showMacawFunctionC)
-                                 , (C.Key (V.KChar 'c') [], C.SomeCommand BC.showCrucibleFunctionC)
-                                 , (C.Key (V.KChar 'b') [], C.SomeCommand BC.showBaseFunctionC)
-                                 , (C.Key (V.KChar 's') [], C.SomeCommand C.initializeSymbolicExecutionC)
-                                 ]
-                               )
-
-blockViewerKeys :: PN.Nonce s arch
-                -> C.IRRepr arch ir
-                -> (C.SomeUIMode s, [(C.Key, C.SomeCommand (C.SurveyorCommand s (C.S SBE.BrickUIExtension SBE.BrickUIState)))])
-blockViewerKeys nonce rep = ( C.SomeUIMode (C.BlockViewer nonce rep)
-                            , [ (C.Key V.KDown [], C.SomeCommand C.selectNextInstructionC)
-                              , (C.Key (V.KChar 'n') [V.MCtrl], C.SomeCommand C.selectNextInstructionC)
-                              , (C.Key V.KUp [], C.SomeCommand C.selectPreviousInstructionC)
-                              , (C.Key (V.KChar 'p') [V.MCtrl], C.SomeCommand C.selectPreviousInstructionC)
-                              , (C.Key V.KEsc [], C.SomeCommand C.resetInstructionSelectionC)
-                              , (C.Key V.KRight [], C.SomeCommand C.selectNextOperandC)
-                              , (C.Key V.KLeft [], C.SomeCommand C.selectPreviousOperandC)
-                              , (C.Key (V.KChar 'm') [], C.SomeCommand BC.showMacawBlockC)
-                              , (C.Key (V.KChar 'c') [], C.SomeCommand BC.showCrucibleBlockC)
-                              , (C.Key (V.KChar 'b') [], C.SomeCommand BC.showBaseBlockC)
-                              ]
-                            )
+    keymap = SBK.defaultKeymap (Just (C.archNonce ares))
