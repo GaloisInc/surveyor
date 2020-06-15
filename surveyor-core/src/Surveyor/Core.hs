@@ -109,6 +109,8 @@ module Surveyor.Core (
   SymEx.singleSessionState,
   SymEx.updateSessionMetrics,
   SymEx.SymbolicExecutionState(..),
+  SymEx.SuspendedState(..),
+  SymEx.suspendedState,
   SymEx.Config,
   SymEx.SetupArgs,
   SymEx.Execute,
@@ -124,6 +126,10 @@ module Surveyor.Core (
   SymEx.configSolverL,
   SymEx.configFloatReprL,
   SymEx.solverInteractionFileL,
+  -- ** Breakpoints
+  SB.Breakpoint(..),
+  SB.BreakpointType(..),
+  SB.classifyBreakpoint,
   -- ** Modifiers
   CCX.resetBlockSelection,
   CCX.selectNextInstruction,
@@ -193,6 +199,7 @@ module Surveyor.Core (
 import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Async as CAS
+import qualified Surveyor.Core.Breakpoint as SB
 import qualified Surveyor.Core.Chan as CS
 import qualified Surveyor.Core.Command as CC
 import           Surveyor.Core.Commands

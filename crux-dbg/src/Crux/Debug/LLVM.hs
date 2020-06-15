@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 module Crux.Debug.LLVM (
   debugLLVM
   ) where
@@ -28,6 +29,7 @@ import qualified Data.Text as T
 import qualified System.Exit as SE
 import qualified System.IO as IO
 import qualified Text.LLVM as TL
+import qualified What4.Expr.Builder as WEB
 
 import qualified Crux as C
 import qualified Crux.LLVM.Overrides as CLO
@@ -61,7 +63,7 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                        )
                     => [CLI.OverrideTemplate (CT.Model sym) sym arch rtp l a]
 breakpointOverrides =
-  [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint() |]
+  [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
        do_breakpoint
   ]
 
@@ -137,15 +139,16 @@ simulateLLVMWithDebug _cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym 
                 case SC.llvmAnalysisResultFromModule ng nonce hdlAlloc llvmModule (Some translation) of
                   SC.SomeResult ares -> return ares
           let debuggerConfig = SB.DebuggerConfig (Proxy @SC.LLVM) (Proxy @(SC.CrucibleExt SC.LLVM)) llvmCon
-          let debugger = SB.debuggerFeature debuggerConfig
+          let debugger = SB.debuggerFeature debuggerConfig (WEB.exprCounter sym)
           return (C.RunnableStateWithExtensions initSt [debugger])
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
 
-do_breakpoint :: LCS.GlobalVar CLM.Mem
+do_breakpoint :: (wptr ~ CLE.ArchWidth arch)
+              => LCS.GlobalVar CLM.Mem
               -> sym
-              -> Ctx.Assignment (LCS.RegEntry sym) Ctx.EmptyCtx
+              -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> CLT.LLVMPointerType wptr Ctx.::> LCT.VectorType LCT.AnyType)
               -> LCS.OverrideSim (CT.Model sym) sym (CLI.LLVM arch) r args ret ()
-do_breakpoint _gv _sym Ctx.Empty = return ()
+do_breakpoint _gv _sym _ = return ()
 
 checkEntryPoint :: ( CLO.ArchOk arch
                    , CL.Logs

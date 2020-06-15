@@ -36,6 +36,8 @@ module Surveyor.Core.SymbolicExecution (
   Inspect,
   Suspend,
   SymbolicExecutionState(..),
+  SuspendedState(..),
+  suspendedState,
   symbolicExecutionConfig,
   initialSymbolicExecutionState,
   startSymbolicExecution,
@@ -51,25 +53,34 @@ module Surveyor.Core.SymbolicExecution (
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )
+import           Control.Lens ( (^.) )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
+import qualified Control.Monad.Catch as CMC
 import qualified Data.Functor.Identity as I
 import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as Map
+import           Data.Maybe ( fromMaybe )
+import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
+import qualified Data.Vector as DV
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Backend.Online as CBO
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.CFG.Extension as CCE
 import qualified Lang.Crucible.Simulator as CS
+import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.EvalStmt as CSE
 import qualified Lang.Crucible.Simulator.ExecutionTree as CSET
 import qualified Lang.Crucible.Simulator.Profiling as CSP
+import qualified Lang.Crucible.Simulator.RegMap as LMCR
+import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as CT
+import qualified Lang.Crucible.Types as LCT
 import qualified System.IO as IO
 import qualified System.Process as SP
 import qualified What4.Concrete as WCC
@@ -87,6 +98,7 @@ import qualified What4.Symbol as WS
 import qualified What4.Utils.StringLiteral as WUS
 
 import qualified Surveyor.Core.Architecture as CA
+import qualified Surveyor.Core.Breakpoint as SCB
 import qualified Surveyor.Core.Chan as SCC
 import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.Panic as SCP
@@ -129,10 +141,83 @@ data SymbolicExecutionState arch s (k :: SymExK) where
                                 (CA.CrucibleExt arch)
                                 (CS.RegEntry sym reg)
              -> SymbolicExecutionState arch s Inspect
-  Suspended :: (CB.IsSymInterface sym, ext ~ CA.CrucibleExt arch, CA.Architecture arch s)
-            => SymbolicState arch s sym init reg
-            -> CSET.SimState p sym ext rtp f a
+  Suspended :: ( CB.IsSymInterface sym
+               , CA.Architecture arch s
+               , ext ~ CA.CrucibleExt arch
+               , sym ~ WEB.ExprBuilder s st fs
+               )
+            => SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s
             -> SymbolicExecutionState arch s Suspend
+
+data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
+  SuspendedState { suspendedSymState :: SymbolicState arch s sym init reg
+                 , suspendedSimState :: CSET.SimState p sym ext rtp f a
+                 , suspendedCallFrame :: LCSC.CallFrame sym ext blocks ret args
+                 , suspendedBreakpoint :: Maybe (SCB.Breakpoint sym)
+                 , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
+                 , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
+                 }
+
+data SymbolicExecutionException =
+  UnexpectedFrame T.Text T.Text
+  deriving (Show)
+
+instance CMC.Exception SymbolicExecutionException
+
+suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
+                . ( CB.IsSymInterface sym
+                  , CA.Architecture arch s
+                  , ext ~ CA.CrucibleExt arch
+                  , sym ~ WEB.ExprBuilder s st fs
+                  , CMC.MonadThrow m
+                  )
+               => SymbolicState arch s sym init reg
+               -> CSET.SimState p sym ext rtp f a
+               -> Maybe (SCB.Breakpoint sym)
+               -> m (SymbolicExecutionState arch s Suspend)
+suspendedState surveyorSymState crucSimState mbp =
+  case topFrame ^. CSET.gpValue of
+    LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
+    LCSC.OF {} -> CMC.throwM (UnexpectedFrame "Override" bpName)
+    LCSC.MF cf ->
+      case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (fmap SCB.breakpointArguments mbp) of
+        Some Ctx.Empty -> do
+          let st = SuspendedState { suspendedSymState = surveyorSymState
+                                  , suspendedSimState = crucSimState
+                                  , suspendedCallFrame = cf
+                                  , suspendedBreakpoint = mbp
+                                  , suspendedRegVals = Ctx.empty
+                                  , suspendedRegSelection = Nothing
+                                  }
+          return (Suspended st)
+        Some valAssignment@(_ Ctx.:> _) -> do
+          let anIndex = Ctx.lastIndex (Ctx.size valAssignment)
+          let st = SuspendedState { suspendedSymState = surveyorSymState
+                                  , suspendedSimState = crucSimState
+                                  , suspendedCallFrame = cf
+                                  , suspendedBreakpoint = mbp
+                                  , suspendedRegVals = valAssignment
+                                  , suspendedRegSelection = Just (Some anIndex)
+                                  }
+          return (Suspended st)
+
+  where
+    bpName :: T.Text
+    bpName = fromMaybe "<Unnamed Breakpoint>" (SCB.breakpointName =<< mbp)
+    topFrame = crucSimState ^. CSET.stateTree . CSET.actFrame
+
+valuesFromVector :: proxy sym
+                 -> DV.Vector (LCSR.RegValue sym LCT.AnyType)
+                 -> Some (Ctx.Assignment (LMCR.RegEntry sym))
+valuesFromVector _ v = go 0 (Some Ctx.empty)
+  where
+    go idx (Some ctx)
+      | idx >= DV.length v = Some ctx
+      | otherwise =
+        case v DV.! idx of
+          LCSR.AnyValue tp val ->
+            go (idx + 1) (Some (Ctx.extend ctx (LMCR.RegEntry tp val)))
+
 
 instance NFData (SymbolicExecutionState arch s k) where
   rnf s =
@@ -143,7 +228,7 @@ instance NFData (SymbolicExecutionState arch s k) where
         symState `seq` ()
       Executing progress -> progress `deepseq` ()
       Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
-      Suspended symState _ -> symState `seq` ()
+      Suspended symState -> symState `seq` ()
 
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
@@ -217,7 +302,7 @@ symbolicExecutionConfig s =
     Initializing s' -> symbolicConfig s'
     Executing s' -> executionConfig s'
     Inspecting _ s' _ -> symbolicConfig s'
-    Suspended s' _ -> symbolicConfig s'
+    Suspended s' -> symbolicConfig (suspendedSymState s')
 
 symbolicSessionID :: SymbolicExecutionState arch s k -> SessionID s
 symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID

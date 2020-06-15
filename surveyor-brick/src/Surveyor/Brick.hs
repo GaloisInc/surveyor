@@ -299,14 +299,19 @@ emptyState mfp mloader ng customEventChan = do
              , C.sArchNonce = n0
              }
 
-stateFromContext :: forall arch s p sym ext rtp f a
-                  . (C.Architecture arch s, LCB.IsSymInterface sym, ext ~ C.CrucibleExt arch)
+stateFromContext :: forall arch s p sym ext rtp f a st fs
+                  . ( C.Architecture arch s
+                    , LCB.IsSymInterface sym
+                    , ext ~ C.CrucibleExt arch
+                    , sym ~ WEB.ExprBuilder s st fs
+                    )
                  => PN.NonceGenerator IO s
                  -> (PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s))
                  -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
                  -> LCSET.SimState p sym ext rtp f a
+                 -> C.Breakpoint sym
                  -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
-stateFromContext ng mkAnalysisResult chan simState = do
+stateFromContext ng mkAnalysisResult chan simState bp = do
   let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
   case topFrame ^. LCSET.gpValue of
     LCSC.RF {} -> error "Unexpected return value"
@@ -353,7 +358,8 @@ stateFromContext ng mkAnalysisResult chan simState = do
                                   , C.symbolicRegs = error "Initial symbolic regs"
                                   }
       ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
-      let symbolicExecutionState = C.Suspended symSt simState
+      -- NOTE: This can throw an exception, but that is fine: the TUI is not yet up
+      symbolicExecutionState <- C.suspendedState symSt simState (Just bp)
       let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
                                      , SBE.sBlockViewers = MapF.fromList blockViewers
                                      , SBE.sFunctionViewer = MapF.fromList funcViewers
@@ -444,11 +450,15 @@ contextStackFromState ng tc ares sesID _simState cfg = do
 -- For now, it simply returns execution to Crucible with no modifications after
 -- Surveyor exits.  It could be extended in the future to persist state
 -- modifications.
-debuggerFeature :: forall ext sym p rtp arch
-                 . (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
-                => DebuggerConfig PN.GlobalNonceGenerator ext arch
+debuggerFeature :: forall ext sym p rtp arch s st fs
+                 . ( LCB.IsSymInterface sym
+                   , LCCE.IsSyntaxExtension ext
+                   , sym ~ WEB.ExprBuilder s st fs
+                   )
+                => DebuggerConfig s ext arch
+                -> PN.NonceGenerator IO s
                 -> LCS.ExecutionFeature p sym ext rtp
-debuggerFeature args = LCS.ExecutionFeature (debugger args)
+debuggerFeature args ng = LCS.ExecutionFeature (debugger args ng)
 
 data DebuggerConfig s ext arch =
   (C.Architecture arch s, ext ~ C.CrucibleExt arch) =>
@@ -457,42 +467,38 @@ data DebuggerConfig s ext arch =
                  , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
                  }
 
-data BreakpointType = UnconditionalBreakpoint | ConditionalBreakpoint
 
--- | Classify a call as a known breakpoint (or not)
---
--- All of our breakpoints are overrides with distinguished names
-classifyBreakpoint :: LCSET.ResolvedCall p sym ext ret -> Maybe BreakpointType
-classifyBreakpoint rc =
-  case rc of
-    LCSET.CrucibleCall {} -> Nothing
-    LCSET.OverrideCall o _fr
-      | LCSET.overrideName o == "crucible_breakpoint" -> Just UnconditionalBreakpoint
-      | LCSET.overrideName o == "crucible_breakpoint_if" -> Just ConditionalBreakpoint
-      | otherwise -> Nothing
-
-debugger :: (LCB.IsSymInterface sym, LCCE.IsSyntaxExtension ext)
-         => DebuggerConfig PN.GlobalNonceGenerator ext arch
+debugger :: ( LCB.IsSymInterface sym
+            , LCCE.IsSyntaxExtension ext
+            , sym ~ WEB.ExprBuilder s st fs
+            )
+         => DebuggerConfig s ext arch
+         -> PN.NonceGenerator IO s
          -> LCSET.ExecState p sym ext rtp
          -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-debugger args@(DebuggerConfig {}) execSt =
+debugger args@(DebuggerConfig {}) ng execSt =
   case execSt of
     LCSET.CallState _retHdlr resolvedCall simState
-      | Just UnconditionalBreakpoint <- classifyBreakpoint resolvedCall ->
-        surveyorState args simState
+      | Just bp <- C.classifyBreakpoint resolvedCall ->
+        surveyorState args ng simState bp
     LCSET.TailCallState _v resolvedCall simState
-      | Just UnconditionalBreakpoint <- classifyBreakpoint resolvedCall->
-        surveyorState args simState
+      | Just bp <- C.classifyBreakpoint resolvedCall->
+        surveyorState args ng simState bp
     _ -> return LCS.ExecutionFeatureNoChange
 
 -- | Initialize Surveyor to navigate an active symbolic execution state
-surveyorState :: (C.Architecture arch PN.GlobalNonceGenerator, LCB.IsSymInterface sym)
-              => DebuggerConfig PN.GlobalNonceGenerator ext arch
+surveyorState :: ( C.Architecture arch s
+                 , LCB.IsSymInterface sym
+                 , sym ~ WEB.ExprBuilder s st fs
+                 )
+              => DebuggerConfig s ext arch
+              -> PN.NonceGenerator IO s
               -> LCSET.SimState p sym ext rtp f a
+              -> C.Breakpoint sym
               -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-surveyorState args@(DebuggerConfig {}) simCtx = do
+surveyorState args@(DebuggerConfig {}) ng simCtx bp = do
   customEventChan <- B.newBChan 100
   let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
-  s0 <- stateFromContext PN.globalNonceGenerator (debuggerCon args) chan simCtx
+  s0 <- stateFromContext ng (debuggerCon args) chan simCtx bp
   surveyorWith args customEventChan s0
   return LCS.ExecutionFeatureNoChange
