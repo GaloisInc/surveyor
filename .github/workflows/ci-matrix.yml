@@ -50,5 +50,6 @@ jobs:
     - name: Build
       run: |
         cp cabal.project.dist cabal.project
-        cabal v2-configure pkg:surveyor-brick --write-ghc-environment-files=always -j1
+        cabal v2-configure pkg:crux-dbg --write-ghc-environment-files=always -j1
+        cabal v2-build pkg:crux-dbg
         cabal v2-build pkg:surveyor-brick
