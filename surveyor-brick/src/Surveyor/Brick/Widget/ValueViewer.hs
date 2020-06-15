@@ -1,8 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -22,6 +24,7 @@ import qualified Data.List as L
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
+import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
 import qualified Data.Vector as DV
@@ -146,7 +149,52 @@ buildTermWidget tp re =
             WUS.Char8Literal bs -> inline (B.str (show bs))
             WUS.Char16Literal ws -> inline (B.str (show ws))
         WEB.BoundVarExpr bv ->
-          return (RenderInline (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))))
+          inline (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv)))
+        WEB.NonceAppExpr nae ->
+          case WEB.nonceExprApp nae of
+            WEB.Annotation bt annotNonce e -> do
+              e' <- argRef <$> buildTermWidget (LCT.baseToType bt) e
+              bindExpr nae (intersperse [ B.txt "annotated"
+                                        , B.str (printf "[$%d]" (PN.indexValue annotNonce))
+                                        , e'
+                                        ])
+            WEB.Forall bv e -> do
+              e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+              bindExpr nae (intersperse [ B.txt "forall"
+                                        , B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))
+                                        , B.txt "."
+                                        , e'
+                                        ])
+            WEB.Exists bv e -> do
+              e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+              bindExpr nae (intersperse [ B.txt "exists"
+                                        , B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))
+                                        , B.txt "."
+                                        , e'
+                                        ])
+            WEB.ArrayFromFn sf -> do
+              bindExpr nae (intersperse [ B.txt "arrayFromFn"
+                                        , B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                        ])
+            WEB.FnApp sf args -> do
+              let es = FC.toListFC (\e -> buildTermWidget (LCT.baseToType (WI.exprType e)) e) args
+              es' <- fmap argRef <$> sequence es
+              bindExpr nae (intersperse ( B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                        : es'
+                                        ))
+            WEB.MapOverArrays sf _reprs vals -> do
+              let es = FC.toListFC (\(WI.ArrayResultWrapper e) -> buildTermWidget (LCT.baseToType (WI.exprType e)) e) vals
+              es' <- fmap argRef <$> sequence es
+              bindExpr nae (intersperse ( B.txt "mapOverArrays"
+                                        : B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                        : es'
+                                        ))
+            WEB.ArrayTrueOnEntries sf e -> do
+              e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+              bindExpr nae (intersperse [ B.txt "arrayTrueOnEntries"
+                                        , B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                        , e'
+                                        ])
         WEB.AppExpr ae -> do
           let nonce = WEB.appExprId ae
           m <- St.get
@@ -312,8 +360,19 @@ bindBinaryFloatExpr ae rm e1 e2 name = do
 intersperse :: [B.Widget n] -> B.Widget n
 intersperse = B.hBox . L.intersperse (B.txt " ")
 
-bindBinExpr :: (sym ~ WEB.ExprBuilder s st fs)
-            => WEB.AppExpr s tp1
+class HasNonce e where
+  getNonce :: e s (tp :: WI.BaseType) -> PN.Nonce s tp
+
+instance HasNonce WEB.AppExpr where
+  getNonce = WEB.appExprId
+
+instance HasNonce WEB.NonceAppExpr where
+  getNonce = WEB.nonceExprId
+
+bindBinExpr :: ( sym ~ WEB.ExprBuilder s st fs
+               , HasNonce e
+               )
+            => e s tp1
             -> WI.SymExpr sym bt1
             -> WI.SymExpr sym bt2
             -> T.Text
@@ -323,8 +382,10 @@ bindBinExpr ae e1 e2 name = do
   e2' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e2)) e2
   bindExpr ae (intersperse [B.txt name, e1', e2'])
 
-bindUnaryExpr :: (sym ~ WEB.ExprBuilder s st fs)
-              => WEB.AppExpr s tp1
+bindUnaryExpr :: ( sym ~ WEB.ExprBuilder s st fs
+                 , HasNonce e
+                 )
+              => e s tp1
               -> WI.SymExpr sym tp2
               -> T.Text
               -> ViewerBuilder s sym RenderWidget
@@ -332,8 +393,8 @@ bindUnaryExpr ae e name = do
   e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
   bindExpr ae (intersperse [B.txt name, e'])
 
-bindExpr :: WEB.AppExpr t tp -> B.Widget Names -> ViewerBuilder t sym RenderWidget
-bindExpr ae w = returnCached (WEB.appExprId ae) $! RenderBound (thisRef ae) w
+bindExpr :: (HasNonce e) => e t tp -> B.Widget Names -> ViewerBuilder t sym RenderWidget
+bindExpr ae w = returnCached (getNonce ae) $! RenderBound (thisRef ae) w
 
 returnCached :: forall s sym (tp :: WT.BaseType)
               . PN.Nonce s tp
@@ -343,8 +404,8 @@ returnCached nonce res = do
   St.modify' $ MapF.insert nonce (ConstWidget res)
   return res
 
-thisRef :: WEB.AppExpr t tp -> B.Widget n
-thisRef ae = B.str (printf "$%d" (PN.indexValue (WEB.appExprId ae)))
+thisRef :: (HasNonce e) => e t tp -> B.Widget n
+thisRef ae = B.str (printf "$%d" (PN.indexValue (getNonce ae)))
 
 -- | Extract a widget that should be used to refer to the given 'RenderWidget'
 -- as an operand
