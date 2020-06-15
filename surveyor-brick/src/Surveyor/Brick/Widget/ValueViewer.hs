@@ -318,7 +318,8 @@ renderCoefficient srep coeff =
     SR.SemiRingNatRepr -> return (B.str (show coeff))
     SR.SemiRingIntegerRepr -> return (B.str (show coeff))
     SR.SemiRingRealRepr -> return (B.str (show coeff))
-    SR.SemiRingBVRepr bvFlv nr ->
+    -- FIXME? We could use the width repr to influence the printing to pad values all the way out
+    SR.SemiRingBVRepr bvFlv _nr ->
       case bvFlv of
         SR.BVArithRepr -> return (B.str (show coeff))
         SR.BVBitsRepr -> return (B.str (printf "0x%x" coeff))
