@@ -39,6 +39,7 @@ import qualified What4.Expr.WeightedSum as WSum
 import qualified What4.Interface as WI
 import qualified What4.SemiRing as SR
 import qualified What4.Symbol as WS
+import qualified What4.Utils.Complex as WUC
 import qualified What4.Utils.StringLiteral as WUS
 
 import           Surveyor.Brick.Names ( Names(..) )
@@ -202,7 +203,9 @@ buildTermWidget tp re =
             Just (ConstWidget cached) -> return cached
             Nothing ->
               case WEB.appExprApp ae of
-                WEB.NotPred e -> bindUnaryExpr ae e "notPred"
+                WEB.BaseEq _tp e1 e2 -> bindBinExpr ae e1 e2 "eq"
+                WEB.BaseIte _tp _nPred e1 e2 e3 -> bindTernaryExpr ae e1 e2 e3 "ite"
+                WEB.NotPred e -> bindUnaryExpr ae e "not"
 
                 WEB.SemiRingSum ws -> do
                   let (addOp, mulOp) = case WSum.sumRepr ws of
@@ -303,6 +306,35 @@ buildTermWidget tp re =
                 WEB.FloatIsSubnorm e -> bindUnaryExpr ae e "floatIsSubnorm"
                 WEB.FloatIsNorm e -> bindUnaryExpr ae e "floatIsNorm"
 
+                WEB.NatToInteger e -> bindUnaryExpr ae e "natToInteger"
+                WEB.IntegerToNat e -> bindUnaryExpr ae e "integerToNat"
+                WEB.IntegerToReal e -> bindUnaryExpr ae e "integerToReal"
+                WEB.RealToInteger e -> bindUnaryExpr ae e "realToInteger"
+                WEB.BVToNat e -> bindUnaryExpr ae e "bvToNat"
+                WEB.BVToInteger e -> bindUnaryExpr ae e "bvToInteger"
+                WEB.SBVToInteger e -> bindUnaryExpr ae e "sbvToInteger"
+
+
+                WEB.RoundReal e -> bindUnaryExpr ae e "roundReal"
+                WEB.FloorReal e -> bindUnaryExpr ae e "floorReal"
+                WEB.CeilReal e -> bindUnaryExpr ae e "ceilReal"
+                WEB.Cplx (realPart WUC.:+ imagPart) -> bindBinExpr ae realPart imagPart "complex"
+                WEB.RealPart e -> bindUnaryExpr ae e "realPart"
+                WEB.ImagPart e -> bindUnaryExpr ae e "imagPart"
+
+                WEB.StringContains e1 e2 -> bindBinExpr ae e1 e2 "stringContains"
+                WEB.StringIsPrefixOf e1 e2 -> bindBinExpr ae e1 e2 "stringIsPrefixOf"
+                WEB.StringIsSuffixOf e1 e2 -> bindBinExpr ae e1 e2 "stringIsSuffixOf"
+                WEB.StringIndexOf e1 e2 e3 -> bindTernaryExpr ae e1 e2 e3 "stringIndexOf"
+                WEB.StringSubstring _srep e1 e2 e3 -> bindTernaryExpr ae e1 e2 e3 "stringSubstring"
+                WEB.StringLength e -> bindUnaryExpr ae e "stringLength"
+
+                WEB.StructCtor _reprs vs -> do
+                  let vs' = FC.toListFC (\e -> buildTermWidget (LCT.baseToType (WI.exprType e)) e) vs
+                  vs'' <- fmap argRef <$> sequence vs'
+                  bindExpr ae (intersperse ( B.txt "structCtor"
+                                           : vs''
+                                           ))
 
 
                 _ -> inline (B.txt "Unhandled app")
@@ -369,6 +401,21 @@ instance HasNonce WEB.AppExpr where
 
 instance HasNonce WEB.NonceAppExpr where
   getNonce = WEB.nonceExprId
+
+bindTernaryExpr :: ( sym ~ WEB.ExprBuilder s st fs
+                   , HasNonce e
+                   )
+                => e s tp1
+                -> WI.SymExpr sym bt1
+                -> WI.SymExpr sym bt2
+                -> WI.SymExpr sym bt3
+                -> T.Text
+                -> ViewerBuilder s sym RenderWidget
+bindTernaryExpr ae e1 e2 e3 name = do
+  e1' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e1)) e1
+  e2' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e2)) e2
+  e3' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e3)) e3
+  bindExpr ae (intersperse [B.txt name, e1', e2', e3'])
 
 bindBinExpr :: ( sym ~ WEB.ExprBuilder s st fs
                , HasNonce e
