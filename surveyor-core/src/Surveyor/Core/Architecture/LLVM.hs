@@ -9,12 +9,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Surveyor.Core.Architecture.LLVM (
   LLVM,
   llvmAnalysisResultFromModule,
+  LLVMPersonality(..),
   mkLLVMResult
   ) where
 
@@ -24,17 +26,24 @@ import           Control.Lens ( (^.) )
 import qualified Control.Lens as L
 import           Control.Monad ( guard )
 import qualified Control.Once as O
+import qualified Crux.Model as CruxM
+import qualified Crux.Types as CruxT
+import qualified Data.ByteString as BS
 import qualified Data.Foldable as F
 import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as M
 import           Data.Maybe ( catMaybes, fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.Context as Ctx
+import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TEE
+import           Data.Word ( Word8 )
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Extension as CCE
@@ -48,6 +57,8 @@ import qualified Lang.Crucible.LLVM.MemModel as LLM
 import qualified Lang.Crucible.LLVM.Translation as LT
 import qualified Lang.Crucible.LLVM.TypeContext as LTC
 import qualified Lang.Crucible.Simulator as CS
+import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
+import qualified Lang.Crucible.Simulator.GlobalState as LCSG
 import qualified Lang.Crucible.Types as CT
 import           System.FilePath ( (</>) )
 import qualified System.FilePath as SFP
@@ -63,6 +74,18 @@ import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Crucible as AC
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr), Crucible )
 import qualified Surveyor.Core.OperandList as OL
+import qualified Surveyor.Core.Panic as SCP
+
+
+data LLVMPersonality sym =
+  LLVMPersonality { _memoryGlobal :: CS.GlobalVar LLM.Mem
+                  , _cruxModel :: CruxT.Model sym
+                  }
+
+$(L.makeLenses ''LLVMPersonality)
+
+instance CruxT.HasModel LLVMPersonality where
+  personalityModel = cruxModel
 
 data LLVM
 
@@ -330,7 +353,10 @@ instance IR LLVM s where
       Ordering {} -> False
       AtomicOp {} -> False
 
-type instance CruciblePersonality LLVM sym = ()
+type instance CruciblePersonality LLVM sym = LLVMPersonality sym
+
+instance SymbolicArchitecture LLVM s where
+  loadConcreteString _ = llvmLoadConcreteString
 
 instance Architecture LLVM s where
   data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
@@ -385,9 +411,9 @@ llvmSymbolicInitializers :: (CB.IsSymInterface sym)
                          -> sym
                          -> IO ( CS.IntrinsicTypes sym
                                , CFH.HandleAllocator
-                               , CS.FunctionBindings () sym (CrucibleExt LLVM)
-                               , CS.ExtensionImpl () sym (CrucibleExt LLVM)
-                               , ()
+                               , CS.FunctionBindings (LLVMPersonality sym) sym (CrucibleExt LLVM)
+                               , CS.ExtensionImpl (LLVMPersonality sym) sym (CrucibleExt LLVM)
+                               , LLVMPersonality sym
                                )
 llvmSymbolicInitializers (AnalysisResult (LLVMAnalysisResult llr) _) _sym = do
   badBehaviorMap <- IOR.newIORef mempty
@@ -396,7 +422,11 @@ llvmSymbolicInitializers (AnalysisResult (LLVMAnalysisResult llr) _) _sym = do
   let intrinsics = LLI.llvmIntrinsicTypes
   let funcBindings = CFH.emptyHandleMap
   let extImpl = LL.llvmExtensionImpl LLM.laxPointerMemOptions
-  return (intrinsics, llvmHdlAlloc llr, funcBindings, extImpl, ())
+  case llvmCrucibleTranslation llr of
+    Some translation -> do
+      let llvmCtx = translation ^. LT.transContext
+      let p = LLVMPersonality (LT.llvmMemVar llvmCtx) CruxM.emptyModel
+      return (intrinsics, llvmHdlAlloc llr, funcBindings, extImpl, p)
 
 data CrucibleLLVMOperand arch s where
   Alignment :: CLDL.Alignment -> CrucibleLLVMOperand arch s
@@ -993,3 +1023,61 @@ toInstruction sym lab (idx, stmt) = (LLVMAddress addr, LLVMInstruction stmt)
   where
     addr = InsnAddr (BlockAddr (FunctionAddr sym) lab) idx
 
+-- | Loading a string in LLVM is slightly complicated; strings are referenced by
+-- RegValues of type LLVMPointer.  There is a memory model operation to load
+-- strings, but it requires access to a great deal of simulator state (the
+-- memory model) and IO.
+--
+-- NOTE: This assumes that strings are valid UTF8
+--
+-- NOTE: It would be ideal if we could reuse 'LLM.loadMaybeString' here, but
+-- that can add assertions into the formula context, which we don't want the
+-- debugger to do.
+llvmLoadConcreteString :: forall sym rtp f a tp
+                        . (CB.IsSymInterface sym)
+                       => CS.SimState (LLVMPersonality sym) sym (LE.LLVM (LE.X86 64)) rtp f a
+                       -> CT.TypeRepr tp
+                       -> CS.RegValue sym tp
+                       -> IO (Maybe T.Text)
+llvmLoadConcreteString simState repr rv =
+  case repr of
+    LLM.LLVMPointerRepr w
+      | Just NR.LeqProof <- NR.testLeq (NR.knownNat @16) w -> do
+          mem <- case LCSG.lookupGlobal (p ^. memoryGlobal) (simState ^. LCSET.stateGlobals) of
+            Nothing -> SCP.panic "LLVM" ["Missing binding for LLVM Memory global"]
+            Just mem -> return mem
+          let ?ptrWidth = w
+          isNull <- LLM.ptrIsNull sym LLM.PtrWidth rv
+          case WI.asConstantPred isNull of
+            Nothing ->
+              -- The pointer is symbolic
+              return Nothing
+            Just True ->
+              -- The pointer is NULL
+              return Nothing
+            Just False -> do
+              badBehaviorMap <- IOR.newIORef mempty
+              let ?badBehaviorMap = badBehaviorMap
+              fmap decode <$> loadByByte mem id rv
+    _ -> return Nothing
+  where
+    decode = TE.decodeUtf8With TEE.lenientDecode . BS.pack
+    sym = simState ^. LCSET.stateSymInterface
+    p = simState ^. LCSET.stateContext . LCSET.cruciblePersonality
+    loadByByte :: (LLM.HasLLVMAnn sym, LLM.HasPtrWidth wptr)
+               => LLM.MemImpl sym
+               -> ([Word8] -> [Word8])
+               -> LLM.LLVMPtr sym wptr
+               -> IO (Maybe [Word8])
+    loadByByte mem f ptr = do
+      v <- LLM.doLoad sym mem ptr (LLM.bitvectorType 1) (LT.LLVMPointerRepr (NR.knownNat @8)) CLDL.noAlignment
+      -- FIXME: Does this add a proof obligation?
+      x <- LLM.projectLLVM_bv sym v
+      case WI.asUnsignedBV x of
+        Just 0 -> return (Just (f []))
+        Just c -> do
+          let c' :: Word8
+              c' = toEnum (fromInteger c)
+          ptr' <- LLM.doPtrAddOffset sym mem ptr =<< WI.bvLit sym LLM.PtrWidth 1
+          loadByByte mem (f . (c':)) ptr'
+        Nothing -> return Nothing

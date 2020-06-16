@@ -35,6 +35,9 @@ instance IR Void s where
 
 type instance CruciblePersonality Void sym = ()
 
+instance SymbolicArchitecture Void s where
+  loadConcreteString _ _ _ _ = return Nothing
+
 instance Architecture Void s where
   data ArchResult Void s = VoidAnalysisResult Void
   type CrucibleExt Void = ()

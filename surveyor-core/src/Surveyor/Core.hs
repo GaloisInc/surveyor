@@ -32,6 +32,7 @@ module Surveyor.Core (
   IR.IRRepr(..),
   CA.SomeIRRepr(..),
   CA.Architecture(..),
+  CA.SymbolicArchitecture(..),
   CA.Block(..),
   CA.BlockMapping(..),
   CA.FunctionHandle(..),
@@ -41,6 +42,7 @@ module Surveyor.Core (
   CA.CruciblePersonality,
   CA.LLVM,
   CA.mkLLVMResult,
+  CA.LLVMPersonality(..),
   CA.llvmAnalysisResultFromModule,
   -- ** Operand lists
   OL.OperandList,
