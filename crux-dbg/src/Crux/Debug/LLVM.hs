@@ -35,6 +35,7 @@ import qualified Crux as C
 import qualified Crux.LLVM.Overrides as CLO
 import qualified Crux.Log as CL
 import qualified Crux.Model as CM
+import qualified Crux.Types as CT
 import qualified Lang.Crucible.Backend as LCB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.FunctionHandle as CFH
@@ -60,7 +61,7 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                        , CLM.HasPtrWidth wptr
                        , wptr ~ CLE.ArchWidth arch
                        )
-                    => [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
+                    => [CLI.OverrideTemplate (CT.Model sym) sym arch rtp l a]
 breakpointOverrides =
   [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
        do_breakpoint
@@ -91,18 +92,17 @@ setupSimCtx :: ( CLO.ArchOk arch
             => IO.Handle
             -> CFH.HandleAllocator
             -> sym
-            -> LCS.GlobalVar CLM.Mem
             -> CLM.MemOptions
             -> CLT.LLVMContext arch
-            -> LCS.SimContext (SC.LLVMPersonality sym) sym (CLE.LLVM arch)
-setupSimCtx outHdl halloc sym memGlobal memOpts llvmCtx =
+            -> LCS.SimContext (CT.Model sym) sym (CLE.LLVM arch)
+setupSimCtx outHdl halloc sym memOpts llvmCtx =
   LCS.initSimContext sym
                      CLI.llvmIntrinsicTypes
                      halloc
                      outHdl
                      (LCS.fnBindingsFromList [])
                      (LCL.llvmExtensionImpl memOpts)
-                     (SC.LLVMPersonality memGlobal CM.emptyModel)
+                     CM.emptyModel
      & LCS.profilingMetrics %~ Map.union (llvmMetrics llvmCtx)
 
 debugLLVM :: (?outputConfig :: CL.OutputConfig) => C.CruxOptions -> CDC.DebugOptions -> FilePath -> IO SE.ExitCode
@@ -125,7 +125,7 @@ simulateLLVMWithDebug _cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym 
     let ?lc = llvmCtx ^. CLT.llvmTypeCtx
     let ?badBehaviorMap = bbMapRef
     let outHdl = ?outputConfig ^. CL.outputHandle
-    let simCtx = setupSimCtx outHdl halloc sym (CLT.llvmMemVar llvmCtx) (CDC.memoryOptions dbgOpts) llvmCtx
+    let simCtx = setupSimCtx outHdl halloc sym (CDC.memoryOptions dbgOpts) llvmCtx
     mem <- CLG.populateAllGlobals sym (CLT.globalInitMap translation) =<< CLG.initializeAllMemory sym llvmCtx llvmModule
     let globSt = LCL.llvmGlobals llvmCtx mem
     let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $ do
@@ -147,7 +147,7 @@ do_breakpoint :: (wptr ~ CLE.ArchWidth arch)
               => LCS.GlobalVar CLM.Mem
               -> sym
               -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> CLT.LLVMPointerType wptr Ctx.::> LCT.VectorType LCT.AnyType)
-              -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
+              -> LCS.OverrideSim (CT.Model sym) sym (CLI.LLVM arch) r args ret ()
 do_breakpoint _gv _sym _ = return ()
 
 checkEntryPoint :: ( CLO.ArchOk arch
@@ -155,7 +155,7 @@ checkEntryPoint :: ( CLO.ArchOk arch
                    )
                 => String
                 -> CLT.ModuleCFGMap arch
-                -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
+                -> LCS.OverrideSim (CT.Model sym) sym (CLI.LLVM arch) r args ret ()
 checkEntryPoint nm mp =
   case Map.lookup (fromString nm) mp of
     Nothing -> CMC.throwM (MissingEntryPoint nm)
@@ -173,7 +173,7 @@ registerFunctions :: ( CLO.ArchOk arch
                      )
                   => TL.Module
                   -> CLT.ModuleTranslation arch
-                  -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
+                  -> LCS.OverrideSim (CT.Model sym) sym (CLI.LLVM arch) r args ret ()
 registerFunctions llvm_module mtrans =
   do let llvm_ctx = mtrans ^. CLT.transContext
      let ?lc = llvm_ctx ^. CLT.llvmTypeCtx

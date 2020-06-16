@@ -454,7 +454,6 @@ debuggerFeature :: forall ext sym p rtp arch s st fs
                  . ( LCB.IsSymInterface sym
                    , LCCE.IsSyntaxExtension ext
                    , sym ~ WEB.ExprBuilder s st fs
-                   , p ~ C.CruciblePersonality arch sym
                    )
                 => DebuggerConfig s ext arch
                 -> PN.NonceGenerator IO s
@@ -462,17 +461,16 @@ debuggerFeature :: forall ext sym p rtp arch s st fs
 debuggerFeature args ng = LCS.ExecutionFeature (debugger args ng)
 
 data DebuggerConfig s ext arch =
-  (C.Architecture arch s, C.SymbolicArchitecture arch s, ext ~ C.CrucibleExt arch) =>
+  (C.Architecture arch s, ext ~ C.CrucibleExt arch) =>
   DebuggerConfig { _debuggerArchProxy :: Proxy arch
                  , _debuggerExtProxy :: Proxy ext
                  , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
                  }
 
-debugger :: forall sym ext s st fs p rtp arch
-          . ( LCB.IsSymInterface sym
+
+debugger :: ( LCB.IsSymInterface sym
             , LCCE.IsSyntaxExtension ext
             , sym ~ WEB.ExprBuilder s st fs
-            , p ~ C.CruciblePersonality arch sym
             )
          => DebuggerConfig s ext arch
          -> PN.NonceGenerator IO s
@@ -481,20 +479,15 @@ debugger :: forall sym ext s st fs p rtp arch
 debugger args@(DebuggerConfig {}) ng execSt =
   case execSt of
     LCSET.CallState _retHdlr resolvedCall simState
-      | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
-          bp <- ioBP
-          surveyorState args ng simState bp
+      | Just bp <- C.classifyBreakpoint resolvedCall ->
+        surveyorState args ng simState bp
     LCSET.TailCallState _v resolvedCall simState
-      | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
-          bp <- ioBP
-          surveyorState args ng simState bp
+      | Just bp <- C.classifyBreakpoint resolvedCall->
+        surveyorState args ng simState bp
     _ -> return LCS.ExecutionFeatureNoChange
-  where
-    proxy = Proxy @(arch, s)
 
 -- | Initialize Surveyor to navigate an active symbolic execution state
 surveyorState :: ( C.Architecture arch s
-                 , C.SymbolicArchitecture arch s
                  , LCB.IsSymInterface sym
                  , sym ~ WEB.ExprBuilder s st fs
                  )

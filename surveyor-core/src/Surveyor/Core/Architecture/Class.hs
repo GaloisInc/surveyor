@@ -18,7 +18,6 @@ module Surveyor.Core.Architecture.Class (
   IR(..),
   SomeIRRepr(..),
   Architecture(..),
-  SymbolicArchitecture(..),
   CruciblePersonality,
   SomeResult(..),
   ResultIndex(..),
@@ -98,23 +97,6 @@ type ArchConstraints arch s = (Eq (Address arch s),
 -- This is a standalone type family because it needs access to a parameter (sym)
 -- that isn't a class method.
 type family CruciblePersonality arch sym :: Type
-
--- | A class holding the operations for symbolically-executing code for a given architecture
-class (Architecture arch s) => SymbolicArchitecture arch s where
-  -- | A function that takes the simulator state and a value that somehow
-  -- represents a string and attempts to turn it into a Haskell string.
-  --
-  -- Note: If the string is symbolic, this will return 'Nothing'; it only works
-  -- for concrete strings
-  --
-  -- Note: This needs to be in IO because some architectures have complex memory
-  -- models that can require IO to manipulate (e.g., llvm)
-  loadConcreteString :: (CB.IsSymInterface sym)
-                     => proxy (arch, s)
-                     -> CS.SimState (CruciblePersonality arch sym) sym (CrucibleExt arch) rtp f a
-                     -> CT.TypeRepr tp
-                     -> CS.RegValue sym tp
-                     -> IO (Maybe T.Text)
 
 class (IR arch s, CCE.IsSyntaxExtension (CrucibleExt arch)) => Architecture (arch :: Type) (s :: Type) where
   data ArchResult arch s :: Type

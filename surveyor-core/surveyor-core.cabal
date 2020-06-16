@@ -89,7 +89,6 @@ library
                        llvm-pretty-bc-parser,
                        crucible-llvm,
                        crucible-jvm,
-                       crux,
                        macaw-base,
                        macaw-loader,
                        macaw-loader-ppc,

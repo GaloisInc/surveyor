@@ -1,7 +1,5 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 module Surveyor.Core.Breakpoint (
   Breakpoint(..),
   BreakpointType(..),
@@ -13,14 +11,11 @@ import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Text as T
 import qualified Data.Vector as DV
 
-import qualified Lang.Crucible.Backend as LCB
 import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Lang.Crucible.Simulator.RegMap as CSR
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as LCT
-
-import qualified Surveyor.Core.Architecture.Class as SCAC
 
 data BreakpointType sym = UnconditionalBreakpoint
                         | ConditionalBreakpoint (LCSR.RegValue sym LCT.BoolType)
@@ -38,39 +33,36 @@ data Breakpoint sym =
 -- The first argument of the (unconditional) breakpoint function is the name.
 -- The rest of the arguments are values that can be viewed easily from the
 -- debugger.
-classifyBreakpoint :: forall proxy arch s sym p ext ret rtp f a
-                    . ( SCAC.SymbolicArchitecture arch s
-                      , p ~ SCAC.CruciblePersonality arch sym
-                      , ext ~ SCAC.CrucibleExt arch
-                      , LCB.IsSymInterface sym
-                      )
-                   => proxy (arch, s)
-                   -> LCSET.SimState p sym ext rtp f a
-                   -> LCSET.ResolvedCall p sym ext ret
-                   -> Maybe (IO (Breakpoint sym))
-classifyBreakpoint proxy simState rc =
+--
+-- FIXME: Interpreting the string here is a bit tricky.  In the LLVM frontend,
+-- it is represented as an LLVMPointer intrinsic type.  We can't mention that
+-- type here because the architecture and extension types are polymorphic.
+-- We'll need a typeclass method (probably based on arch) that lets us dig into
+-- arch-specific types.  Additionally, that function will need access to the
+-- full SimState, as loading a string from memory in LLVM requires reading from
+-- memory.
+classifyBreakpoint :: LCSET.ResolvedCall p sym ext ret -> Maybe (Breakpoint sym)
+classifyBreakpoint rc =
   case rc of
     LCSET.CrucibleCall {} -> Nothing
     LCSET.OverrideCall o fr
       | LCSET.overrideName o == "crucible_breakpoint" ->
         case CSR.regMap (fr ^. LCSC.overrideRegMap) of
           Ctx.Empty Ctx.:> name Ctx.:> args
-            | LCT.VectorRepr LCT.AnyRepr <- CSR.regType args -> Just $ do
-                mName <- SCAC.loadConcreteString proxy simState (CSR.regType name) (CSR.regValue name)
-                return Breakpoint { breakpointType = UnconditionalBreakpoint
-                                  , breakpointName = mName
-                                  , breakpointArguments = CSR.regValue args
-                                  }
+            | LCT.VectorRepr LCT.AnyRepr <- CSR.regType args ->
+              Just $ Breakpoint { breakpointType = UnconditionalBreakpoint
+                                , breakpointName = Nothing
+                                , breakpointArguments = CSR.regValue args
+                                }
           _ -> Nothing
       | LCSET.overrideName o == "crucible_breakpoint_if" ->
         case CSR.regMap (fr ^. LCSC.overrideRegMap) of
           Ctx.Empty Ctx.:> name Ctx.:> predicate Ctx.:> args
             | LCT.VectorRepr LCT.AnyRepr <- CSR.regType args
-            , LCT.BoolRepr <- CSR.regType predicate -> Just $ do
-                mName <- SCAC.loadConcreteString proxy simState (CSR.regType name) (CSR.regValue name)
-                return Breakpoint { breakpointType = ConditionalBreakpoint (CSR.regValue predicate)
-                                  , breakpointName = mName
-                                  , breakpointArguments = CSR.regValue args
-                                  }
+            , LCT.BoolRepr <- CSR.regType predicate ->
+              Just $ Breakpoint { breakpointType = ConditionalBreakpoint (CSR.regValue predicate)
+                                , breakpointName = Nothing
+                                , breakpointArguments = CSR.regValue args
+                                }
           _ -> Nothing
       | otherwise -> Nothing
