@@ -29,6 +29,7 @@ import qualified Data.Text as T
 import qualified Graphics.Vty as GV
 import qualified Lang.Crucible.CFG.Core as LCCC
 import qualified Lang.Crucible.Simulator.CallFrame as LCSC
+import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified What4.Expr.Builder as WEB
 
@@ -36,6 +37,7 @@ import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Panic as SBP
 import qualified Surveyor.Core as C
 
+import qualified Surveyor.Brick.Widget.CallStackViewer as WCSV
 import qualified Surveyor.Brick.Widget.ValueViewer as WVV
 
 -- | This is a wrapper around a symbolic-execution time value (a RegEntry).  The
@@ -85,11 +87,12 @@ data WrappedViewer s (tp :: LCCC.CrucibleType) where
 --
 -- This includes the selected value state as well as the state for the value
 -- viewer widget itself.
-data StateExplorer s e where
+data StateExplorer arch s e where
   StateExplorer :: ValueSelectorForm s ctx e
                 -> Ctx.Assignment (WrappedViewer s) ctx
                 -> BF.FocusRing Names
-                -> StateExplorer s e
+                -> WCSV.CallStackViewer arch s
+                -> StateExplorer arch s e
 
 -- | Construct the necessary explorer state from a suspended symbolic execution state
 --
@@ -109,10 +112,12 @@ data StateExplorer s e where
 -- selector widget or the value viewer widget.
 stateExplorer :: forall e arch s
                . C.SymbolicExecutionState arch s C.Suspend
-              -> StateExplorer s e
+              -> StateExplorer arch s e
 stateExplorer (C.Suspended suspSt) =
   case C.suspendedRegVals suspSt of
-    Ctx.Empty -> StateExplorer NoValues Ctx.Empty (BF.focusRing [])
+    Ctx.Empty ->
+      let csv = WCSV.callStackViewer (Proxy @arch) (suspSt ^. L.to C.suspendedSimState . LCSET.stateTree . L.to LCSET.activeFrames)
+      in StateExplorer NoValues Ctx.Empty (BF.focusRing []) csv
     vals@(_ Ctx.:> _) ->
       let idxList = reverse $ Ctx.forIndex (Ctx.size vals) (\acc idx -> idxEntry idx : acc) []
           wrappedVals = FC.fmapFC RegWrapper vals
@@ -128,8 +133,9 @@ stateExplorer (C.Suspended suspSt) =
             case re of
               LMCR.RegEntry tp rv -> WrappedViewer (WVV.valueViewer (Proxy @(WEB.ExprBuilder s st fs)) tp rv)
           viewers = FC.fmapFC toValueViewer wrappedVals
-          fr = BF.focusRing [BreakpointValueSelectorForm, BreakpointValueViewer]
-      in StateExplorer vsf viewers fr
+          fr = BF.focusRing [BreakpointValueSelectorForm, BreakpointValueViewer, CallStackViewer]
+          csv = WCSV.callStackViewer (Proxy @arch) (suspSt ^. L.to C.suspendedSimState . LCSET.stateTree . L.to LCSET.activeFrames)
+      in StateExplorer vsf viewers fr csv
   where
     idxEntry :: forall tp (ctx :: Ctx.Ctx LCCC.CrucibleType) . Ctx.Index ctx tp -> (Some (Ctx.Index ctx), Names, T.Text)
     idxEntry idx = (Some idx, SelectedBreakpointValue (Ctx.indexVal idx), T.pack (show idx))
@@ -139,15 +145,18 @@ stateExplorer (C.Suspended suspSt) =
 -- Eventually, this should provide some mechanisms for deeply inspecting the
 -- state (including arch-specific inspection of memory).
 renderSymbolicExecutionStateExplorer :: forall arch s e
-                                      . (C.SymbolicExecutionState arch s C.Suspend, StateExplorer s e)
+                                      . (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
                                      -> B.Widget Names
-renderSymbolicExecutionStateExplorer (C.Suspended suspSt, se@(StateExplorer vsf _viewers _focus)) =
+renderSymbolicExecutionStateExplorer (C.Suspended suspSt, se@(StateExplorer vsf _viewers focus csv)) =
   case C.suspendedCallFrame suspSt of
     cf@LCSC.CallFrame { LCSC._frameCFG = fcfg } ->
       B.vBox [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
            , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
            , B.txt "Breakpoint name:" B.<+> B.txt (fromMaybe "<Unnamed Breakpoint>" (C.breakpointName =<< mbp))
-           , renderBreakpointValueSelector vsf
+           , B.hBox[ renderBreakpointValueSelector vsf
+                   , B.fill ' '
+                   , WCSV.renderCallStackViewer (BF.focusGetCurrent focus == Just CallStackViewer) csv
+                   ]
            , renderSelectedValue se
            ]
   where
@@ -160,10 +169,10 @@ renderBreakpointValueSelector vsf =
     NoValues -> B.emptyWidget
     ValueSelectorForm f -> B.renderForm f
 
-renderSelectedValue :: forall s e
-                     . StateExplorer s e
+renderSelectedValue :: forall arch s e
+                     . StateExplorer arch s e
                     -> B.Widget Names
-renderSelectedValue (StateExplorer vsf viewers focus) =
+renderSelectedValue (StateExplorer vsf viewers focus _csv) =
   case vsf of
     NoValues -> B.emptyWidget
     ValueSelectorForm f
@@ -177,28 +186,33 @@ renderSelectedValue (StateExplorer vsf viewers focus) =
 -- This handles changing focus between the two sub-widgets via tab.  Beyond
 -- that, it delegates all events to the currently focused sub-widget.
 handleSymbolicExecutionStateExplorerEvent :: B.BrickEvent Names e
-                                          -> (C.SymbolicExecutionState arch s C.Suspend, StateExplorer s e)
-                                          -> B.EventM Names (C.SymbolicExecutionState arch s C.Suspend, StateExplorer s e)
-handleSymbolicExecutionStateExplorerEvent evt s0@(C.Suspended suspSt, StateExplorer vsf viewers focus) =
+                                          -> (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
+                                          -> B.EventM Names (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
+handleSymbolicExecutionStateExplorerEvent evt s0@(C.Suspended suspSt, StateExplorer vsf viewers focus csv) =
   case evt of
     B.VtyEvent (GV.EvKey (GV.KChar '\t') []) ->
-      return (C.Suspended suspSt, StateExplorer vsf viewers (BF.focusNext focus))
+      return (C.Suspended suspSt, StateExplorer vsf viewers (BF.focusNext focus) csv)
     B.VtyEvent ve ->
-      case vsf of
-        NoValues ->
-          -- If there is no index, that is only because there are no breakpoint
-          -- values (and therefore nothing to select and no events to handle)
-          return s0
-        ValueSelectorForm f ->
-          case BF.focusGetCurrent focus of
-            Just BreakpointValueSelectorForm -> do
-              f' <- B.handleFormEvent evt f
-              return (C.Suspended suspSt, StateExplorer (ValueSelectorForm f') viewers focus)
-            Just BreakpointValueViewer
-              | Some idx <- f ^. L.to B.formState . index
-              , WrappedViewer valView <- viewers Ctx.! idx -> do
-                  v' <- WVV.handleValueViewerEvent ve valView
-                  let viewers' = L.set (PC.ixF idx) (WrappedViewer v') viewers
-                  return (C.Suspended suspSt, StateExplorer vsf viewers' focus)
-            n -> SBP.panic "handleSymbolicExecutionExplorerEvent" ["Unexpected component in focus ring: " ++ show n]
+      case BF.focusGetCurrent focus of
+        Just CallStackViewer -> do
+          csv' <- WCSV.handleCallStackViewerEvent evt csv
+          return (C.Suspended suspSt, StateExplorer vsf viewers focus csv')
+        _ ->
+          case vsf of
+            NoValues ->
+              -- If there is no index, that is only because there are no breakpoint
+              -- values (and therefore nothing to select and no events to handle)
+              return s0
+            ValueSelectorForm f ->
+              case BF.focusGetCurrent focus of
+                Just BreakpointValueSelectorForm -> do
+                  f' <- B.handleFormEvent evt f
+                  return (C.Suspended suspSt, StateExplorer (ValueSelectorForm f') viewers focus csv)
+                Just BreakpointValueViewer
+                  | Some idx <- f ^. L.to B.formState . index
+                  , WrappedViewer valView <- viewers Ctx.! idx -> do
+                      v' <- WVV.handleValueViewerEvent ve valView
+                      let viewers' = L.set (PC.ixF idx) (WrappedViewer v') viewers
+                      return (C.Suspended suspSt, StateExplorer vsf viewers' focus csv)
+                n -> SBP.panic "handleSymbolicExecutionExplorerEvent" ["Unexpected component in focus ring: " ++ show n]
     _ -> return s0

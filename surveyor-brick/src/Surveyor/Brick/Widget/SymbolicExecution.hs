@@ -33,7 +33,7 @@ data SymbolicExecutionManager e arch s where
   Initializing :: C.SymbolicExecutionState arch s C.SetupArgs -> SymbolicExecutionManager e arch s
   Executing :: C.SymbolicExecutionState arch s C.Execute -> SymbolicExecutionManager e arch s
   Inspecting :: C.SymbolicExecutionState arch s C.Inspect -> SymbolicExecutionManager e arch s
-  Suspended :: C.SymbolicExecutionState arch s C.Suspend -> SEE.StateExplorer s e -> SymbolicExecutionManager e arch s
+  Suspended :: C.SymbolicExecutionState arch s C.Suspend -> SEE.StateExplorer arch s e -> SymbolicExecutionManager e arch s
 
 symbolicExecutionManagerState :: SymbolicExecutionManager e arch s -> Some (C.SymbolicExecutionState arch s)
 symbolicExecutionManagerState sem =
