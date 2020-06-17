@@ -28,6 +28,7 @@ import           Control.Monad ( guard )
 import qualified Control.Once as O
 import qualified Crux.Model as CruxM
 import qualified Crux.Types as CruxT
+import qualified Data.BitVector.Sized as DBS
 import qualified Data.ByteString as BS
 import qualified Data.Foldable as F
 import qualified Data.IORef as IOR
@@ -1073,11 +1074,11 @@ llvmLoadConcreteString simState repr rv =
       v <- LLM.doLoad sym mem ptr (LLM.bitvectorType 1) (LT.LLVMPointerRepr (NR.knownNat @8)) CLDL.noAlignment
       -- FIXME: Does this add a proof obligation?
       x <- LLM.projectLLVM_bv sym v
-      case WI.asUnsignedBV x of
+      case DBS.asUnsigned <$> WI.asBV x of
         Just 0 -> return (Just (f []))
         Just c -> do
           let c' :: Word8
               c' = toEnum (fromInteger c)
-          ptr' <- LLM.doPtrAddOffset sym mem ptr =<< WI.bvLit sym LLM.PtrWidth 1
+          ptr' <- LLM.doPtrAddOffset sym mem ptr =<< WI.bvLit sym LLM.PtrWidth (DBS.mkBV ?ptrWidth 1)
           loadByByte mem (f . (c':)) ptr'
         Nothing -> return Nothing

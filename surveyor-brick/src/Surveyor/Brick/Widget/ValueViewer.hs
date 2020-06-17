@@ -20,6 +20,7 @@ module Surveyor.Brick.Widget.ValueViewer (
 import qualified Brick as B
 import qualified Brick.Widgets.List as BL
 import qualified Control.Monad.State.Strict as St
+import qualified Data.BitVector.Sized as DBS
 import qualified Data.List as L
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Map as MapF
@@ -350,11 +351,10 @@ renderCoefficient srep coeff =
     SR.SemiRingNatRepr -> return (B.str (show coeff))
     SR.SemiRingIntegerRepr -> return (B.str (show coeff))
     SR.SemiRingRealRepr -> return (B.str (show coeff))
-    -- FIXME? We could use the width repr to influence the printing to pad values all the way out
-    SR.SemiRingBVRepr bvFlv _nr ->
+    SR.SemiRingBVRepr bvFlv nr ->
       case bvFlv of
         SR.BVArithRepr -> return (B.str (show coeff))
-        SR.BVBitsRepr -> return (B.str (printf "0x%x" coeff))
+        SR.BVBitsRepr -> return (B.str (DBS.ppHex nr coeff))
 
 renderRoundingMode :: WI.RoundingMode -> B.Widget n
 renderRoundingMode rm =
