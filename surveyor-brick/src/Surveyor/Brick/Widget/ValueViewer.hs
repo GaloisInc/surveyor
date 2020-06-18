@@ -61,9 +61,25 @@ data ValueViewerState s sym tp =
                    , vsProxy :: Proxy sym
                    }
 
+-- | A widget state backing the value viewer; it existentially quantifies away
+-- the type and symbolic backend, with the real data storage in
+-- 'ValueViewerState'
 data ValueViewer s where
   ValueViewer :: ValueViewerState s sym tp -> ValueViewer s
 
+-- | Construct a 'ValueViewer' for a single value
+--
+-- Note that 'LCSR.RegValue' is a type family, and we need the 'LCT.TypeRepr' to
+-- know how to interpret the value (i.e., determine its representation).  We can
+-- only touch values under a case expression over the type repr.
+--
+-- Also note that we have concretized the symbolic backend type, as we need to
+-- know what the underlying representation is to case over all of the
+-- constructors.
+--
+-- Note that we eagerly construct most of the state for the viewer, but we do it
+-- in a way that preserves sharing to avoid re-traversing terms (see
+-- 'buildViewer')
 valueViewer :: forall proxy sym tp s st fs
              . (sym ~ WEB.ExprBuilder s st fs)
             => proxy sym
@@ -100,6 +116,9 @@ newtype ViewerBuilder s sym a =
            , St.MonadState (MapF.MapF (PN.Nonce s) ConstWidget)
            )
 
+-- | Build a 'ValueViewer' by traversing the value and building brick widgets as
+-- we encounter terms.  It caches previously-seen terms by their nonce value.
+-- Values without nonces are always rendered inline.
 buildViewer :: forall proxy sym tp s st fs
              . (sym ~ WEB.ExprBuilder s st fs)
             => proxy sym
