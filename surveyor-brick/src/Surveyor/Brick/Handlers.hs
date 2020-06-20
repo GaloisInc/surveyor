@@ -31,7 +31,6 @@ import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Control.NF as NF
 import qualified Data.Foldable as F
-import           Data.Monoid
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( viewSome )
@@ -117,7 +116,7 @@ handleVtyEvent s0@(C.State s) evt
           manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
           let st1 = SEM.symbolicExecutionManagerState manager1
           let s' = s & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager1
-                     & C.lArchState . _Just . C.symExStateL %~ (viewSome C.singleSessionState st1 <>)
+                     & C.lArchState . _Just . C.symExStateL %~ C.mergeSessionState (viewSome C.singleSessionState st1)
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
