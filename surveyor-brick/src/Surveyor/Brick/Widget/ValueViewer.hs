@@ -19,6 +19,7 @@ module Surveyor.Brick.Widget.ValueViewer (
 
 import qualified Brick as B
 import qualified Brick.Widgets.List as BL
+import           Control.Lens ( (^.) )
 import qualified Control.Monad.State.Strict as St
 import qualified Data.BitVector.Sized as DBS
 import qualified Data.List as L
@@ -37,7 +38,9 @@ import           Text.Printf ( printf )
 import qualified What4.BaseTypes as WT
 import qualified What4.Expr.Builder as WEB
 import qualified What4.Expr.WeightedSum as WSum
+import qualified What4.FunctionName as WFN
 import qualified What4.Interface as WI
+import qualified What4.ProgramLoc as WPL
 import qualified What4.SemiRing as SR
 import qualified What4.Symbol as WS
 import qualified What4.Utils.Complex as WUC
@@ -89,14 +92,16 @@ valueViewer :: forall proxy sym tp s st fs
 valueViewer p tp re =
   St.evalState (unViewBuilder (buildViewer p tp re)) MapF.empty
 
+data RenderWidget = RenderWidget Rendering (Maybe WPL.ProgramLoc)
+
 -- | Mark widgets as either being rendered inline in operand positions or as
 -- generating a binding that will be referred to by a number in an operand
 -- position
-data RenderWidget = RenderInline (B.Widget Names)
-                  | RenderBound (B.Widget Names) (B.Widget Names)
+data Rendering = RenderInline (B.Widget Names)
+               | RenderBound (B.Widget Names) (B.Widget Names)
 
 renderedWidget :: RenderWidget -> B.Widget Names
-renderedWidget rw =
+renderedWidget (RenderWidget rw _mloc) =
   case rw of
     RenderInline w -> w
     RenderBound _name w -> w
@@ -163,14 +168,16 @@ buildTermWidget tp re =
     LCT.AsBaseType _btp ->
       case re of
         WEB.BoolExpr b _ -> inline (B.txt (T.pack (show b)))
-        WEB.SemiRingLiteral srep coeff _loc -> RenderInline <$> renderCoefficient srep coeff
+        WEB.SemiRingLiteral srep coeff loc -> do
+          rd <- RenderInline <$> renderCoefficient srep coeff
+          return (RenderWidget rd (Just loc))
         WEB.StringExpr sl _loc ->
           case sl of
             WUS.UnicodeLiteral t -> inline (B.txt "\"" B.<+> B.txt t B.<+> B.txt "\"")
             WUS.Char8Literal bs -> inline (B.str (show bs))
             WUS.Char16Literal ws -> inline (B.str (show ws))
         WEB.BoundVarExpr bv ->
-          inline (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv)))
+          inlineLoc re (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv)))
         WEB.NonceAppExpr nae ->
           case WEB.nonceExprApp nae of
             WEB.Annotation bt annotNonce e -> do
@@ -299,11 +306,11 @@ buildTermWidget tp re =
                 WEB.BVCountTrailingZeros _rep e -> bindUnaryExpr ae e "bvCtz"
                 WEB.BVCountLeadingZeros _rep e -> bindUnaryExpr ae e "bvClz"
 
-                WEB.FloatPZero _rep -> inline (B.txt "+0")
-                WEB.FloatNZero _rep -> inline (B.txt "-0")
-                WEB.FloatNaN _rep -> inline (B.txt "NaN")
-                WEB.FloatPInf _rep -> inline (B.txt "+Inf")
-                WEB.FloatNInf _rep -> inline (B.txt "-Inf")
+                WEB.FloatPZero _rep -> inlineLoc re (B.txt "+0")
+                WEB.FloatNZero _rep -> inlineLoc re (B.txt "-0")
+                WEB.FloatNaN _rep -> inlineLoc re (B.txt "NaN")
+                WEB.FloatPInf _rep -> inlineLoc re (B.txt "+Inf")
+                WEB.FloatNInf _rep -> inlineLoc re (B.txt "-Inf")
                 WEB.FloatNeg _rep e -> bindUnaryExpr ae e "floatNeg"
                 WEB.FloatAbs _rep e -> bindUnaryExpr ae e "floatAbs"
                 WEB.FloatSqrt _rep rm e -> bindUnaryFloatExpr ae rm e "floatSqrt"
@@ -357,12 +364,13 @@ buildTermWidget tp re =
                                            ))
 
 
-                _ -> inline (B.txt "Unhandled app")
+                _ -> inlineLoc re (B.txt "Unhandled app")
 
 inline :: (Monad m) => B.Widget Names -> m RenderWidget
-inline = return . RenderInline
+inline w = return (RenderWidget (RenderInline w) Nothing)
 
-
+inlineLoc :: (Monad m) => WEB.Expr t tp -> B.Widget Names -> m RenderWidget
+inlineLoc e w = return (RenderWidget (RenderInline w) (Just (WEB.exprLoc e)))
 
 renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m (B.Widget n)
 renderCoefficient srep coeff =
@@ -414,12 +422,15 @@ intersperse = B.hBox . L.intersperse (B.txt " ")
 
 class HasNonce e where
   getNonce :: e s (tp :: WI.BaseType) -> PN.Nonce s tp
+  getLoc :: e s (tp :: WI.BaseType) -> WPL.ProgramLoc
 
 instance HasNonce WEB.AppExpr where
   getNonce = WEB.appExprId
+  getLoc = WEB.appExprLoc
 
 instance HasNonce WEB.NonceAppExpr where
   getNonce = WEB.nonceExprId
+  getLoc = WEB.nonceExprLoc
 
 bindTernaryExpr :: ( sym ~ WEB.ExprBuilder s st fs
                    , HasNonce e
@@ -461,7 +472,7 @@ bindUnaryExpr ae e name = do
   bindExpr ae (intersperse [B.txt name, e'])
 
 bindExpr :: (HasNonce e) => e t tp -> B.Widget Names -> ViewerBuilder t sym RenderWidget
-bindExpr ae w = returnCached (getNonce ae) $! RenderBound (thisRef ae) w
+bindExpr ae w = returnCached (getNonce ae) $! RenderWidget (RenderBound (thisRef ae) w) (Just (getLoc ae))
 
 returnCached :: forall s sym (tp :: WT.BaseType)
               . PN.Nonce s tp
@@ -482,19 +493,31 @@ thisRef ae = B.str (printf "$%d" (PN.indexValue (getNonce ae)))
 -- For compound values that must be bound, this widget is the unique identifier
 -- bound to the term
 argRef :: RenderWidget -> B.Widget Names
-argRef widget =
+argRef (RenderWidget widget _) =
   case widget of
     RenderInline w -> w
     RenderBound r _ -> r
 
 renderValueViewer :: Bool -> ValueViewer s -> B.Widget Names
 renderValueViewer viewerFocused (ValueViewer vs) =
-  BL.renderList render viewerFocused (valueList vs)
+  B.vBox [ BL.renderList render viewerFocused (valueList vs)
+         , renderSelectedLocation
+         ]
   where
-    render _hasFocus rw =
+    render _hasFocus (RenderWidget rw _) =
       case rw of
         RenderInline w -> w
         RenderBound name w -> intersperse [name, B.txt "=", w]
+    renderSelectedLocation = fromMaybe B.emptyWidget $ do
+      let valList = valueList vs
+      selIdx <- valList ^. BL.listSelectedL
+      let elts = valList ^. BL.listElementsL
+      RenderWidget _ (Just loc) <- elts DV.!? selIdx
+      return $ B.hBox [ B.txt "Location: "
+                      , B.txt (WFN.functionName (WPL.plFunction loc))
+                      , B.txt " @ "
+                      , B.str (show (WPL.plSourceLoc loc))
+                      ]
 
 handleValueViewerEvent :: GV.Event
                        -> ValueViewer s
