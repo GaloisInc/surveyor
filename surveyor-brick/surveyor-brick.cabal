@@ -31,6 +31,7 @@ library
                        Surveyor.Brick.Widget.SymbolicExecution.Setup
                        Surveyor.Brick.Widget.SymbolicExecution.StateExplorer
                        Surveyor.Brick.Widget.ValueViewer
+                       Surveyor.Brick.Widget.CallStackViewer
                        Brick.Match.Subword
                        Brick.Widget.FilterList
                        Brick.Widget.Graph
@@ -52,6 +53,7 @@ library
                        vector,
                        filepath,
                        Glob >= 0.10 && < 0.11,
+                       bv-sized >= 1 && < 1.1,
                        prettyprinter,
                        pretty,
                        split >= 0.2 && < 0.3,

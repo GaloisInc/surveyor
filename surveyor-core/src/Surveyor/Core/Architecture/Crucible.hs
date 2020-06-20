@@ -38,6 +38,7 @@ module Surveyor.Core.Architecture.Crucible (
 
 import           Control.DeepSeq ( NFData(rnf) )
 import           Control.Lens ( (^.) )
+import qualified Data.BitVector.Sized as DBS
 import qualified Data.Foldable as F
 import           Data.Functor.Const ( Const(Const, getConst) )
 import           Data.Kind ( Type )
@@ -273,6 +274,7 @@ instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible ar
       BoolLit {} -> False
       NatLit {} -> False
       IntegerLit {} -> False
+      BVLit {} -> False
       RationalLit {} -> False
       StringLiteral {} -> False
       FloatLit {} -> False
@@ -304,6 +306,7 @@ data CrucibleOperand arch s where
   BoolLit :: Bool -> CrucibleOperand arch s
   NatLit :: Natural -> CrucibleOperand arch s
   IntegerLit :: Integer -> CrucibleOperand arch s
+  BVLit :: NR.NatRepr w -> DBS.BV w -> CrucibleOperand arch s
   RationalLit :: Rational -> CrucibleOperand arch s
   StringLiteral :: WSL.StringLiteral si -> CrucibleOperand arch s
   FloatLit :: Float -> CrucibleOperand arch s
@@ -396,6 +399,7 @@ cruciblePrettyOperand o =
     BoolLit b -> T.pack (show b)
     NatLit n -> T.pack (show n)
     IntegerLit i -> T.pack (show i)
+    BVLit nr bv -> T.pack (DBS.ppHex nr bv)
     RationalLit r -> T.pack (show r)
     StringLiteral s -> T.pack (show s)
     FloatLit f -> T.pack (show f)
@@ -1138,11 +1142,11 @@ crucibleAppOperands cache ng app =
     C.BVUndef nrep -> do
       n1 <- PN.freshNonce ng
       return $ OL.fromList [ CrucibleOperand n1 (NatRepr nrep) ]
-    C.BVLit nr i -> do
+    C.BVLit nr bv -> do
       n1 <- PN.freshNonce ng
       n2 <- PN.freshNonce ng
       return $ OL.fromList [ CrucibleOperand n1 (NatRepr nr)
-             , CrucibleOperand n2 (IntegerLit i)
+             , CrucibleOperand n2 (BVLit nr bv)
              ]
     C.BVConcat nrep1 nrep2 r1 r2 -> do
       n1 <- PN.freshNonce ng
