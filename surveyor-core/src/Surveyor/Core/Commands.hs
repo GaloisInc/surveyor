@@ -288,14 +288,13 @@ beginSymbolicExecutionSetupC =
       , Just archState <- state ^. CS.lArchState
       , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
       , Just (Some symExecState) <- curSymExState state = do
-      -- , Some symExecState <- curCtx ^. CCX.symExecStateL = do
           let fh = curCtx ^. CCX.baseFunctionG
           mcfg <- CA.crucibleCFG (archState ^. CS.lAnalysisResult) fh
           case mcfg of
             Just (CCC.AnyCFG cfg) -> do
               let conf = SymEx.symbolicExecutionConfig symExecState
               SCE.emitEvent customEventChan (SCE.BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
-            Nothing -> do
+            Nothing ->
               CS.logMessage state (SCL.msgWith { SCL.logText = [Fmt.fmt ("Missing CFG for function "+||fh||+"")]
                                                , SCL.logLevel = SCL.Warn
                                                , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
@@ -316,13 +315,13 @@ startSymbolicExecutionC =
       | nonce <- state ^. CS.lNonce
       , Just (Some (SymEx.Initializing symExecState)) <- curSymExState state
       , Just archState <- state ^. CS.lArchState = do
-      -- , Just curCtx <- archState ^? CS.contextL . CCX.currentContext
-      -- , Some (SymEx.Initializing symExecState) <- curCtx ^. CCX.symExecStateL = do
           let ares = archState ^. CS.lAnalysisResult
           SCE.emitEvent customEventChan (SCE.StartSymbolicExecution nonce ares symExecState)
       | otherwise =
-        -- If we weren't in an appropriate state, just don't do anything
-        return ()
+          CS.logMessage state (SCL.msgWith { SCL.logText = ["Wrong state for starting symbolic execution"]
+                                           , SCL.logLevel = SCL.Error
+                                           , SCL.logSource = SCL.CommandCallback "StartSymbolicExecution"
+                                           })
     isInitializingSymEx (AR.SomeState ss)
       | Just (Some (SymEx.Initializing {})) <- curSymExState ss = True
       | otherwise = False
