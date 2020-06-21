@@ -93,28 +93,11 @@ handleSymbolicExecutionEvent s0 evt =
           case LCT.asBaseType (CSR.regType curVal) of
             LCT.AsBaseType _btr ->
               case CSR.regValue curVal of
-                WEB.AppExpr ae -> do
-                  liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                                      , C.logSource = C.EventHandler (T.pack "InitializeValueNamePrompt")
-                                                      , C.logText = [T.pack "Name: " <> name]
-                                                      })
-                  liftIO $ C.sEmitEvent s0 (C.NameValue (WEB.appExprId ae) name)
+                WEB.AppExpr ae -> liftIO $ C.sEmitEvent s0 (C.NameValue (WEB.appExprId ae) name)
                 WEB.NonceAppExpr nae -> liftIO $ C.sEmitEvent s0 (C.NameValue (WEB.nonceExprId nae) name)
                 _ -> return ()
             LCT.NotBaseType -> return ()
           B.continue (C.State s0)
-      | Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce)
-      , Just sessionID <- s0 ^? C.lArchState . _Just . C.contextL . C.currentContext . C.symExecSessionIDL
-      , Just symExSt <- s0 ^? C.lArchState . _Just . C.symExStateL
-      , Just (Some (C.Suspended _symNonce suspSt)) <- C.lookupSessionState symExSt sessionID ->
-        case C.suspendedCurrentValue suspSt of
-          Nothing -> do
-            liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                              , C.logSource = C.EventHandler (T.pack "InitializeValueNamePrompt")
-                                              , C.logText = [T.pack "Empty suspended state"]
-                                              })
-            B.continue (C.State s0)
-          Just _ -> error ""
       | otherwise -> do
           liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
                                               , C.logSource = C.EventHandler (T.pack "InitializeValueNamePrompt")
