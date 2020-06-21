@@ -70,9 +70,9 @@ handleSymbolicExecutionManagerEvent :: B.BrickEvent Names e
                                     -> B.EventM Names (SymbolicExecutionManager e arch s)
 handleSymbolicExecutionManagerEvent evt sem =
   case sem of
-    Configuring st f -> do
-      f' <- SEC.handleSymbolicExecutionConfiguratorEvent evt f
-      return (Configuring st f')
+    Configuring _ f -> do
+      (st', f') <- SEC.handleSymbolicExecutionConfiguratorEvent evt f
+      return (Configuring st' f')
     Initializing st -> do
       st' <- SES.handleSymbolicExecutionSetupEvent evt st
       return (Initializing st')

@@ -47,5 +47,7 @@ renderSymbolicExecutionConfigurator = B.renderForm
 
 handleSymbolicExecutionConfiguratorEvent :: B.BrickEvent Names e
                                          -> B.Form (C.SymbolicExecutionConfig s) e Names
-                                         -> B.EventM Names (B.Form (C.SymbolicExecutionConfig s) e Names)
-handleSymbolicExecutionConfiguratorEvent = B.handleFormEvent
+                                         -> B.EventM Names (C.SymbolicExecutionState arch s C.Config, B.Form (C.SymbolicExecutionConfig s) e Names)
+handleSymbolicExecutionConfiguratorEvent evt f = do
+  f' <- B.handleFormEvent evt f
+  return (C.Configuring (B.formState f'), f')
