@@ -30,7 +30,7 @@ module Surveyor.Core.Commands (
   allCommands
   ) where
 
-import           Control.Lens ( (^.), (^?) )
+import           Control.Lens ( (^.), (^?), _Just )
 import qualified Data.Functor.Const as C
 import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
@@ -123,7 +123,7 @@ nameValueC =
     -- interactive use because the user can never provide a nonce via prompt
     hasCurrentValue = const True
 
-promptValueNameC :: forall s st . (AR.HasNonce st) => Command s st '[AR.StringType]
+promptValueNameC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.StringType]
 promptValueNameC =
   C.Command "prompt-value-name" doc argNames argTypes callback hasCurrentValue
   where
@@ -131,7 +131,13 @@ promptValueNameC =
     callback :: Callback s st '[AR.StringType]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) (AR.StringArgument name PL.:< PL.Nil) ->
       SCE.emitEvent customEventChan (SCE.InitializeValueNamePrompt archNonce name)
-    hasCurrentValue = const True
+    hasCurrentValue :: AR.SomeState (CS.S e u) s -> Bool
+    hasCurrentValue (AR.SomeState st)
+      | Just sessionID <- st ^? CS.lArchState . _Just . CS.contextL . CCX.currentContext . CCX.symExecSessionIDL
+      , Just symExSt <- st ^? CS.lArchState . _Just . CS.symExStateL
+      , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID =
+          isJust (SymEx.suspendedCurrentValue suspSt)
+      | otherwise = False
     argNames = C.Const "Name" PL.:< PL.Nil
     argTypes = AR.StringTypeRepr PL.:< PL.Nil
 
