@@ -25,6 +25,8 @@ module Surveyor.Core.Commands (
   startSymbolicExecutionC,
   setLogFileC,
   disableFileLoggingC,
+  nameValueC,
+  promptValueNameC,
   allCommands
   ) where
 
@@ -74,6 +76,8 @@ allCommands =
   , C.SomeCommand startSymbolicExecutionC
   , C.SomeCommand setLogFileC
   , C.SomeCommand disableFileLoggingC
+  , C.SomeCommand nameValueC
+  , C.SomeCommand promptValueNameC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -104,6 +108,32 @@ describeKeysC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.DescribeKeys
+
+nameValueC :: forall s st . Command s st '[AR.ValueNonceType, AR.StringType]
+nameValueC =
+  C.Command "name-value" doc argNames argTypes callback hasCurrentValue
+  where
+    doc = "Name a sub-term in a formula"
+    argNames = C.Const "nonce" PL.:< C.Const "name" PL.:< PL.Nil
+    argTypes = AR.ValueNonceTypeRepr PL.:< AR.StringTypeRepr PL.:< PL.Nil
+    callback :: Callback s st '[AR.ValueNonceType, AR.StringType]
+    callback = \customEventChan _ (AR.ValueNonceArgument nonce PL.:< AR.StringArgument name PL.:< PL.Nil) ->
+      SCE.emitEvent customEventChan (SCE.NameValue nonce name)
+    -- FIXME: Maybe this is always available?  Or perhaps never available for
+    -- interactive use because the user can never provide a nonce via prompt
+    hasCurrentValue = const True
+
+promptValueNameC :: forall s st . (AR.HasNonce st) => Command s st '[AR.StringType]
+promptValueNameC =
+  C.Command "prompt-value-name" doc argNames argTypes callback hasCurrentValue
+  where
+    doc = "Name a sub-term in the current value (determined by context)"
+    callback :: Callback s st '[AR.StringType]
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) (AR.StringArgument name PL.:< PL.Nil) ->
+      SCE.emitEvent customEventChan (SCE.InitializeValueNamePrompt archNonce name)
+    hasCurrentValue = const True
+    argNames = C.Const "Name" PL.:< PL.Nil
+    argTypes = AR.StringTypeRepr PL.:< PL.Nil
 
 selectNextInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextInstructionC =

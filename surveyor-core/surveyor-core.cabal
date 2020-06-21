@@ -53,6 +53,7 @@ library
                        Surveyor.Core.Panic
                        Surveyor.Core.State
                        Surveyor.Core.TranslationCache
+                       Surveyor.Core.ValueNames
   -- other-extensions:    
   build-depends:       base >=4.10 && <5,
                        deepseq,

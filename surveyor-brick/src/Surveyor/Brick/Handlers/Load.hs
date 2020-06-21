@@ -150,6 +150,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              , C.sLoader = C.sLoader s0
              , C.sKeymap = keymap
              , C.sUIExtension = uiExt
+             , C.sValueNames = C.emptyValueNameMap
              , C.sArchNonce = C.archNonce ares
              , C.sArchState =
                case () of

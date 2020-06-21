@@ -50,6 +50,7 @@ modeKeys :: [(C.SomeUIMode s, [(C.Key, C.SomeCommand (C.SurveyorCommand s (C.S e
 modeKeys = [ (C.SomeUIMode C.SymbolicExecutionManager,
                   [ (C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)
                   , (C.Key (V.KChar 's') [], C.SomeCommand C.startSymbolicExecutionC)
+                  , (C.Key (V.KChar 'n') [], C.SomeCommand C.promptValueNameC)
                   ])
            ]
 

@@ -32,6 +32,7 @@ module Surveyor.Core.State (
   lUIExtension,
   lArchState,
   lNonce,
+  lValueNames,
   lAnalysisResult,
   lKeymap,
   lUIState,
@@ -64,6 +65,7 @@ import qualified Surveyor.Core.Logging as SCL
 import           Surveyor.Core.Mode
 import qualified Surveyor.Core.SymbolicExecution as SE
 import qualified Surveyor.Core.TranslationCache as TC
+import qualified Surveyor.Core.ValueNames as SCV
 
 -- | There are multiple supported logging actions: internal state and file
 --
@@ -187,6 +189,8 @@ data S e u (arch :: Type) s =
     -- equality.
     , sKeymap :: !(Keymap (AR.SurveyorCommand s (S e u)) (SomeUIMode s))
     -- ^ Keybindings mapped to commands
+    , sValueNames :: !(SCV.ValueNameMap s)
+    -- ^ Saved names for symbolic value (both automatically generated and user-provided)
     , sUIExtension :: e s
     -- ^ An extension field for UI frontends for containing data that must exist
     -- even when there is no active architecture (i.e., when @arch ~ Void@).
@@ -210,6 +214,7 @@ L.makeLensesFor
   , ("sNonceGenerator", "lNonceGenerator")
   , ("sLoader", "lLoader")
   , ("sKeymap", "lKeymap")
+  , ("sValueNames", "lValueNames")
   , ("sUIExtension", "lUIExtension")
   , ("sArchState", "lArchState") ]
   ''S

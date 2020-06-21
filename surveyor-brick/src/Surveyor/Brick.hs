@@ -293,6 +293,7 @@ emptyState mfp mloader ng customEventChan = do
              , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
              , C.sEventChannel = customEventChan
              , C.sNonceGenerator = ng
+             , C.sValueNames = C.emptyValueNameMap
              , C.sKeymap = SBK.defaultKeymap Nothing
              , C.sUIExtension = uiExt
              , C.sArchState = Nothing
@@ -359,7 +360,7 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                                   }
       ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
       -- NOTE: This can throw an exception, but that is fine: the TUI is not yet up
-      symbolicExecutionState <- C.suspendedState symSt simState (Just bp)
+      symbolicExecutionState <- C.suspendedState ng symSt simState (Just bp)
       let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
                                      , SBE.sBlockViewers = MapF.fromList blockViewers
                                      , SBE.sFunctionViewer = MapF.fromList funcViewers
@@ -390,6 +391,7 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                  , C.sArchNonce = n0
                  , C.sEventChannel = chan
                  , C.sUIExtension = uiExt
+                 , C.sValueNames = C.emptyValueNameMap
                  , C.sArchState = Just archState
                  , C.sUIMode = C.SomeUIMode C.SymbolicExecutionManager
                  }

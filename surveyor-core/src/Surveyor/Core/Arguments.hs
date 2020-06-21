@@ -18,6 +18,7 @@ module Surveyor.Core.Arguments (
   StringType,
   CommandType,
   FilePathType,
+  ValueNonceType,
   showRepr,
   parseArgument,
   HasNonce(..),
@@ -35,6 +36,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as Z
 import           Numeric.Natural ( Natural )
 import           Text.Read ( readMaybe )
+import qualified What4.BaseTypes as WT
 
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Events as E
@@ -68,6 +70,7 @@ data Type where
   WordType :: Type
   CommandType :: Type
   FilePathType :: Type
+  ValueNonceType :: Type
 
 type StringType = 'StringType
 type AddressType = 'AddressType
@@ -75,6 +78,7 @@ type IntType = 'IntType
 type WordType = 'WordType
 type CommandType = 'CommandType
 type FilePathType = 'FilePathType
+type ValueNonceType = 'ValueNonceType
 
 data TypeRepr tp where
   CommandTypeRepr :: TypeRepr CommandType
@@ -83,6 +87,7 @@ data TypeRepr tp where
   IntTypeRepr :: TypeRepr IntType
   WordTypeRepr :: TypeRepr WordType
   FilePathTypeRepr :: TypeRepr FilePathType
+  ValueNonceTypeRepr :: TypeRepr ValueNonceType
 
 instance TestEquality TypeRepr where
   testEquality CommandTypeRepr CommandTypeRepr = Just Refl
@@ -91,6 +96,7 @@ instance TestEquality TypeRepr where
   testEquality IntTypeRepr IntTypeRepr = Just Refl
   testEquality WordTypeRepr WordTypeRepr = Just Refl
   testEquality FilePathTypeRepr FilePathTypeRepr = Just Refl
+  testEquality ValueNonceTypeRepr ValueNonceTypeRepr = Just Refl
   testEquality _ _ = Nothing
 
 data SomeAddress s where
@@ -103,6 +109,7 @@ data Argument s tp where
   IntArgument :: Integer -> Argument s IntType
   WordArgument :: Natural -> Argument s WordType
   FilePathArgument :: FilePath -> Argument s FilePathType
+  ValueNonceArgument :: PN.Nonce s (tp :: WT.BaseType) -> Argument s ValueNonceType
 
 parseArgument :: (Z.GenericTextZipper t)
               => (String -> Maybe (SomeAddress s))
@@ -122,6 +129,9 @@ parseArgument parseAddress cmds =
         let t = T.pack txt
         in CommandArgument <$> M.lookup t cmdIndex
       FilePathTypeRepr -> Just (FilePathArgument txt)
+      ValueNonceTypeRepr ->
+        -- We can't read in nonces, since it would break the abstraction
+        Nothing
 
 showRepr :: TypeRepr tp -> T.Text
 showRepr r =
@@ -132,3 +142,4 @@ showRepr r =
     WordTypeRepr -> "Word"
     CommandTypeRepr -> "Command"
     FilePathTypeRepr -> "FilePath"
+    ValueNonceTypeRepr -> "Nonce"
