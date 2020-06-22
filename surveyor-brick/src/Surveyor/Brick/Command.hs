@@ -20,13 +20,17 @@ module Surveyor.Brick.Command (
   extraCommands,
   findBlockC,
   listFunctionsC,
+  promptValueNameC,
   mkExtension
   ) where
 
+import           Control.Lens ( (^.), (^?), _Just )
 import qualified Data.Functor.Const as C
 import           Data.Kind ( Type )
+import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
 
@@ -64,8 +68,24 @@ extraCommands = [ C.SomeCommand showMacawBlockC
                 , C.SomeCommand minibufferC
                 , C.SomeCommand findBlockC
                 , C.SomeCommand listFunctionsC
+                , C.SomeCommand promptValueNameC
                 ]
 
+promptValueNameC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
+promptValueNameC =
+  C.Command "name-selected-value" doc PL.Nil PL.Nil callback hasCurrentValue
+  where
+    doc = "Prompt the user for the name to assign to the currently-selected value"
+    callback :: Callback s st '[]
+    callback = \customEventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
+      C.emitEvent customEventChan (SBE.PromptValueName archNonce)
+    hasCurrentValue :: C.SomeState (C.S e u) s -> Bool
+    hasCurrentValue (C.SomeState st)
+      | Just sessionID <- st ^? C.lArchState . _Just . C.contextL . C.currentContext . C.symExecSessionIDL
+      , Just symExSt <- st ^? C.lArchState . _Just . C.symExStateL
+      , Just (Some (C.Suspended _symNonce suspSt)) <- C.lookupSessionState symExSt sessionID =
+          isJust (C.suspendedCurrentValue suspSt)
+      | otherwise = False
 
 
 listFunctionsC :: forall s st . (C.HasNonce st, st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]

@@ -104,6 +104,8 @@ data BrickUIEvent s (st :: Type -> Type -> Type) where
   FindFunctionsContaining :: PN.Nonce s arch -> Maybe (C.Address arch s) -> BrickUIEvent s st
   FindBlockContaining :: PN.Nonce s arch -> C.Address arch s -> BrickUIEvent s st
 
+  PromptValueName :: PN.Nonce s arch -> BrickUIEvent s st
+
 instance C.ToEvent s (C.S BrickUIExtension BrickUIState) BrickUIEvent where
   toEvent = C.ExtensionEvent
 

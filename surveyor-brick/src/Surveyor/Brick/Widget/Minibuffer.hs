@@ -3,6 +3,7 @@
 module Surveyor.Brick.Widget.Minibuffer (
   MB.Minibuffer,
   minibuffer,
+  MB.invokeCommand,
   MB.MinibufferStatus(..),
   MB.handleMinibufferEvent,
   MB.renderMinibuffer,

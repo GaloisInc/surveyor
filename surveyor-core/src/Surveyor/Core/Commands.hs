@@ -26,7 +26,7 @@ module Surveyor.Core.Commands (
   setLogFileC,
   disableFileLoggingC,
   nameValueC,
-  promptValueNameC,
+  nameCurrentValueC,
   allCommands
   ) where
 
@@ -77,7 +77,7 @@ allCommands =
   , C.SomeCommand setLogFileC
   , C.SomeCommand disableFileLoggingC
   , C.SomeCommand nameValueC
-  , C.SomeCommand promptValueNameC
+  , C.SomeCommand nameCurrentValueC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -123,9 +123,9 @@ nameValueC =
     -- interactive use because the user can never provide a nonce via prompt
     hasCurrentValue = const True
 
-promptValueNameC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.StringType]
-promptValueNameC =
-  C.Command "prompt-value-name" doc argNames argTypes callback hasCurrentValue
+nameCurrentValueC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.StringType]
+nameCurrentValueC =
+  C.Command "name-current-value" doc argNames argTypes callback hasCurrentValue
   where
     doc = "Name a sub-term in the current value (determined by context)"
     callback :: Callback s st '[AR.StringType]
