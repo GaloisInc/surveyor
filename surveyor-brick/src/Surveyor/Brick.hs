@@ -205,7 +205,9 @@ drawUIMode binFileName archState s uim =
     C.SemanticsViewer ->
       drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. C.contextG) ISV.instructionSemanticsViewer)
     C.SymbolicExecutionManager -> do
-      drawAppShell s (SEM.renderSymbolicExecutionManager (archState ^. BH.symbolicExecutionManagerG))
+      let valNames = s ^. C.lValueNames
+      let sem = archState ^. BH.symbolicExecutionManagerG
+      drawAppShell s (SEM.renderSymbolicExecutionManager sem valNames)
   where
     binfo = C.sAnalysisResult archState
 

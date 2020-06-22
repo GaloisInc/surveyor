@@ -49,6 +49,7 @@ import qualified What4.Utils.Complex as WUC
 import qualified What4.Utils.StringLiteral as WUS
 
 import           Surveyor.Brick.Names ( Names(..) )
+import qualified Surveyor.Core as C
 
 data ValueViewerState s sym tp =
   ValueViewerState { regType :: LCT.TypeRepr tp
@@ -543,16 +544,18 @@ argRef rw =
     RenderInline w -> w
     RenderBound r _ -> r
 
-renderValueViewer :: Bool -> ValueViewer s -> B.Widget Names
-renderValueViewer viewerFocused (ValueViewer vs) =
+-- lookupValueName nonce vmap
+
+renderValueViewer :: Bool -> C.ValueNameMap s -> ValueViewer s -> B.Widget Names
+renderValueViewer viewerFocused valNames (ValueViewer vs) =
   B.vBox [ BL.renderList render viewerFocused (valueList vs)
          , renderSelectedLocation
          ]
   where
-    render _hasFocus (RenderWidget rw _ _) =
+    render _hasFocus (RenderWidget rw _ mval) =
       case rw of
         RenderInline w -> w
-        RenderBound name w -> intersperse [name, B.txt "=", w]
+        RenderBound name w -> intersperse [name, B.txt "=", w, renderValueName mval valNames]
     renderSelectedLocation = fromMaybe B.emptyWidget $ do
       let valList = valueList vs
       selIdx <- valList ^. BL.listSelectedL
@@ -563,6 +566,25 @@ renderValueViewer viewerFocused (ValueViewer vs) =
                       , B.txt " @ "
                       , B.str (show (WPL.plSourceLoc loc))
                       ]
+
+renderValueName :: Maybe (WEB.Expr s tp)
+                -> C.ValueNameMap s
+                -> B.Widget n
+renderValueName mval valNames = fromMaybe B.emptyWidget $ do
+  val <- mval
+  nonce <- exprNonce val
+  name <- C.lookupValueName nonce valNames
+  return (B.hBox [B.txt "[", B.txt name, B.txt "]"])
+
+exprNonce :: WEB.Expr t tp -> Maybe (PN.Nonce t tp)
+exprNonce val =
+  case val of
+    WEB.NonceAppExpr nae -> Just (WEB.nonceExprId nae)
+    WEB.BoundVarExpr bv -> Just (WEB.bvarId bv)
+    WEB.AppExpr ae -> Just (WEB.appExprId ae)
+    WEB.StringExpr {} -> Nothing
+    WEB.BoolExpr {} -> Nothing
+    WEB.SemiRingLiteral {} -> Nothing
 
 handleValueViewerEvent :: GV.Event
                        -> ValueViewer s

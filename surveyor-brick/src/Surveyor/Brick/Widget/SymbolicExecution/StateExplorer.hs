@@ -153,8 +153,9 @@ stateExplorer (C.Suspended symNonce suspSt) =
 -- state (including arch-specific inspection of memory).
 renderSymbolicExecutionStateExplorer :: forall arch s e
                                       . (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
+                                     -> C.ValueNameMap s
                                      -> B.Widget Names
-renderSymbolicExecutionStateExplorer (C.Suspended _symNonce suspSt, se@(StateExplorer vsf _viewers focus csv)) =
+renderSymbolicExecutionStateExplorer (C.Suspended _symNonce suspSt, se@(StateExplorer vsf _viewers focus csv)) valNames =
   case C.suspendedCallFrame suspSt of
     cf@LCSC.CallFrame { LCSC._frameCFG = fcfg } ->
       B.vBox [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
@@ -164,7 +165,7 @@ renderSymbolicExecutionStateExplorer (C.Suspended _symNonce suspSt, se@(StateExp
                    , B.fill ' '
                    , WCSV.renderCallStackViewer (BF.focusGetCurrent focus == Just CallStackViewer) csv
                    ]
-           , renderSelectedValue se
+           , renderSelectedValue valNames se
            ]
   where
     mbp = C.suspendedBreakpoint suspSt
@@ -177,16 +178,17 @@ renderBreakpointValueSelector vsf =
     ValueSelectorForm f -> B.renderForm f
 
 renderSelectedValue :: forall arch s e
-                     . StateExplorer arch s e
+                     . C.ValueNameMap s
+                    -> StateExplorer arch s e
                     -> B.Widget Names
-renderSelectedValue (StateExplorer vsf viewers focus _csv) =
+renderSelectedValue valNames (StateExplorer vsf viewers focus _csv) =
   case vsf of
     NoValues -> B.emptyWidget
     ValueSelectorForm f
       | Some idx <- f ^. L.to B.formState . index
       , WrappedViewer vv <- viewers Ctx.! idx ->
           let isFocused = BF.focusGetCurrent focus == Just BreakpointValueViewer
-          in WVV.renderValueViewer isFocused vv
+          in WVV.renderValueViewer isFocused valNames vv
 
 -- | Handle events for the 'StateExplorer'
 --
