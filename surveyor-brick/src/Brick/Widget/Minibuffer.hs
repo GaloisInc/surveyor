@@ -185,16 +185,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
           -- the command immediately
           case FL.selectedItem (commandList mb) of
             Nothing -> return (Completed mb)
-            Just (C.SomeCommand (C.Command _ _ argNames argTypes callback _)) ->
-              case (argNames, argTypes) of
-                (PL.Nil, PL.Nil) -> do
-                  liftIO (callback customEventChan s PL.Nil)
-                  return (Executed (resetMinibuffer mb))
-                _ ->
-                  return $ Completed mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
-                                        , commandList = FL.resetList (commandList mb)
-                                        , argumentList = FL.resetList (argumentList mb)
-                                        }
+            Just someCmd -> liftIO $ invokeCommand customEventChan s mb someCmd
         CollectingArguments expectedArgNames expectedArgTypes collectedArgTypes collectedArgValues callbackType callback ->
           case (expectedArgNames, expectedArgTypes) of
             (PL.Nil, PL.Nil) ->
@@ -267,6 +258,10 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
                                              }
 
 -- | Invoke a command in the minibuffer to let it prompt the user for arguments
+--
+-- This function is intended to allow non-minibuffer code to set the minibuffer
+-- into a state that will prompt users for command argument values.  This lets
+-- other code us the minibuffer as their UI.
 invokeCommand :: ( C.CommandLike b
                  , ZG.GenericTextZipper t
                  )
