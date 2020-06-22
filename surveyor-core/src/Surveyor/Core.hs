@@ -58,6 +58,10 @@ module Surveyor.Core (
   -- * State
   module Surveyor.Core.State,
   CAS.asynchronously,
+  SCV.ValueNameMap,
+  SCV.emptyValueNameMap,
+  SCV.addValueName,
+  SCV.lookupValueName,
   -- ** Modes
   M.UIMode(..),
   M.UIKind,
@@ -87,6 +91,7 @@ module Surveyor.Core (
   AR.StringType,
   AR.CommandType,
   AR.FilePathType,
+  AR.ValueNonceType,
   AR.showRepr,
   AR.parseArgument,
   -- * Context
@@ -220,3 +225,4 @@ import qualified Surveyor.Core.OperandList as OL
 import           Surveyor.Core.State
 import qualified Surveyor.Core.SymbolicExecution as SymEx
 import qualified Surveyor.Core.TranslationCache as TC
+import qualified Surveyor.Core.ValueNames as SCV

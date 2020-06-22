@@ -55,14 +55,15 @@ symbolicExecutionManager (Some state) =
     C.Suspended {} -> Suspended state (SEE.stateExplorer state)
 
 renderSymbolicExecutionManager :: SymbolicExecutionManager e arch s
+                               -> C.ValueNameMap s
                                -> B.Widget Names
-renderSymbolicExecutionManager sem =
+renderSymbolicExecutionManager sem valNames =
   case sem of
     Configuring _ form -> SEC.renderSymbolicExecutionConfigurator form
     Initializing st -> SES.renderSymbolicExecutionSetup st
     Executing st -> SEM.renderSymbolicExecutionMonitor st
     Inspecting st -> SEI.renderSymbolicExecutionInspector st
-    Suspended st form -> SEE.renderSymbolicExecutionStateExplorer (st, form)
+    Suspended st form -> SEE.renderSymbolicExecutionStateExplorer (st, form) valNames
 
 handleSymbolicExecutionManagerEvent :: B.BrickEvent Names e
                                     -> SymbolicExecutionManager e arch s

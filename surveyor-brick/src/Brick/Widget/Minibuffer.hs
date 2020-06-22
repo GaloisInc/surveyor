@@ -16,6 +16,7 @@ module Brick.Widget.Minibuffer (
   minibuffer,
   activeCompletionTarget,
   setCompletions,
+  invokeCommand,
   MinibufferStatus(..),
   handleMinibufferEvent,
   renderMinibuffer
@@ -184,16 +185,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
           -- the command immediately
           case FL.selectedItem (commandList mb) of
             Nothing -> return (Completed mb)
-            Just (C.SomeCommand (C.Command _ _ argNames argTypes callback _)) ->
-              case (argNames, argTypes) of
-                (PL.Nil, PL.Nil) -> do
-                  liftIO (callback customEventChan s PL.Nil)
-                  return (Executed (resetMinibuffer mb))
-                _ ->
-                  return $ Completed mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
-                                        , commandList = FL.resetList (commandList mb)
-                                        , argumentList = FL.resetList (argumentList mb)
-                                        }
+            Just someCmd -> liftIO $ invokeCommand customEventChan s mb someCmd
         CollectingArguments expectedArgNames expectedArgTypes collectedArgTypes collectedArgValues callbackType callback ->
           case (expectedArgNames, expectedArgTypes) of
             (PL.Nil, PL.Nil) ->
@@ -264,6 +256,32 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
                        return $ Completed mb { argumentList = argList'
                                              , outstandingCompletion = Just (completionTarget, ac)
                                              }
+
+-- | Invoke a command in the minibuffer to let it prompt the user for arguments
+--
+-- This function is intended to allow non-minibuffer code to set the minibuffer
+-- into a state that will prompt users for command argument values.  This lets
+-- other code us the minibuffer as their UI.
+invokeCommand :: ( C.CommandLike b
+                 , ZG.GenericTextZipper t
+                 )
+              => C.Chan (C.EventType b)
+              -> C.StateType b
+              -> Minibuffer b t n
+              -> C.SomeCommand b
+              -> IO (MinibufferStatus b t n)
+invokeCommand customEventChan s mb (C.SomeCommand (C.Command _ _ argNames argTypes callback p))
+  | not (p s) = return (Canceled mb)
+  | otherwise =
+    case (argNames, argTypes) of
+      (PL.Nil, PL.Nil) -> do
+        callback customEventChan s PL.Nil
+        return (Executed (resetMinibuffer mb))
+      _ ->
+        return $ Completed mb { state = CollectingArguments argNames argTypes PL.Nil PL.Nil argTypes callback
+                              , commandList = FL.resetList (commandList mb)
+                              , argumentList = FL.resetList (argumentList mb)
+                              }
 
 setCompletions :: V.Vector t -> Minibuffer b t n -> Minibuffer b t n
 setCompletions comps mb =

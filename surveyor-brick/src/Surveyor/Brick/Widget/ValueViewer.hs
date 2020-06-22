@@ -13,6 +13,7 @@
 module Surveyor.Brick.Widget.ValueViewer (
   ValueViewer,
   valueViewer,
+  selectedValue,
   renderValueViewer,
   handleValueViewerEvent
   ) where
@@ -24,10 +25,11 @@ import qualified Control.Monad.State.Strict as St
 import qualified Data.BitVector.Sized as DBS
 import qualified Data.List as L
 import           Data.Maybe ( fromMaybe )
+import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
-import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
 import qualified Data.Vector as DV
 import qualified Graphics.Vty as GV
@@ -47,28 +49,40 @@ import qualified What4.Utils.Complex as WUC
 import qualified What4.Utils.StringLiteral as WUS
 
 import           Surveyor.Brick.Names ( Names(..) )
+import qualified Surveyor.Core as C
 
 data ValueViewerState s sym tp =
   ValueViewerState { regType :: LCT.TypeRepr tp
                    , regValue :: LCSR.RegValue sym tp
-                   , cache :: MapF.MapF (PN.Nonce s) ConstWidget
+                   , cache :: MapF.MapF (PN.Nonce s) (ConstWidget sym)
                    -- ^ Previous translations of terms into widgets, cached to
                    -- avoid recomputation
                    , rootWidget :: B.Widget Names
                    -- ^ The top-level widget that demands the values defined in
                    -- the cache
-                   , valueList :: BL.GenericList Names DV.Vector RenderWidget
+                   , valueList :: BL.GenericList Names DV.Vector (RenderWidget sym)
                    -- ^ The state of the Brick list we use to render values
                    --
                    -- This tracks things like selection state
-                   , vsProxy :: Proxy sym
+                   , vsSymNonce :: PN.Nonce s sym
                    }
+
+-- | Get the value that the user has selected in the 'ValueViewer' widget, if any
+--
+-- NOTE: This only considers values with nonces
+selectedValue :: PN.Nonce s sym -> ValueViewer s -> Maybe (Some (WEB.Expr s))
+selectedValue symNonce (ValueViewer vs) = do
+  PC.Refl <- PC.testEquality symNonce (vsSymNonce vs)
+  (_ix, RenderWidget { rwValue = mval }) <- BL.listSelectedElement (valueList vs)
+  val <- mval
+  return (Some val)
+
 
 -- | A widget state backing the value viewer; it existentially quantifies away
 -- the type and symbolic backend, with the real data storage in
 -- 'ValueViewerState'
 data ValueViewer s where
-  ValueViewer :: ValueViewerState s sym tp -> ValueViewer s
+  ValueViewer :: (sym ~ WEB.ExprBuilder s st fs) => ValueViewerState s sym tp -> ValueViewer s
 
 -- | Construct a 'ValueViewer' for a single value
 --
@@ -83,16 +97,30 @@ data ValueViewer s where
 -- Note that we eagerly construct most of the state for the viewer, but we do it
 -- in a way that preserves sharing to avoid re-traversing terms (see
 -- 'buildViewer')
-valueViewer :: forall proxy sym tp s st fs
+valueViewer :: forall sym tp s st fs
              . (sym ~ WEB.ExprBuilder s st fs)
-            => proxy sym
+            => PN.Nonce s sym
             -> LCT.TypeRepr tp
             -> LCSR.RegValue sym tp
             -> ValueViewer s
 valueViewer p tp re =
   St.evalState (unViewBuilder (buildViewer p tp re)) MapF.empty
 
-data RenderWidget = RenderWidget Rendering (Maybe WPL.ProgramLoc)
+-- | A wrapper around a 'Rendering' that (possibly) includes program location
+-- information.
+--
+-- It also includes the term that generated it, with the intention that we need
+-- to be able to pull out terms to feed back into the 'ValueViewer' based on
+-- user selections.  NOTE that users can only name/select bound values, which
+-- are bound values by virtue of having a unique nonce identifier.  All of the
+-- values that can have nonces are base types (thus our nonces are restricted to
+-- having base types)
+data RenderWidget sym =
+  forall tp .
+  RenderWidget { rwRendering :: Rendering
+               , rwLocation :: Maybe WPL.ProgramLoc
+               , rwValue :: Maybe (WI.SymExpr sym tp)
+               }
 
 -- | Mark widgets as either being rendered inline in operand positions or as
 -- generating a binding that will be referred to by a number in an operand
@@ -100,9 +128,9 @@ data RenderWidget = RenderWidget Rendering (Maybe WPL.ProgramLoc)
 data Rendering = RenderInline (B.Widget Names)
                | RenderBound (B.Widget Names) (B.Widget Names)
 
-renderedWidget :: RenderWidget -> B.Widget Names
-renderedWidget (RenderWidget rw _mloc) =
-  case rw of
+renderedWidget :: RenderWidget sym -> B.Widget Names
+renderedWidget rw =
+  case rwRendering rw of
     RenderInline w -> w
     RenderBound _name w -> w
 
@@ -110,27 +138,27 @@ renderedWidget (RenderWidget rw _mloc) =
 -- parameter so that we can store it in a 'MapF.MapF'.  We need a custom type
 -- instead of just using 'Data.Functor.Const' because that type is too
 -- polymorphic and causes some type inference problems.
-newtype ConstWidget (tp :: WT.BaseType) = ConstWidget RenderWidget
+newtype ConstWidget sym (tp :: WT.BaseType) = ConstWidget (RenderWidget sym)
 
 newtype ViewerBuilder s sym a =
-  ViewerBuilder { unViewBuilder :: St.State (MapF.MapF (PN.Nonce s) ConstWidget) a
+  ViewerBuilder { unViewBuilder :: St.State (MapF.MapF (PN.Nonce s) (ConstWidget sym)) a
                 }
   deriving ( Functor
            , Monad
            , Applicative
-           , St.MonadState (MapF.MapF (PN.Nonce s) ConstWidget)
+           , St.MonadState (MapF.MapF (PN.Nonce s) (ConstWidget sym))
            )
 
 -- | Build a 'ValueViewer' by traversing the value and building brick widgets as
 -- we encounter terms.  It caches previously-seen terms by their nonce value.
 -- Values without nonces are always rendered inline.
-buildViewer :: forall proxy sym tp s st fs
+buildViewer :: forall sym tp s st fs
              . (sym ~ WEB.ExprBuilder s st fs)
-            => proxy sym
+            => PN.Nonce s sym
             -> LCT.TypeRepr tp
             -> LCSR.RegValue sym tp
             -> ViewerBuilder s sym (ValueViewer s)
-buildViewer _p tp re = do
+buildViewer symNonce tp re = do
   -- Traverse the whole term initially to cache any widgets we can based on nonces.
   --
   -- We'll use this same primitive for rendering later, but then we'll start it
@@ -142,7 +170,7 @@ buildViewer _p tp re = do
                              , regValue = re
                              , cache = c
                              , rootWidget = renderedWidget root
-                             , vsProxy = Proxy @sym
+                             , vsSymNonce = symNonce
                              , valueList = BL.list ValueViewerList vals 1
                              }
   return (ValueViewer vvs)
@@ -150,7 +178,7 @@ buildViewer _p tp re = do
 buildTermWidget :: (sym ~ WEB.ExprBuilder s st fs)
                 => LCT.TypeRepr tp
                 -> LCSR.RegValue sym tp
-                -> ViewerBuilder s sym RenderWidget
+                -> ViewerBuilder s sym (RenderWidget sym)
 buildTermWidget tp re =
   case LCT.asBaseType tp of
     LCT.NotBaseType ->
@@ -170,7 +198,7 @@ buildTermWidget tp re =
         WEB.BoolExpr b _ -> inline (B.txt (T.pack (show b)))
         WEB.SemiRingLiteral srep coeff loc -> do
           rd <- RenderInline <$> renderCoefficient srep coeff
-          return (RenderWidget rd (Just loc))
+          return (RenderWidget rd (Just loc) Nothing)
         WEB.StringExpr sl _loc ->
           case sl of
             WUS.UnicodeLiteral t -> inline (B.txt "\"" B.<+> B.txt t B.<+> B.txt "\"")
@@ -178,51 +206,56 @@ buildTermWidget tp re =
             WUS.Char16Literal ws -> inline (B.str (show ws))
         WEB.BoundVarExpr bv ->
           inlineLoc re (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv)))
-        WEB.NonceAppExpr nae ->
-          case WEB.nonceExprApp nae of
-            WEB.Annotation bt annotNonce e -> do
-              e' <- argRef <$> buildTermWidget (LCT.baseToType bt) e
-              bindExpr nae (intersperse [ B.txt "annotated"
-                                        , B.str (printf "[$%d]" (PN.indexValue annotNonce))
-                                        , e'
-                                        ])
-            WEB.Forall bv e -> do
-              e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
-              bindExpr nae (intersperse [ B.txt "forall"
-                                        , B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))
-                                        , B.txt "."
-                                        , e'
-                                        ])
-            WEB.Exists bv e -> do
-              e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
-              bindExpr nae (intersperse [ B.txt "exists"
-                                        , B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))
-                                        , B.txt "."
-                                        , e'
-                                        ])
-            WEB.ArrayFromFn sf -> do
-              bindExpr nae (intersperse [ B.txt "arrayFromFn"
-                                        , B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
-                                        ])
-            WEB.FnApp sf args -> do
-              let es = FC.toListFC (\e -> buildTermWidget (LCT.baseToType (WI.exprType e)) e) args
-              es' <- fmap argRef <$> sequence es
-              bindExpr nae (intersperse ( B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
-                                        : es'
-                                        ))
-            WEB.MapOverArrays sf _reprs vals -> do
-              let es = FC.toListFC (\(WI.ArrayResultWrapper e) -> buildTermWidget (LCT.baseToType (WI.exprType e)) e) vals
-              es' <- fmap argRef <$> sequence es
-              bindExpr nae (intersperse ( B.txt "mapOverArrays"
-                                        : B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
-                                        : es'
-                                        ))
-            WEB.ArrayTrueOnEntries sf e -> do
-              e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
-              bindExpr nae (intersperse [ B.txt "arrayTrueOnEntries"
-                                        , B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
-                                        , e'
-                                        ])
+        WEB.NonceAppExpr nae -> do
+          let nonce = WEB.nonceExprId nae
+          m <- St.get
+          case MapF.lookup nonce m of
+            Just (ConstWidget cached) -> return cached
+            Nothing ->
+              case WEB.nonceExprApp nae of
+                WEB.Annotation bt annotNonce e -> do
+                  e' <- argRef <$> buildTermWidget (LCT.baseToType bt) e
+                  bindExpr nae (intersperse [ B.txt "annotated"
+                                            , B.str (printf "[$%d]" (PN.indexValue annotNonce))
+                                            , e'
+                                            ])
+                WEB.Forall bv e -> do
+                  e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+                  bindExpr nae (intersperse [ B.txt "forall"
+                                            , B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))
+                                            , B.txt "."
+                                            , e'
+                                            ])
+                WEB.Exists bv e -> do
+                  e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+                  bindExpr nae (intersperse [ B.txt "exists"
+                                            , B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv))
+                                            , B.txt "."
+                                            , e'
+                                            ])
+                WEB.ArrayFromFn sf -> do
+                  bindExpr nae (intersperse [ B.txt "arrayFromFn"
+                                            , B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                            ])
+                WEB.FnApp sf args -> do
+                  let es = FC.toListFC (\e -> buildTermWidget (LCT.baseToType (WI.exprType e)) e) args
+                  es' <- fmap argRef <$> sequence es
+                  bindExpr nae (intersperse ( B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                            : es'
+                                            ))
+                WEB.MapOverArrays sf _reprs vals -> do
+                  let es = FC.toListFC (\(WI.ArrayResultWrapper e) -> buildTermWidget (LCT.baseToType (WI.exprType e)) e) vals
+                  es' <- fmap argRef <$> sequence es
+                  bindExpr nae (intersperse ( B.txt "mapOverArrays"
+                                            : B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                            : es'
+                                            ))
+                WEB.ArrayTrueOnEntries sf e -> do
+                  e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
+                  bindExpr nae (intersperse [ B.txt "arrayTrueOnEntries"
+                                            , B.txt (WS.solverSymbolAsText (WEB.symFnName sf))
+                                            , e'
+                                            ])
         WEB.AppExpr ae -> do
           let nonce = WEB.appExprId ae
           m <- St.get
@@ -366,11 +399,15 @@ buildTermWidget tp re =
 
                 _ -> inlineLoc re (B.txt "Unhandled app")
 
-inline :: (Monad m) => B.Widget Names -> m RenderWidget
-inline w = return (RenderWidget (RenderInline w) Nothing)
+inline :: (Monad m) => B.Widget Names -> m (RenderWidget sym)
+inline w = return (RenderWidget (RenderInline w) Nothing Nothing)
 
-inlineLoc :: (Monad m) => WEB.Expr t tp -> B.Widget Names -> m RenderWidget
-inlineLoc e w = return (RenderWidget (RenderInline w) (Just (WEB.exprLoc e)))
+inlineLoc :: (Monad m, sym ~ WEB.ExprBuilder t st fs)
+          => WEB.Expr t tp
+          -> B.Widget Names
+          -> m (RenderWidget sym)
+inlineLoc e w =
+  return (RenderWidget (RenderInline w) (Just (WEB.exprLoc e)) (Just e))
 
 renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m (B.Widget n)
 renderCoefficient srep coeff =
@@ -397,7 +434,7 @@ bindUnaryFloatExpr :: (sym ~ WEB.ExprBuilder s st fs)
                    -> WI.RoundingMode
                    -> WI.SymExpr sym bt1
                    -> T.Text
-                   -> ViewerBuilder s sym RenderWidget
+                   -> ViewerBuilder s sym (RenderWidget sym)
 bindUnaryFloatExpr ae rm e name = do
   e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
   let rmw = renderRoundingMode rm
@@ -409,7 +446,7 @@ bindBinaryFloatExpr :: (sym ~ WEB.ExprBuilder s st fs)
                     -> WI.SymExpr sym bt1
                     -> WI.SymExpr sym bt2
                     -> T.Text
-                    -> ViewerBuilder s sym RenderWidget
+                    -> ViewerBuilder s sym (RenderWidget sym)
 bindBinaryFloatExpr ae rm e1 e2 name = do
   e1' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e1)) e1
   e2' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e2)) e2
@@ -422,15 +459,18 @@ intersperse = B.hBox . L.intersperse (B.txt " ")
 
 class HasNonce e where
   getNonce :: e s (tp :: WI.BaseType) -> PN.Nonce s tp
-  getLoc :: e s (tp :: WI.BaseType) -> WPL.ProgramLoc
+  getLoc :: e s tp -> WPL.ProgramLoc
+  getSymExpr :: e s tp -> WEB.Expr s tp
 
 instance HasNonce WEB.AppExpr where
   getNonce = WEB.appExprId
   getLoc = WEB.appExprLoc
+  getSymExpr = WEB.AppExpr
 
 instance HasNonce WEB.NonceAppExpr where
   getNonce = WEB.nonceExprId
   getLoc = WEB.nonceExprLoc
+  getSymExpr = WEB.NonceAppExpr
 
 bindTernaryExpr :: ( sym ~ WEB.ExprBuilder s st fs
                    , HasNonce e
@@ -440,7 +480,7 @@ bindTernaryExpr :: ( sym ~ WEB.ExprBuilder s st fs
                 -> WI.SymExpr sym bt2
                 -> WI.SymExpr sym bt3
                 -> T.Text
-                -> ViewerBuilder s sym RenderWidget
+                -> ViewerBuilder s sym (RenderWidget sym)
 bindTernaryExpr ae e1 e2 e3 name = do
   e1' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e1)) e1
   e2' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e2)) e2
@@ -454,7 +494,7 @@ bindBinExpr :: ( sym ~ WEB.ExprBuilder s st fs
             -> WI.SymExpr sym bt1
             -> WI.SymExpr sym bt2
             -> T.Text
-            -> ViewerBuilder s sym RenderWidget
+            -> ViewerBuilder s sym (RenderWidget sym)
 bindBinExpr ae e1 e2 name = do
   e1' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e1)) e1
   e2' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e2)) e2
@@ -466,18 +506,24 @@ bindUnaryExpr :: ( sym ~ WEB.ExprBuilder s st fs
               => e s tp1
               -> WI.SymExpr sym tp2
               -> T.Text
-              -> ViewerBuilder s sym RenderWidget
+              -> ViewerBuilder s sym (RenderWidget sym)
 bindUnaryExpr ae e name = do
   e' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType e)) e
   bindExpr ae (intersperse [B.txt name, e'])
 
-bindExpr :: (HasNonce e) => e t tp -> B.Widget Names -> ViewerBuilder t sym RenderWidget
-bindExpr ae w = returnCached (getNonce ae) $! RenderWidget (RenderBound (thisRef ae) w) (Just (getLoc ae))
+bindExpr :: (HasNonce e, sym ~ WEB.ExprBuilder t st fs)
+         => e t (tp :: WT.BaseType)
+         -> B.Widget Names
+         -> ViewerBuilder t sym (RenderWidget sym)
+bindExpr ae w =
+  returnCached (getNonce ae) $! RenderWidget (RenderBound (thisRef ae) w) (Just (getLoc ae)) (Just re)
+  where
+    re = getSymExpr ae
 
 returnCached :: forall s sym (tp :: WT.BaseType)
               . PN.Nonce s tp
-             -> RenderWidget
-             -> ViewerBuilder s sym RenderWidget
+             -> RenderWidget sym
+             -> ViewerBuilder s sym (RenderWidget sym)
 returnCached nonce res = do
   St.modify' $ MapF.insert nonce (ConstWidget res)
   return res
@@ -492,32 +538,53 @@ thisRef ae = B.str (printf "$%d" (PN.indexValue (getNonce ae)))
 --
 -- For compound values that must be bound, this widget is the unique identifier
 -- bound to the term
-argRef :: RenderWidget -> B.Widget Names
-argRef (RenderWidget widget _) =
-  case widget of
+argRef :: RenderWidget sym -> B.Widget Names
+argRef rw =
+  case rwRendering rw of
     RenderInline w -> w
     RenderBound r _ -> r
 
-renderValueViewer :: Bool -> ValueViewer s -> B.Widget Names
-renderValueViewer viewerFocused (ValueViewer vs) =
+-- lookupValueName nonce vmap
+
+renderValueViewer :: Bool -> C.ValueNameMap s -> ValueViewer s -> B.Widget Names
+renderValueViewer viewerFocused valNames (ValueViewer vs) =
   B.vBox [ BL.renderList render viewerFocused (valueList vs)
          , renderSelectedLocation
          ]
   where
-    render _hasFocus (RenderWidget rw _) =
+    render _hasFocus (RenderWidget rw _ mval) =
       case rw of
         RenderInline w -> w
-        RenderBound name w -> intersperse [name, B.txt "=", w]
+        RenderBound name w -> intersperse [name, B.txt "=", w, renderValueName mval valNames]
     renderSelectedLocation = fromMaybe B.emptyWidget $ do
       let valList = valueList vs
       selIdx <- valList ^. BL.listSelectedL
       let elts = valList ^. BL.listElementsL
-      RenderWidget _ (Just loc) <- elts DV.!? selIdx
+      RenderWidget _ (Just loc) _ <- elts DV.!? selIdx
       return $ B.hBox [ B.txt "Location: "
                       , B.txt (WFN.functionName (WPL.plFunction loc))
                       , B.txt " @ "
                       , B.str (show (WPL.plSourceLoc loc))
                       ]
+
+renderValueName :: Maybe (WEB.Expr s tp)
+                -> C.ValueNameMap s
+                -> B.Widget n
+renderValueName mval valNames = fromMaybe B.emptyWidget $ do
+  val <- mval
+  nonce <- exprNonce val
+  name <- C.lookupValueName nonce valNames
+  return (B.hBox [B.txt "[", B.txt name, B.txt "]"])
+
+exprNonce :: WEB.Expr t tp -> Maybe (PN.Nonce t tp)
+exprNonce val =
+  case val of
+    WEB.NonceAppExpr nae -> Just (WEB.nonceExprId nae)
+    WEB.BoundVarExpr bv -> Just (WEB.bvarId bv)
+    WEB.AppExpr ae -> Just (WEB.appExprId ae)
+    WEB.StringExpr {} -> Nothing
+    WEB.BoolExpr {} -> Nothing
+    WEB.SemiRingLiteral {} -> Nothing
 
 handleValueViewerEvent :: GV.Event
                        -> ValueViewer s

@@ -14,6 +14,7 @@ import           Surveyor.Brick.Attributes ( focusedListAttr )
 import qualified Surveyor.Brick.Extension as SBE
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
+import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
 handleExtensionEvent :: (C.Architecture arch s)
                      => C.S SBE.BrickUIExtension SBE.BrickUIState arch s
@@ -92,4 +93,23 @@ handleExtensionEvent s0 evt =
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.FunctionSelector
                       & C.lArchState . _Just . C.lUIState . SBE.functionSelectorL .~ FS.functionSelector callback focusedListAttr funcs
           B.continue (C.State s1)
+      | otherwise -> B.continue (C.State s0)
+
+    SBE.PromptValueName archNonce
+      | Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce)
+      , C.SomeUIMode curMode <- s0 ^. C.lUIMode
+      , mb <- s0 ^. C.lUIExtension . SBE.minibufferG -> do
+          let chan = s0 ^. C.lEventChannel
+          mbs <- liftIO $ MB.invokeCommand chan (C.SomeState s0) mb (C.SomeCommand C.nameCurrentValueC)
+          case mbs of
+            MB.Canceled mb' -> do
+              let s1 = s0 & C.lUIExtension . SBE.minibufferL .~ mb'
+              B.continue $! C.State s1
+            MB.Completed mb' -> do
+              let s1 = s0 & C.lUIExtension . SBE.minibufferL .~ mb'
+                          & C.lUIMode .~ C.SomeMiniBuffer (C.MiniBuffer curMode)
+              B.continue $! C.State s1
+            MB.Executed mb' -> do
+              let s1 = s0 & C.lUIExtension . SBE.minibufferL .~ mb'
+              B.continue $! C.State s1
       | otherwise -> B.continue (C.State s0)

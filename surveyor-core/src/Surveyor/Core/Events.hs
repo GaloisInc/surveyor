@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
@@ -27,6 +28,7 @@ import qualified Data.Text as T
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.Simulator.Profiling as CSP
+import qualified What4.BaseTypes as WT
 
 import qualified Renovate as R
 
@@ -102,6 +104,11 @@ data SymbolicExecutionEvent s st where
                          -> SES.SymbolicState arch s sym init reg
                          -> SymbolicExecutionEvent s st
   ReportSymbolicExecutionMetrics :: CSS.SessionID s -> CSP.Metrics I.Identity -> SymbolicExecutionEvent s st
+  -- | Prompt the user for the name for the currently-selected value (which is
+  -- determined by the current context)
+  InitializeValueNamePrompt :: PN.Nonce s (arch :: Type) -> T.Text -> SymbolicExecutionEvent s st
+  -- | Update the state with the name for a value
+  NameValue :: PN.Nonce s (tp :: WT.BaseType) -> T.Text -> SymbolicExecutionEvent s st
 
 -- | Events that manipulate the current context or context stack
 data ContextEvent s st where

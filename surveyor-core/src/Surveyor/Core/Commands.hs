@@ -25,10 +25,12 @@ module Surveyor.Core.Commands (
   startSymbolicExecutionC,
   setLogFileC,
   disableFileLoggingC,
+  nameValueC,
+  nameCurrentValueC,
   allCommands
   ) where
 
-import           Control.Lens ( (^.), (^?) )
+import           Control.Lens ( (^.), (^?), _Just )
 import qualified Data.Functor.Const as C
 import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
@@ -74,6 +76,8 @@ allCommands =
   , C.SomeCommand startSymbolicExecutionC
   , C.SomeCommand setLogFileC
   , C.SomeCommand disableFileLoggingC
+  , C.SomeCommand nameValueC
+  , C.SomeCommand nameCurrentValueC
   ]
 
 exitC :: forall s st . Command s st '[]
@@ -104,6 +108,38 @@ describeKeysC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.DescribeKeys
+
+nameValueC :: forall s st . Command s st '[AR.ValueNonceType, AR.StringType]
+nameValueC =
+  C.Command "name-value" doc argNames argTypes callback hasCurrentValue
+  where
+    doc = "Name a sub-term in a formula"
+    argNames = C.Const "nonce" PL.:< C.Const "name" PL.:< PL.Nil
+    argTypes = AR.ValueNonceTypeRepr PL.:< AR.StringTypeRepr PL.:< PL.Nil
+    callback :: Callback s st '[AR.ValueNonceType, AR.StringType]
+    callback = \customEventChan _ (AR.ValueNonceArgument nonce PL.:< AR.StringArgument name PL.:< PL.Nil) ->
+      SCE.emitEvent customEventChan (SCE.NameValue nonce name)
+    -- FIXME: Maybe this is always available?  Or perhaps never available for
+    -- interactive use because the user can never provide a nonce via prompt
+    hasCurrentValue = const True
+
+nameCurrentValueC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.StringType]
+nameCurrentValueC =
+  C.Command "name-current-value" doc argNames argTypes callback hasCurrentValue
+  where
+    doc = "Name a sub-term in the current value (determined by context)"
+    callback :: Callback s st '[AR.StringType]
+    callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) (AR.StringArgument name PL.:< PL.Nil) ->
+      SCE.emitEvent customEventChan (SCE.InitializeValueNamePrompt archNonce name)
+    hasCurrentValue :: AR.SomeState (CS.S e u) s -> Bool
+    hasCurrentValue (AR.SomeState st)
+      | Just sessionID <- st ^? CS.lArchState . _Just . CS.contextL . CCX.currentContext . CCX.symExecSessionIDL
+      , Just symExSt <- st ^? CS.lArchState . _Just . CS.symExStateL
+      , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID =
+          isJust (SymEx.suspendedCurrentValue suspSt)
+      | otherwise = False
+    argNames = C.Const "Name" PL.:< PL.Nil
+    argTypes = AR.StringTypeRepr PL.:< PL.Nil
 
 selectNextInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextInstructionC =

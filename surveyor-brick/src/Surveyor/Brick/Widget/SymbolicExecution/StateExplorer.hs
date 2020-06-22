@@ -22,6 +22,7 @@ import qualified Control.Lens as L
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Context as Ctx
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
@@ -31,6 +32,7 @@ import qualified Lang.Crucible.CFG.Core as LCCC
 import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Lang.Crucible.Simulator.RegMap as LMCR
+import qualified Lang.Crucible.Types as LCT
 import qualified What4.Expr.Builder as WEB
 
 import           Surveyor.Brick.Names ( Names(..) )
@@ -47,11 +49,13 @@ import qualified Surveyor.Brick.Widget.ValueViewer as WVV
 -- While we hide the parameter, we do record the concrete symbolic backend type
 -- so that we can traverse terms.
 --
--- While this quantification is useful for now, it could become problematic if
--- we need to use any of this information with values taken from the symbolic
--- execution state, which has separately quantified it all out.
+-- While this quantification is useful for now, it is problematic when we need
+-- to use any of this information with values taken from the symbolic execution
+-- state, which has separately quantified it all out.  To accommodate that use
+-- case, we store a nonce to let us dynamically ensure that we have the correct
+-- symbolic backend.  It should be impossible for them to not match.
 data RegWrapper s tp where
-  RegWrapper :: LMCR.RegEntry (WEB.ExprBuilder s st fs) tp -> RegWrapper s tp
+  RegWrapper :: (sym ~ WEB.ExprBuilder s st fs) => PN.Nonce s sym -> LMCR.RegEntry (WEB.ExprBuilder s st fs) tp -> RegWrapper s tp
 
 -- | This is a type capturing the data necessary to render the value selector form
 --
@@ -113,14 +117,14 @@ data StateExplorer arch s e where
 stateExplorer :: forall e arch s
                . C.SymbolicExecutionState arch s C.Suspend
               -> StateExplorer arch s e
-stateExplorer (C.Suspended suspSt) =
+stateExplorer (C.Suspended symNonce suspSt) =
   case C.suspendedRegVals suspSt of
     Ctx.Empty ->
       let csv = WCSV.callStackViewer (Proxy @arch) (suspSt ^. L.to C.suspendedSimState . LCSET.stateTree . L.to LCSET.activeFrames)
       in StateExplorer NoValues Ctx.Empty (BF.focusRing []) csv
     vals@(_ Ctx.:> _) ->
       let idxList = reverse $ Ctx.forIndex (Ctx.size vals) (\acc idx -> idxEntry idx : acc) []
-          wrappedVals = FC.fmapFC RegWrapper vals
+          wrappedVals = FC.fmapFC (RegWrapper symNonce) vals
           vs = ValueSelector { _values = wrappedVals
                              , _index = head idxList ^. L._1
                              }
@@ -129,9 +133,12 @@ stateExplorer (C.Suspended suspSt) =
           vsf = ValueSelectorForm (formCon vs)
 
           toValueViewer :: forall tp . RegWrapper s tp -> WrappedViewer s tp
-          toValueViewer (RegWrapper (re :: LMCR.RegEntry (WEB.ExprBuilder s st fs) tp)) =
+          toValueViewer (RegWrapper sn (re :: LMCR.RegEntry (WEB.ExprBuilder s st fs) tp)) =
             case re of
-              LMCR.RegEntry tp rv -> WrappedViewer (WVV.valueViewer (Proxy @(WEB.ExprBuilder s st fs)) tp rv)
+              LMCR.RegEntry tp rv
+                | Just PC.Refl <- PC.testEquality sn symNonce -> WrappedViewer (WVV.valueViewer symNonce tp rv)
+                | otherwise ->
+                  SBP.panic "stateExplorer" ["Symbolic backend nonce mismatch"]
           viewers = FC.fmapFC toValueViewer wrappedVals
           fr = BF.focusRing [BreakpointValueSelectorForm, BreakpointValueViewer, CallStackViewer]
           csv = WCSV.callStackViewer (Proxy @arch) (suspSt ^. L.to C.suspendedSimState . LCSET.stateTree . L.to LCSET.activeFrames)
@@ -146,8 +153,9 @@ stateExplorer (C.Suspended suspSt) =
 -- state (including arch-specific inspection of memory).
 renderSymbolicExecutionStateExplorer :: forall arch s e
                                       . (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
+                                     -> C.ValueNameMap s
                                      -> B.Widget Names
-renderSymbolicExecutionStateExplorer (C.Suspended suspSt, se@(StateExplorer vsf _viewers focus csv)) =
+renderSymbolicExecutionStateExplorer (C.Suspended _symNonce suspSt, se@(StateExplorer vsf _viewers focus csv)) valNames =
   case C.suspendedCallFrame suspSt of
     cf@LCSC.CallFrame { LCSC._frameCFG = fcfg } ->
       B.vBox [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
@@ -157,7 +165,7 @@ renderSymbolicExecutionStateExplorer (C.Suspended suspSt, se@(StateExplorer vsf 
                    , B.fill ' '
                    , WCSV.renderCallStackViewer (BF.focusGetCurrent focus == Just CallStackViewer) csv
                    ]
-           , renderSelectedValue se
+           , renderSelectedValue valNames se
            ]
   where
     mbp = C.suspendedBreakpoint suspSt
@@ -170,16 +178,17 @@ renderBreakpointValueSelector vsf =
     ValueSelectorForm f -> B.renderForm f
 
 renderSelectedValue :: forall arch s e
-                     . StateExplorer arch s e
+                     . C.ValueNameMap s
+                    -> StateExplorer arch s e
                     -> B.Widget Names
-renderSelectedValue (StateExplorer vsf viewers focus _csv) =
+renderSelectedValue valNames (StateExplorer vsf viewers focus _csv) =
   case vsf of
     NoValues -> B.emptyWidget
     ValueSelectorForm f
       | Some idx <- f ^. L.to B.formState . index
       , WrappedViewer vv <- viewers Ctx.! idx ->
           let isFocused = BF.focusGetCurrent focus == Just BreakpointValueViewer
-          in WVV.renderValueViewer isFocused vv
+          in WVV.renderValueViewer isFocused valNames vv
 
 -- | Handle events for the 'StateExplorer'
 --
@@ -188,15 +197,15 @@ renderSelectedValue (StateExplorer vsf viewers focus _csv) =
 handleSymbolicExecutionStateExplorerEvent :: B.BrickEvent Names e
                                           -> (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
                                           -> B.EventM Names (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
-handleSymbolicExecutionStateExplorerEvent evt s0@(C.Suspended suspSt, StateExplorer vsf viewers focus csv) =
+handleSymbolicExecutionStateExplorerEvent evt s0@(C.Suspended symNonce suspSt, StateExplorer vsf viewers focus csv) =
   case evt of
     B.VtyEvent (GV.EvKey (GV.KChar '\t') []) ->
-      return (C.Suspended suspSt, StateExplorer vsf viewers (BF.focusNext focus) csv)
+      return (C.Suspended symNonce suspSt, StateExplorer vsf viewers (BF.focusNext focus) csv)
     B.VtyEvent ve ->
       case BF.focusGetCurrent focus of
         Just CallStackViewer -> do
           csv' <- WCSV.handleCallStackViewerEvent evt csv
-          return (C.Suspended suspSt, StateExplorer vsf viewers focus csv')
+          return (C.Suspended symNonce suspSt, StateExplorer vsf viewers focus csv')
         _ ->
           case vsf of
             NoValues ->
@@ -207,12 +216,25 @@ handleSymbolicExecutionStateExplorerEvent evt s0@(C.Suspended suspSt, StateExplo
               case BF.focusGetCurrent focus of
                 Just BreakpointValueSelectorForm -> do
                   f' <- B.handleFormEvent evt f
-                  return (C.Suspended suspSt, StateExplorer (ValueSelectorForm f') viewers focus csv)
+                  let vs = B.formState f'
+                  case vs ^. index of
+                    Some idx
+                      | RegWrapper regNonce re <- (vs ^. values) Ctx.! idx -> do
+                          case PC.testEquality regNonce symNonce of
+                            Just PC.Refl -> do
+                              let suspSt' = suspSt { C.suspendedCurrentValue = Just (Some re) }
+                              return (C.Suspended symNonce suspSt', StateExplorer (ValueSelectorForm f') viewers focus csv)
+                            Nothing ->
+                              SBP.panic "handleSymbolicExecutionExplorerEvent" ["Mismatched solver nonce"]
                 Just BreakpointValueViewer
                   | Some idx <- f ^. L.to B.formState . index
                   , WrappedViewer valView <- viewers Ctx.! idx -> do
                       v' <- WVV.handleValueViewerEvent ve valView
+                      let suspSt' = suspSt { C.suspendedCurrentValue = exprToRegEntry <$> WVV.selectedValue symNonce v' }
                       let viewers' = L.set (PC.ixF idx) (WrappedViewer v') viewers
-                      return (C.Suspended suspSt, StateExplorer vsf viewers' focus csv)
+                      return (C.Suspended symNonce suspSt', StateExplorer vsf viewers' focus csv)
                 n -> SBP.panic "handleSymbolicExecutionExplorerEvent" ["Unexpected component in focus ring: " ++ show n]
     _ -> return s0
+
+exprToRegEntry :: Some (WEB.Expr s) -> Some (LMCR.RegEntry (WEB.ExprBuilder s st fs))
+exprToRegEntry (Some e) = Some (LMCR.RegEntry (LCT.baseToType (WEB.exprType e)) e)

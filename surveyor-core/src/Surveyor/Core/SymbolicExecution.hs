@@ -57,6 +57,7 @@ import           Control.Lens ( (^.) )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Control.Monad.Catch as CMC
+import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.Functor.Identity as I
 import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as Map
@@ -146,7 +147,8 @@ data SymbolicExecutionState arch s (k :: SymExK) where
                , ext ~ CA.CrucibleExt arch
                , sym ~ WEB.ExprBuilder s st fs
                )
-            => SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s
+            => PN.Nonce s sym
+            -> SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s
             -> SymbolicExecutionState arch s Suspend
 
 data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
@@ -156,6 +158,13 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  , suspendedBreakpoint :: Maybe (SCB.Breakpoint sym)
                  , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
                  , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
+                 , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
+                 -- , suspendedNonce :: PN.Nonce s sym
+                 -- ^ A nonce to witness the compatibility of terms
+                 -- parameterized by the same nonce.  This is needed because we
+                 -- persist some state outside of this structure that needs to
+                 -- be correlated against it, while also retaining information
+                 -- about the actual type of the symbolic backend.
                  }
 
 data SymbolicExecutionException =
@@ -170,27 +179,32 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                   , ext ~ CA.CrucibleExt arch
                   , sym ~ WEB.ExprBuilder s st fs
                   , CMC.MonadThrow m
+                  , MonadIO m
                   )
-               => SymbolicState arch s sym init reg
+               => PN.NonceGenerator IO s
+               -> SymbolicState arch s sym init reg
                -> CSET.SimState p sym ext rtp f a
                -> Maybe (SCB.Breakpoint sym)
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState surveyorSymState crucSimState mbp =
+suspendedState ng surveyorSymState crucSimState mbp =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
     LCSC.OF {} -> CMC.throwM (UnexpectedFrame "Override" bpName)
     LCSC.MF cf ->
       case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (fmap SCB.breakpointArguments mbp) of
         Some Ctx.Empty -> do
+          symNonce <- liftIO $ PN.freshNonce ng
           let st = SuspendedState { suspendedSymState = surveyorSymState
                                   , suspendedSimState = crucSimState
                                   , suspendedCallFrame = cf
                                   , suspendedBreakpoint = mbp
                                   , suspendedRegVals = Ctx.empty
                                   , suspendedRegSelection = Nothing
+                                  , suspendedCurrentValue = Nothing
                                   }
-          return (Suspended st)
+          return (Suspended symNonce st)
         Some valAssignment@(_ Ctx.:> _) -> do
+          symNonce <- liftIO $ PN.freshNonce ng
           let anIndex = Ctx.lastIndex (Ctx.size valAssignment)
           let st = SuspendedState { suspendedSymState = surveyorSymState
                                   , suspendedSimState = crucSimState
@@ -198,8 +212,9 @@ suspendedState surveyorSymState crucSimState mbp =
                                   , suspendedBreakpoint = mbp
                                   , suspendedRegVals = valAssignment
                                   , suspendedRegSelection = Just (Some anIndex)
+                                  , suspendedCurrentValue = Nothing
                                   }
-          return (Suspended st)
+          return (Suspended symNonce st)
 
   where
     bpName :: T.Text
@@ -228,7 +243,7 @@ instance NFData (SymbolicExecutionState arch s k) where
         symState `seq` ()
       Executing progress -> progress `deepseq` ()
       Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
-      Suspended symState -> symState `seq` ()
+      Suspended _ symState -> symState `seq` ()
 
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
@@ -302,7 +317,7 @@ symbolicExecutionConfig s =
     Initializing s' -> symbolicConfig s'
     Executing s' -> executionConfig s'
     Inspecting _ s' _ -> symbolicConfig s'
-    Suspended s' -> symbolicConfig (suspendedSymState s')
+    Suspended _ s' -> symbolicConfig (suspendedSymState s')
 
 symbolicSessionID :: SymbolicExecutionState arch s k -> SessionID s
 symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID

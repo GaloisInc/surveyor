@@ -3,6 +3,7 @@
 module Surveyor.Brick.Widget.Minibuffer (
   MB.Minibuffer,
   minibuffer,
+  MB.invokeCommand,
   MB.MinibufferStatus(..),
   MB.handleMinibufferEvent,
   MB.renderMinibuffer,
@@ -41,6 +42,7 @@ completeArgument cmds =
             let matches = V.filter (SW.matches matcher) cmdNames
             let toGeneric txt = mconcat (map Z.singleton (T.unpack txt))
             return (fmap toGeneric matches)
+      C.ValueNonceTypeRepr -> return V.empty
 
 completeFilename :: (Z.GenericTextZipper a) => a -> IO [FilePath]
 completeFilename t =

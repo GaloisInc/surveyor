@@ -117,7 +117,7 @@ handleVtyEvent s0@(C.State s) evt
           manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
           let st1 = SEM.symbolicExecutionManagerState manager1
           let s' = s & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager1
-                     & C.lArchState . _Just . C.symExStateL %~ (<> viewSome C.singleSessionState st1)
+                     & C.lArchState . _Just . C.symExStateL %~ (viewSome C.singleSessionState st1 <>)
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
