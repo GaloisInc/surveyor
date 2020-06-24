@@ -30,6 +30,7 @@ library
                        Surveyor.Brick.Widget.SymbolicExecution.Monitor
                        Surveyor.Brick.Widget.SymbolicExecution.Setup
                        Surveyor.Brick.Widget.SymbolicExecution.StateExplorer
+                       Surveyor.Brick.Widget.ValueSelector
                        Surveyor.Brick.Widget.ValueViewer
                        Surveyor.Brick.Widget.CallStackViewer
                        Brick.Match.Subword

@@ -25,7 +25,6 @@ import qualified Control.Monad.State.Strict as St
 import qualified Data.BitVector.Sized as DBS
 import qualified Data.List as L
 import           Data.Maybe ( fromMaybe )
-import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
@@ -34,6 +33,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as DV
 import qualified Graphics.Vty as GV
 import qualified Lang.Crucible.LLVM.MemModel as CLM
+import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as LCT
 import           Text.Printf ( printf )
@@ -64,25 +64,23 @@ data ValueViewerState s sym tp =
                    -- ^ The state of the Brick list we use to render values
                    --
                    -- This tracks things like selection state
-                   , vsSymNonce :: PN.Nonce s sym
                    }
 
 -- | Get the value that the user has selected in the 'ValueViewer' widget, if any
 --
 -- NOTE: This only considers values with nonces
-selectedValue :: PN.Nonce s sym -> ValueViewer s -> Maybe (Some (WEB.Expr s))
-selectedValue symNonce (ValueViewer vs) = do
-  PC.Refl <- PC.testEquality symNonce (vsSymNonce vs)
+selectedValue :: (sym ~ WEB.ExprBuilder s st fs) => ValueViewer s sym -> Maybe (Some (LMCR.RegEntry sym))
+selectedValue (ValueViewer vs) = do
   (_ix, RenderWidget { rwValue = mval }) <- BL.listSelectedElement (valueList vs)
   val <- mval
-  return (Some val)
+  return (Some (LMCR.RegEntry (LCT.baseToType (WEB.exprType val)) val))
 
 
 -- | A widget state backing the value viewer; it existentially quantifies away
 -- the type and symbolic backend, with the real data storage in
 -- 'ValueViewerState'
-data ValueViewer s where
-  ValueViewer :: (sym ~ WEB.ExprBuilder s st fs) => ValueViewerState s sym tp -> ValueViewer s
+data ValueViewer s sym where
+  ValueViewer :: ValueViewerState s sym tp -> ValueViewer s sym
 
 -- | Construct a 'ValueViewer' for a single value
 --
@@ -99,12 +97,11 @@ data ValueViewer s where
 -- 'buildViewer')
 valueViewer :: forall sym tp s st fs
              . (sym ~ WEB.ExprBuilder s st fs)
-            => PN.Nonce s sym
-            -> LCT.TypeRepr tp
+            => LCT.TypeRepr tp
             -> LCSR.RegValue sym tp
-            -> ValueViewer s
-valueViewer p tp re =
-  St.evalState (unViewBuilder (buildViewer p tp re)) MapF.empty
+            -> ValueViewer s sym
+valueViewer tp re =
+  St.evalState (unViewBuilder (buildViewer tp re)) MapF.empty
 
 -- | A wrapper around a 'Rendering' that (possibly) includes program location
 -- information.
@@ -118,7 +115,7 @@ valueViewer p tp re =
 data RenderWidget sym =
   forall tp .
   RenderWidget { rwRendering :: Rendering
-               , rwLocation :: Maybe WPL.ProgramLoc
+               , _rwLocation :: Maybe WPL.ProgramLoc
                , rwValue :: Maybe (WI.SymExpr sym tp)
                }
 
@@ -154,11 +151,10 @@ newtype ViewerBuilder s sym a =
 -- Values without nonces are always rendered inline.
 buildViewer :: forall sym tp s st fs
              . (sym ~ WEB.ExprBuilder s st fs)
-            => PN.Nonce s sym
-            -> LCT.TypeRepr tp
+            => LCT.TypeRepr tp
             -> LCSR.RegValue sym tp
-            -> ViewerBuilder s sym (ValueViewer s)
-buildViewer symNonce tp re = do
+            -> ViewerBuilder s sym (ValueViewer s sym)
+buildViewer tp re = do
   -- Traverse the whole term initially to cache any widgets we can based on nonces.
   --
   -- We'll use this same primitive for rendering later, but then we'll start it
@@ -170,7 +166,6 @@ buildViewer symNonce tp re = do
                              , regValue = re
                              , cache = c
                              , rootWidget = renderedWidget root
-                             , vsSymNonce = symNonce
                              , valueList = BL.list ValueViewerList vals 1
                              }
   return (ValueViewer vvs)
@@ -544,9 +539,7 @@ argRef rw =
     RenderInline w -> w
     RenderBound r _ -> r
 
--- lookupValueName nonce vmap
-
-renderValueViewer :: Bool -> C.ValueNameMap s -> ValueViewer s -> B.Widget Names
+renderValueViewer :: (sym ~ WEB.ExprBuilder s st fs) => Bool -> C.ValueNameMap s -> ValueViewer s sym -> B.Widget Names
 renderValueViewer viewerFocused valNames (ValueViewer vs) =
   B.vBox [ BL.renderList render viewerFocused (valueList vs)
          , renderSelectedLocation
@@ -587,8 +580,8 @@ exprNonce val =
     WEB.SemiRingLiteral {} -> Nothing
 
 handleValueViewerEvent :: GV.Event
-                       -> ValueViewer s
-                       -> B.EventM Names (ValueViewer s)
+                       -> ValueViewer s sym
+                       -> B.EventM Names (ValueViewer s sym)
 handleValueViewerEvent evt (ValueViewer vs) = do
   l' <- BL.handleListEvent evt (valueList vs)
   return (ValueViewer vs { valueList = l' })
