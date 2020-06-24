@@ -64,7 +64,6 @@ data ValueViewerState s sym tp =
                    -- ^ The state of the Brick list we use to render values
                    --
                    -- This tracks things like selection state
-                   -- , vsSymNonce :: PN.Nonce s sym
                    }
 
 -- | Get the value that the user has selected in the 'ValueViewer' widget, if any
