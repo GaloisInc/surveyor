@@ -25,21 +25,6 @@ import qualified Lang.Crucible.Simulator.RegMap as LMCR
 
 import qualified Surveyor.Brick.Names as SBN
 
--- | This is a wrapper around a symbolic-execution time value (a RegEntry).  The
--- wrapper is helpful for hiding the @sym@ type parameter while still leaving
--- 'ValueSelector' as a plain data type (so lenses and brick still work).
---
--- While we hide the parameter, we do record the concrete symbolic backend type
--- so that we can traverse terms.
---
--- While this quantification is useful for now, it is problematic when we need
--- to use any of this information with values taken from the symbolic execution
--- state, which has separately quantified it all out.  To accommodate that use
--- case, we store a nonce to let us dynamically ensure that we have the correct
--- symbolic backend.  It should be impossible for them to not match.
--- data RegWrapper s tp where
---   RegWrapper :: (sym ~ WEB.ExprBuilder s st fs) => PN.Nonce s sym -> LMCR.RegEntry (WEB.ExprBuilder s st fs) tp -> RegWrapper s tp
-
 -- | This is a type capturing the data necessary to render the value selector form
 --
 -- We have to carefully quantify type parameters so that we can mesh well with brick.
