@@ -39,19 +39,26 @@ handleSymbolicExecutionEvent s0 evt =
           let newState = C.configuringSymbolicExecution conf
           let manager = SEM.symbolicExecutionManager (Some newState)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
-                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
+                      & C.lArchState . _Just . C.symExStateL %~ (C.singleSessionState newState <>)
                       & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
+                      & C.lArchState . _Just . C.contextL . C.currentContext . C.symExecSessionIDL .~ C.symbolicSessionID newState
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
 
     C.BeginSymbolicExecutionSetup archNonce symExConfig cfg
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce) -> do
           let ng = C.sNonceGenerator s0
+          liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
+                                              , C.logSource = C.EventHandler (T.pack "BeginSymbolicExecutionSetup")
+                                              , C.logText = [ T.pack "Chose symbolic exec config"
+                                                            , T.pack (show symExConfig)
+                                                            ]
+                                              })
           symExSt <- liftIO $ C.initializingSymbolicExecution ng symExConfig cfg
           let manager = SEM.symbolicExecutionManager (Some symExSt)
           let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
                       & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
-                      & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState symExSt)
+                      & C.lArchState . _Just . C.symExStateL %~ (C.singleSessionState symExSt <>)
           B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
     C.StartSymbolicExecution archNonce ares symState
@@ -62,7 +69,7 @@ handleSymbolicExecutionEvent s0 evt =
           inspectState <- executionLoop
           let updateSymExecState _ st =
                 let manager = SEM.symbolicExecutionManager (Some inspectState)
-                in st & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
+                in st & C.lArchState . _Just . C.symExStateL %~ (C.singleSessionState newState <>)
                       & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
                       & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
           -- We pass () as the value of the update state and capture the real
@@ -73,7 +80,7 @@ handleSymbolicExecutionEvent s0 evt =
         let manager = SEM.symbolicExecutionManager (Some newState)
         let s1 = s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager
                     & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager
-                    & C.lArchState . _Just . C.symExStateL %~ (<> C.singleSessionState newState)
+                    & C.lArchState . _Just . C.symExStateL %~ (C.singleSessionState newState <>)
         B.continue (C.State s1)
       | otherwise -> B.continue (C.State s0)
     C.ReportSymbolicExecutionMetrics sid metrics -> do

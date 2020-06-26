@@ -64,6 +64,8 @@ data SymbolicExecutionConfig s where
                           -> T.Text
                           -> SymbolicExecutionConfig s
 
+deriving instance Show (SymbolicExecutionConfig s)
+
 instance NFData (SymbolicExecutionConfig s) where
   rnf (SymbolicExecutionConfig sid solver _fm t) =
     sid `deepseq` solver `deepseq` t `deepseq` ()

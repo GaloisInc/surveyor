@@ -111,6 +111,7 @@ module Surveyor.Core (
   SymEx.SomeFloatModeRepr(..),
   SymEx.defaultSymbolicExecutionConfig,
   SymEx.SymbolicState(..),
+  SymEx.symbolicSessionID,
   SymEx.SessionState,
   SymEx.lookupSessionState,
   SymEx.singleSessionState,

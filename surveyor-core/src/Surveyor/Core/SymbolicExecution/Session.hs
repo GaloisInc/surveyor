@@ -12,7 +12,7 @@ import qualified Data.Parameterized.Nonce as PN
 -- This is a wrapper around a 'PN.Nonce', but a newtype to encode that we don't
 -- use the type parameter (only the state thread parameter)
 newtype SessionID s = SessionID (PN.Nonce s ())
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 -- | We don't have an 'NFData' instance for nonces, so we just take it to WHNF
 instance NFData (SessionID s) where

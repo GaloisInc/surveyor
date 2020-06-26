@@ -35,6 +35,7 @@ import qualified Data.Functor.Const as C
 import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Text as T
 import           Fmt ( (+||), (||+) )
 import qualified Fmt as Fmt
 import qualified Lang.Crucible.CFG.Core as CCC
@@ -294,6 +295,19 @@ beginSymbolicExecutionSetupC =
           case mcfg of
             Just (CCC.AnyCFG cfg) -> do
               let conf = SymEx.symbolicExecutionConfig symExecState
+              CS.logMessage state (SCL.msgWith { SCL.logLevel = SCL.Debug
+                                               , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
+                                               , SCL.logText = [ "State we are getting a config from"
+                                                               , case symExecState of
+                                                                   SymEx.Configuring {} -> "Configuring"
+                                                                   SymEx.Initializing {} -> "Initializing"
+                                                                   _ -> "Other"
+                                                               , "With config"
+                                                               , T.pack (show conf)
+                                                               , "session id:"
+                                                               , T.pack (show (curCtx ^. CCX.symExecSessionIDL))
+                                                               ]
+                                               })
               SCE.emitEvent customEventChan (SCE.BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
             Nothing -> do
               CS.logMessage state (SCL.msgWith { SCL.logText = [Fmt.fmt ("Missing CFG for function "+||fh||+"")]
