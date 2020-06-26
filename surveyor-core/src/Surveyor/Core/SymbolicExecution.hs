@@ -26,8 +26,10 @@ module Surveyor.Core.SymbolicExecution (
   newSessionID,
   symbolicSessionID,
   SessionState,
+  emptySessionState,
   singleSessionState,
   lookupSessionState,
+  mergeSessionState,
   updateSessionMetrics,
   -- * The state of the symbolic execution automaton
   Config,
@@ -256,7 +258,6 @@ instance NFData (SymbolicExecutionState arch s k) where
 -- updated data in a format more amenable to rapid updates.
 newtype SessionState arch s =
   SessionState { unSessionState :: Map.Map (SessionID s) (Some (SymbolicExecutionState arch s)) }
-  deriving (Monoid, Semigroup)
 
 instance NFData (SessionState arch s) where
   rnf (SessionState m) =
@@ -274,6 +275,12 @@ singleSessionState s =
   SessionState { unSessionState = Map.singleton sid (Some s) }
   where
     sid = symbolicSessionID s
+
+emptySessionState :: SessionState arch s
+emptySessionState = SessionState { unSessionState = Map.empty }
+
+mergeSessionState :: SessionState arch s -> SessionState arch s -> SessionState arch s
+mergeSessionState (SessionState m) (SessionState m') = SessionState { unSessionState = Map.union m m'  }
 
 -- | Updates the given session ID with additional metrics IFF that 'SessionID'
 -- corresponds to a session in the 'Executing' state.

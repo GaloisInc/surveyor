@@ -123,7 +123,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              defFunc : _ -> do
                let pushContext (newContext, sessState) oldState =
                      oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newContext
-                              & C.lArchState . _Just . C.symExStateL %~ (<> sessState)
+                              & C.lArchState . _Just . C.symExStateL %~ C.mergeSessionState sessState
                C.asynchronously (C.archNonce ares) (C.sEmitEvent s0) pushContext $ do
                  case C.functionBlocks ares defFunc of
                    b0 : _ -> do
@@ -184,7 +184,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                         return C.ArchState { C.sAnalysisResult = ares
                                            , C.sUIState = uiState
                                            , C.sContext = C.emptyContextStack
-                                           , C.sSymExState = mempty
+                                           , C.sSymExState = C.emptySessionState
                                            , C.sArchDicts = MapF.fromList archDicts
                                            , C.sIRCache = tcache
                                            }

@@ -19,6 +19,7 @@ import qualified Surveyor.Core.IRRepr as SCIR
 import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.Mode as SCM
 import qualified Surveyor.Core.State as SCS
+import qualified Surveyor.Core.SymbolicExecution as SymEx
 
 handleContextEvent :: (SCA.Architecture arch s, MonadIO m)
                   => SCS.S e u arch s
@@ -103,7 +104,7 @@ handleContextEvent s0 evt =
           let ng = SCS.sNonceGenerator s0
           (ctx, sessionState) <- liftIO $ SCCx.makeContext ng (archState ^. SCS.irCacheL) (archState ^. SCS.lAnalysisResult) fh irrepr b
           let s1 = s0 & SCS.lArchState . _Just . SCS.contextL %~ SCCx.pushContext ctx
-                      & SCS.lArchState . _Just . SCS.symExStateL %~ (<> sessionState)
+                      & SCS.lArchState . _Just . SCS.symExStateL %~ SymEx.mergeSessionState sessionState
           liftIO $ SCS.logMessage s0 (SCL.msgWith { SCL.logLevel = SCL.Debug
                                                   , SCL.logSource = SCL.EventHandler "PushContext"
                                                   , SCL.logText = [ Fmt.fmt ("Selecting block: " +| SCA.blockAddress b ||+ "")
