@@ -161,12 +161,6 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
                  , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
                  , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
-                 -- , suspendedNonce :: PN.Nonce s sym
-                 -- ^ A nonce to witness the compatibility of terms
-                 -- parameterized by the same nonce.  This is needed because we
-                 -- persist some state outside of this structure that needs to
-                 -- be correlated against it, while also retaining information
-                 -- about the actual type of the symbolic backend.
                  }
 
 data SymbolicExecutionException =
