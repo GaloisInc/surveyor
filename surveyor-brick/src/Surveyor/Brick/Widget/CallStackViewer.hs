@@ -101,7 +101,7 @@ callStackViewer proxy bpName bpVals simFrames = CallStackViewer frmList fr
   where
     bpEntry = BreakpointFrame bpName
     bpViewers = FC.fmapFC regViewer bpVals
-    bpFrame = CallStackFrame bpEntry (SBV.valueSelectorForm bpVals) bpViewers
+    bpFrame = CallStackFrame bpEntry (SBV.valueSelectorForm (Just 0) bpVals) bpViewers
     frames = bpFrame : map (fromSimFrame proxy) simFrames
     frmList = BL.list SBN.CallStackViewer (DV.fromList frames) 1
 
@@ -112,21 +112,31 @@ fromSimFrame :: (sym ~ WEB.ExprBuilder s st fs)
              -> LCSET.SomeFrame (LCSC.SimFrame sym (SC.CrucibleExt arch))
              -> CallStackFrame arch s sym e
 fromSimFrame proxy (LCSET.SomeFrame sf) =
-  withFrameRegs proxy sf $ \regs ->
+  withFrameRegs proxy sf $ \nArgs regs ->
     let viewers = FC.fmapFC regViewer regs
-    in CallStackFrame entry (SBV.valueSelectorForm regs) viewers
+    in CallStackFrame entry (SBV.valueSelectorForm nArgs regs) viewers
   where
     entry = CallFrame sf
 
 withFrameRegs :: proxy arch
               -> LCSC.SimFrame sym (SC.CrucibleExt arch) l args
-              -> (forall ctx . Ctx.Assignment (LMCR.RegEntry sym) ctx -> a)
+              -> (forall ctx . Maybe Int -> Ctx.Assignment (LMCR.RegEntry sym) ctx -> a)
               -> a
 withFrameRegs _ sf k =
   case sf of
-    LCSC.OF oframe -> k (oframe ^. LCSC.overrideRegMap . L.to LMCR.regMap)
-    LCSC.MF mframe -> k (mframe ^. LCSC.frameRegs . L.to LMCR.regMap)
-    LCSC.RF _name e -> k (Ctx.Empty Ctx.:> e)
+    LCSC.OF oframe -> k Nothing (oframe ^. LCSC.overrideRegMap . L.to LMCR.regMap)
+    LCSC.MF mframe@(LCSC.CallFrame { LCSC._frameCFG = cfg }) ->
+      let nArgs = cfgArgCount cfg
+      in k (Just nArgs) (mframe ^. LCSC.frameRegs . L.to LMCR.regMap)
+    LCSC.RF _name e -> k Nothing (Ctx.Empty Ctx.:> e)
+
+-- | Return the number of formal parameters to the CFG
+cfgArgCount :: LCCC.CFG ext blocks ctx ret -> Int
+cfgArgCount cfg =
+  Ctx.sizeInt (Ctx.size argReprs)
+  where
+    hdl = LCCC.cfgHandle cfg
+    argReprs = CFH.handleArgTypes hdl
 
 regViewer :: (sym ~ WEB.ExprBuilder s st fs)
           => LMCR.RegEntry sym tp
@@ -152,6 +162,8 @@ renderCallStackViewer hasFocus valNames cs =
     valSelSelected = Just SBN.BreakpointValueSelectorForm == curSel
     viewerSelected = Just SBN.BreakpointValueViewer == curSel
 
+-- | This renders the form that lets the user select the value in the current
+-- stack frame to view
 renderValueSelector :: Bool -> Maybe (Int, CallStackFrame arch s sym e) -> B.Widget SBN.Names
 renderValueSelector _hasFocus mf =
   case mf of
