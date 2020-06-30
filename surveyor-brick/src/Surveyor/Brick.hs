@@ -303,7 +303,7 @@ emptyState mfp mloader ng customEventChan = do
              }
 
 stateFromContext :: forall arch s p sym ext rtp f a st fs
-                  . ( C.Architecture arch s
+                  . ( C.SymbolicArchitecture arch s
                     , LCB.IsSymInterface sym
                     , ext ~ C.CrucibleExt arch
                     , sym ~ WEB.ExprBuilder s st fs
@@ -393,7 +393,7 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                  , C.sArchNonce = n0
                  , C.sEventChannel = chan
                  , C.sUIExtension = uiExt
-                 , C.sValueNames = C.emptyValueNameMap
+                 , C.sValueNames = C.initialValueNames (Proxy @arch) simState
                  , C.sArchState = Just archState
                  , C.sUIMode = C.SomeUIMode C.SymbolicExecutionManager
                  }

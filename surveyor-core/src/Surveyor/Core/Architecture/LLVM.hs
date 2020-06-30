@@ -39,6 +39,7 @@ import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Parameterized.SymbolRepr as PSR
 import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Set as S
 import qualified Data.Text as T
@@ -67,6 +68,7 @@ import qualified Text.LLVM as LL
 import qualified Text.LLVM.PP as LL
 import qualified Text.PrettyPrint as PP
 import           Text.Printf ( printf )
+import qualified What4.Expr.Builder as WEB
 import qualified What4.Interface as WI
 import qualified What4.ProgramLoc as WPL
 import qualified What4.Symbol as WS
@@ -358,6 +360,7 @@ type instance CruciblePersonality LLVM sym = LLVMPersonality sym
 
 instance SymbolicArchitecture LLVM s where
   loadConcreteString _ = llvmLoadConcreteString
+  archNonceNames _ = llvmArchNonceNames
 
 instance Architecture LLVM s where
   data ArchResult LLVM s = LLVMAnalysisResult (LLVMResult s)
@@ -1082,3 +1085,35 @@ llvmLoadConcreteString simState repr rv =
           ptr' <- LLM.doPtrAddOffset sym mem ptr =<< WI.bvLit sym LLM.PtrWidth (DBS.mkBV ?ptrWidth 1)
           loadByByte mem (f . (c':)) ptr'
         Nothing -> return Nothing
+
+llvmArchNonceNames :: ( CB.IsSymInterface sym
+                      , tp ~ CT.IntrinsicType nm ctx
+                      , sym ~ WEB.ExprBuilder s st fs
+                      )
+                   => T.Text
+                   -> PSR.SymbolRepr nm
+                   -> CT.CtxRepr ctx
+                   -> CS.RegEntry sym tp
+                   -> [NamedTerm s]
+llvmArchNonceNames baseName symRep ctxRep re
+  | Just Refl <- testEquality symRep (PSR.knownSymbol @"LLVM_pointer")
+  , Ctx.Empty Ctx.:> CT.BVRepr _wrep <- ctxRep =
+      case CS.regValue re of
+        LLM.LLVMPointer blockId offsetVal ->
+          catMaybes [ NamedTerm <$> nonceOf blockId <*> pure (baseName <> "_BlockID")
+                    , NamedTerm <$> nonceOf offsetVal <*> pure (baseName <> "_Offset")
+                    ]
+  | otherwise = []
+
+nonceOf :: ( sym ~ WEB.ExprBuilder s st fs
+           )
+        => WEB.Expr s tp
+        -> Maybe (NG.Nonce s tp)
+nonceOf e =
+  case e of
+    WEB.AppExpr ae -> Just (WEB.appExprId ae)
+    WEB.NonceAppExpr nae -> Just (WEB.nonceExprId nae)
+    WEB.BoundVarExpr bv -> Just (WEB.bvarId bv)
+    WEB.StringExpr {} -> Nothing
+    WEB.SemiRingLiteral {} -> Nothing
+    WEB.BoolExpr {} -> Nothing

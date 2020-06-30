@@ -27,6 +27,7 @@ module Surveyor.Core.Architecture (
   ParameterizedFormula(..),
   prettyParameterizedFormula,
   SomeResult(..),
+  NamedTerm(..),
   MC.mkPPC32Result,
   MC.mkPPC64Result,
   MC.mkX86Result,

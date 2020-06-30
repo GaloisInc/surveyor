@@ -28,10 +28,12 @@ module Surveyor.Core.Architecture.Class (
   prettyParameterizedFormula,
   Block(..),
   FunctionHandle(..),
+  NamedTerm(..),
   -- * Constraints
   ArchConstraints
   ) where
 
+import qualified Data.Parameterized.SymbolRepr as PSR
 import           GHC.Generics ( Generic )
 
 import           Control.DeepSeq ( NFData, rnf, deepseq )
@@ -44,6 +46,8 @@ import           Data.Parameterized.Classes ( testEquality )
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified What4.BaseTypes as WT
+import qualified What4.Expr.Builder as WEB
 
 import qualified SemMC.Architecture as SA
 import qualified SemMC.Formula as F
@@ -93,6 +97,9 @@ type ArchConstraints arch s = (Eq (Address arch s),
                                NFData (Operand arch s),
                                NFData (Instruction arch s))
 
+data NamedTerm s where
+  NamedTerm :: NG.Nonce s (tp :: WT.BaseType) -> T.Text -> NamedTerm s
+
 -- | The type of the personality for each simulator
 --
 -- This is a standalone type family because it needs access to a parameter (sym)
@@ -115,6 +122,16 @@ class (Architecture arch s) => SymbolicArchitecture arch s where
                      -> CT.TypeRepr tp
                      -> CS.RegValue sym tp
                      -> IO (Maybe T.Text)
+  archNonceNames :: ( CB.IsSymInterface sym
+                    , tp ~ CT.IntrinsicType nm ctx
+                    , sym ~ WEB.ExprBuilder s st fs
+                    )
+                 => proxy (arch, s)
+                 -> T.Text
+                 -> PSR.SymbolRepr nm
+                 -> CT.CtxRepr ctx
+                 -> CS.RegEntry sym tp
+                 -> [NamedTerm s]
 
 class (IR arch s, CCE.IsSyntaxExtension (CrucibleExt arch)) => Architecture (arch :: Type) (s :: Type) where
   data ArchResult arch s :: Type

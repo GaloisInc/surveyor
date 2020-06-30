@@ -63,12 +63,17 @@ data ValueSelectorForm s sym ctx e where
   -- the 'StateExplorer')
   --
   -- We carry a proof that the context is not empty
-  ValueSelectorForm :: (ctx ~ (ctx0 Ctx.::> tp)) => B.Form (ValueSelector sym ctx) e SBN.Names -> ValueSelectorForm s sym ctx e
+  ValueSelectorForm :: (ctx ~ (ctx0 Ctx.::> tp))
+                    => B.Form (ValueSelector sym ctx) e SBN.Names
+                    -> ValueSelectorForm s sym ctx e
 
 valueSelectorForm :: forall s sym ctx e
-                   . Ctx.Assignment (LMCR.RegEntry sym) ctx
+                   . Maybe Int
+                   -- ^ The number of 'LCMR.RegEntry's that are function
+                   -- arguments (which will be rendered differently in the list)
+                  -> Ctx.Assignment (LMCR.RegEntry sym) ctx
                   -> ValueSelectorForm s sym ctx e
-valueSelectorForm entries =
+valueSelectorForm mNArgs entries =
   case entries of
     Ctx.Empty -> NoValues
     vals@(_ Ctx.:> _) ->
@@ -79,7 +84,13 @@ valueSelectorForm entries =
       in ValueSelectorForm (formCon vs)
   where
     idxEntry :: forall tp . Ctx.Index ctx tp -> (Some (Ctx.Index ctx), SBN.Names, T.Text)
-    idxEntry idx = (Some idx, SBN.SelectedBreakpointValue (Ctx.indexVal idx), T.pack (show idx))
+    idxEntry idx = (Some idx, SBN.SelectedBreakpointValue (Ctx.indexVal idx), idxName idx)
+    idxName :: forall tp . Ctx.Index ctx tp -> T.Text
+    idxName idx =
+      case mNArgs of
+        Just nArgs
+          | Ctx.indexVal idx < nArgs -> T.pack (show idx ++ " (argument)")
+        _ -> T.pack (show idx)
 
 renderValueSelectorForm :: ValueSelectorForm s sym ctx e -> B.Widget SBN.Names
 renderValueSelectorForm vsf =

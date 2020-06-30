@@ -122,11 +122,15 @@ type Suspend = 'Suspend
 
 data SymbolicExecutionState arch s (k :: SymExK) where
   -- | Holds the current configuration during symbolic execution setup
+  --
+  -- We establish the user's solver choice (and basic configuration
+  -- w.r.t. floating point modes) early, as it could have an effect on the next
+  -- stage.
   Configuring :: SymbolicExecutionConfig s -> SymbolicExecutionState arch s Config
   -- | Holds the current set of initial register values (that can be
   -- incrementally modified via the UI/messages).  The type of the CFG fixes the
   -- shape of the initial registers.  It also contains initial values for global
-  -- variables.
+  -- variables and other memory objects.
   Initializing :: (CB.IsSymInterface sym)
                => SymbolicState arch s sym init reg
                -> SymbolicExecutionState arch s SetupArgs
@@ -161,12 +165,6 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
                  , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
                  , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
-                 -- , suspendedNonce :: PN.Nonce s sym
-                 -- ^ A nonce to witness the compatibility of terms
-                 -- parameterized by the same nonce.  This is needed because we
-                 -- persist some state outside of this structure that needs to
-                 -- be correlated against it, while also retaining information
-                 -- about the actual type of the symbolic backend.
                  }
 
 data SymbolicExecutionException =
