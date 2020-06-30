@@ -37,6 +37,7 @@ type instance CruciblePersonality Void sym = ()
 
 instance SymbolicArchitecture Void s where
   loadConcreteString _ _ _ _ = return Nothing
+  archNonceNames _ _ _ _ _ = []
 
 instance Architecture Void s where
   data ArchResult Void s = VoidAnalysisResult Void

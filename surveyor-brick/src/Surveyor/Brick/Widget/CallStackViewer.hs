@@ -124,9 +124,18 @@ withFrameRegs :: proxy arch
               -> a
 withFrameRegs _ sf k =
   case sf of
-    LCSC.OF oframe -> k Nothing (oframe ^. LCSC.overrideRegMap . L.to LMCR.regMap)
+    LCSC.OF oframe ->
+      -- Pass Nothing to label all override frame values
+      k Nothing (oframe ^. LCSC.overrideRegMap . L.to LMCR.regMap)
     LCSC.MF mframe@(LCSC.CallFrame { LCSC._frameCFG = cfg }) ->
-      let nArgs = cfgArgCount cfg
+      -- Either label all of the arguments if this block is the entry block OR
+      -- label no arguments (because the block args are just locals)
+      --
+      -- NOTE: Investigate if we could figure out names for the arguments to
+      -- function frames not in the call stack, if relevant?
+      let nArgs = if mframe ^. LCSC.frameBlockID == Some (LCCC.cfgEntryBlockID cfg)
+                  then cfgArgCount cfg
+                  else 0
       in k (Just nArgs) (mframe ^. LCSC.frameRegs . L.to LMCR.regMap)
     LCSC.RF _name e -> k Nothing (Ctx.Empty Ctx.:> e)
 

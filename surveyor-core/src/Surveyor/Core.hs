@@ -38,6 +38,7 @@ module Surveyor.Core (
   CA.FunctionHandle(..),
   CA.ParameterizedFormula(..),
   CA.prettyParameterizedFormula,
+  CA.NamedTerm(..),
   CA.SomeResult(..),
   CA.CruciblePersonality,
   CA.LLVM,
@@ -62,6 +63,7 @@ module Surveyor.Core (
   SCV.emptyValueNameMap,
   SCV.addValueName,
   SCV.lookupValueName,
+  SCV.initialValueNames,
   -- ** Modes
   M.UIMode(..),
   M.UIKind,
