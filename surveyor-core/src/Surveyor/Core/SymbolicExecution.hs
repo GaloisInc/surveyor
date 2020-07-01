@@ -189,7 +189,17 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
 suspendedState ng surveyorSymState crucSimState mbp =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
-    LCSC.OF {} -> CMC.throwM (UnexpectedFrame "Override" bpName)
+    LCSC.OF {} -> do
+      symNonce <- liftIO $ PN.freshNonce ng
+      let st = SuspendedState { suspendedSymState = surveyorSymState
+                              , suspendedSimState = crucSimState
+                              , suspendedCallFrame = error "Missing callframe"
+                              , suspendedBreakpoint = mbp
+                              , suspendedRegVals = Ctx.empty
+                              , suspendedRegSelection = Nothing
+                              , suspendedCurrentValue = Nothing
+                              }
+      return (Suspended symNonce st)
     LCSC.MF cf ->
       case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (fmap SCB.breakpointArguments mbp) of
         Some Ctx.Empty -> do

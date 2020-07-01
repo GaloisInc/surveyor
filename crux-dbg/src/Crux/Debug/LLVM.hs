@@ -13,8 +13,13 @@ module Crux.Debug.LLVM (
   ) where
 
 import           Control.Lens ( (^.), (&), (%~) )
+import           Control.Monad ( when, void )
 import qualified Control.Monad.Catch as CMC
+import qualified Control.Monad.State as CMS
 import           Control.Monad.IO.Class ( liftIO )
+import qualified Data.BitVector.Sized as BV
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
 import qualified Data.IORef as IOR
 import qualified Data.LLVM.BitCode as DLB
 import qualified Data.Map.Strict as Map
@@ -30,8 +35,17 @@ import qualified System.Exit as SE
 import qualified System.IO as IO
 import qualified Text.LLVM as TL
 import qualified What4.Expr.Builder as WEB
+import qualified What4.ProgramLoc as WPL
+import qualified What4.Solver as WS
+
+import What4.SatResult(SatResult(..))
+import What4.Solver.Adapter (solver_adapter_check_sat)
+import What4.Solver.Yices (yicesAdapter)
+import What4.Interface (bvIsNonzero, getCurrentProgramLoc, asBV)
+import Lang.Crucible.Simulator.RegMap (regValue)
 
 import qualified Crux as C
+import qualified Crux.Types as C
 import qualified Crux.LLVM.Overrides as CLO
 import qualified Crux.Log as CL
 import qualified Crux.Model as CM
@@ -59,11 +73,19 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                        , CLM.HasLLVMAnn sym
                        , CLM.HasPtrWidth wptr
                        , wptr ~ CLE.ArchWidth arch
+                       , sym ~ (WEB.ExprBuilder t st fs)
+                       , SC.Architecture arch' t
+                       , SC.SymbolicArchitecture arch' t
+                       , ext ~ CLI.LLVM arch
                        )
-                    => [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
-breakpointOverrides =
+                    => SB.DebuggerConfig t ext arch'
+                    -> [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
+breakpointOverrides sconf =
   [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
        do_breakpoint
+
+  , CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_debug_assert( i8, i8*, i32 ) |]
+       (do_debug_assert sconf)
   ]
 
 
@@ -128,10 +150,6 @@ simulateLLVMWithDebug _cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym 
     let simCtx = setupSimCtx outHdl halloc sym (CLT.llvmMemVar llvmCtx) (CDC.memoryOptions dbgOpts) llvmCtx
     mem <- CLG.populateAllGlobals sym (CLT.globalInitMap translation) =<< CLG.initializeAllMemory sym llvmCtx llvmModule
     let globSt = LCL.llvmGlobals llvmCtx mem
-    let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $ do
-          LCS.runOverrideSim LCT.UnitRepr $ do
-            registerFunctions llvmModule translation
-            checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
     case CLT.llvmArch llvmCtx of
       CLE.X86Repr rep
         | Just PC.Refl <- PC.testEquality rep (NR.knownNat @64) -> do
@@ -140,6 +158,10 @@ simulateLLVMWithDebug _cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym 
                   SC.SomeResult ares -> return ares
           let debuggerConfig = SB.DebuggerConfig (Proxy @SC.LLVM) (Proxy @(SC.CrucibleExt SC.LLVM)) llvmCon
           let debugger = SB.debuggerFeature debuggerConfig (WEB.exprCounter sym)
+          let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $ do
+                LCS.runOverrideSim LCT.UnitRepr $ do
+                  registerFunctions debuggerConfig llvmModule translation
+                  checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
           return (C.RunnableStateWithExtensions initSt [debugger])
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
 
@@ -150,9 +172,54 @@ do_breakpoint :: (wptr ~ CLE.ArchWidth arch)
               -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
 do_breakpoint _gv _sym _ = return ()
 
+lookupString :: (LCB.IsSymInterface sym, CLM.HasLLVMAnn sym, CLO.ArchOk arch)
+             => LCS.GlobalVar CLM.Mem
+             -> LCS.RegEntry sym (CLT.LLVMPointerType (CLE.ArchWidth arch))
+             -> C.OverM personality sym (CLI.LLVM arch) String
+lookupString mvar ptr =
+  do sym <- LCS.getSymInterface
+     mem <- LCS.readGlobal mvar
+     bytes <- liftIO (CLM.loadString sym mem (regValue ptr) Nothing)
+     return (BS8.unpack (BS.pack bytes))
+
+do_debug_assert :: ( CLO.ArchOk arch
+                  , LCB.IsSymInterface sym
+                  , CLM.HasLLVMAnn sym
+                  , sym ~ (WEB.ExprBuilder t st fs)
+                  , SC.Architecture arch' t
+                  , SC.SymbolicArchitecture arch' t
+                  , ext ~ CLI.LLVM arch
+                  )
+                => SB.DebuggerConfig t ext arch'
+                -> LCS.GlobalVar CLM.Mem
+                -> sym
+                -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> LCT.BVType 8 Ctx.::> CLT.LLVMPointerType (CLE.ArchWidth arch) Ctx.::> LCT.BVType 32)
+                -> C.OverM personality sym (CLI.LLVM arch) (LCS.RegValue sym LCT.UnitType)
+do_debug_assert sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) =
+  do cond <- liftIO $ bvIsNonzero sym (regValue p)
+     file <- lookupString mvar pFile
+     l <- case asBV (regValue line) of
+            Just (BV.BV l)  -> return (fromInteger l)
+            Nothing -> return 0
+     let pos = WPL.SourcePos (T.pack file) l 0
+     loc <- liftIO $ getCurrentProgramLoc sym
+     let loc' = loc{ WPL.plSourceLoc = pos }
+     let msg = LCS.GenericSimError "crucible_debug_assert"
+     ret <- liftIO $ LCB.addDurableAssertion sym (LCB.LabeledPred cond (LCS.SimError loc' msg))
+     let adapter = yicesAdapter
+     let logData = WS.defaultLogData
+     satTest <- liftIO $ solver_adapter_check_sat adapter sym logData [cond] $ \satRes ->
+       case satRes of
+         Sat _ -> return True
+         _ -> return False
+     simState <- CMS.get
+     let ng = WEB.exprCounter sym
+     liftIO $ when (not satTest) . void $ SB.surveyorState sconf ng simState Nothing
+     return ret
+
 checkEntryPoint :: ( CLO.ArchOk arch
-                   , CL.Logs
-                   )
+                  , CL.Logs
+                  )
                 => String
                 -> CLT.ModuleCFGMap arch
                 -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
@@ -168,13 +235,18 @@ checkEntryPoint nm mp =
         _ -> CMC.throwM EntryPointHasArguments
 
 registerFunctions :: ( CLO.ArchOk arch
-                     , LCB.IsSymInterface sym
-                     , CLM.HasLLVMAnn sym
-                     )
-                  => TL.Module
+                    , LCB.IsSymInterface sym
+                    , CLM.HasLLVMAnn sym
+                    , sym ~ (WEB.ExprBuilder t st fs)
+                    , SC.Architecture arch' t
+                    , SC.SymbolicArchitecture arch' t
+                    , ext ~ CLI.LLVM arch
+                    )
+                  => SB.DebuggerConfig t ext arch'
+                  -> TL.Module
                   -> CLT.ModuleTranslation arch
                   -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
-registerFunctions llvm_module mtrans =
+registerFunctions sconf llvm_module mtrans =
   do let llvm_ctx = mtrans ^. CLT.transContext
      let ?lc = llvm_ctx ^. CLT.llvmTypeCtx
 
@@ -182,7 +254,7 @@ registerFunctions llvm_module mtrans =
      let overrides = concat [ CLO.cruxLLVMOverrides
                             , CLO.svCompOverrides
                             , CLO.cbmcOverrides
-                            , breakpointOverrides
+                            , breakpointOverrides sconf
                             ]
      CLI.register_llvm_overrides llvm_module [] overrides llvm_ctx
 

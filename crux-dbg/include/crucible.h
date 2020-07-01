@@ -15,6 +15,7 @@ extern "C" {
 void crucible_breakpoint(const char* name, ...);
 void crucible_assume(uint8_t x, const char *file, int line);
 void crucible_assert(uint8_t x, const char *file, int line);
+void crucible_debug_assert(uint8_t x, const char *file, int line);
 
 int8_t   crucible_int8_t   (const char *name);
 int16_t  crucible_int16_t  (const char *name);
@@ -41,6 +42,7 @@ const char* crucible_string(const char *name, size_t max_len);
 
 #define assuming(e) crucible_assume(e, __FILE__, __LINE__)
 #define check(e) crucible_assert(e, __FILE__, __LINE__)
+#define debug_check(e) crucible_debug_assert(e, __FILE__, __LINE__)
 
 #ifdef __cplusplus
 }
