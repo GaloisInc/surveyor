@@ -390,9 +390,10 @@ startSymbolicExecution :: (CA.Architecture arch s, CB.IsSymInterface sym)
                        -> IO ( SymbolicExecutionState arch s Execute
                              , IO (SymbolicExecutionState arch s Inspect)
                              )
-startSymbolicExecution eventChan ares st = do
+startSymbolicExecution eventChan ares st =
   case someCFG st of
-    CCC.SomeCFG cfg -> withSymConstraints st $ do
+    -- Nothing -> error "Can't execute"
+    (CCC.SomeCFG cfg) -> withSymConstraints st $ do
       let sym = symbolicBackend st
       let retRep = CCC.cfgReturnType cfg
       (readH, writeH) <- SP.createPipe
