@@ -316,12 +316,12 @@ stateFromContext :: forall arch s p sym ext rtp f a st fs
                  -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
 stateFromContext ng mkAnalysisResult chan simState bp = do
   let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
+  let simCtx = simState ^. LCSET.stateContext
+  let halloc = simCtx ^. L.to LCSET.simHandleAllocator
+  let addrParser _s = Nothing
   case topFrame ^. LCSET.gpValue of
     LCSC.RF {} -> error "Unexpected return value"
     LCSC.OF LCSC.OverrideFrame {} -> do
-      let simCtx = simState ^. LCSET.stateContext
-      let halloc = simCtx ^. L.to LCSET.simHandleAllocator
-      let addrParser _s = Nothing
       n0 <- PN.freshNonce ng
       ares <- mkAnalysisResult ng n0 halloc
       symCfg <- C.defaultSymbolicExecutionConfig ng
@@ -396,9 +396,6 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
 
     LCSC.MF LCSC.CallFrame { LCSC._frameCFG = fcfg
                            } -> do
-      let simCtx = simState ^. LCSET.stateContext
-      let halloc = simCtx ^. L.to LCSET.simHandleAllocator
-      let addrParser _s = Nothing
       n0 <- PN.freshNonce ng
       ares <- mkAnalysisResult ng n0 halloc
       let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
@@ -407,7 +404,7 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                   | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                   ]
       tc0 <- C.newTranslationCache
-      let blockViewers = (MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr))
+      let blockViewers = MapF.Pair C.BaseRepr (BV.blockViewer InteractiveBlockViewer C.BaseRepr)
                          : [ MapF.Pair rep (BV.blockViewer InteractiveBlockViewer rep)
                            | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                            ]
@@ -415,7 +412,7 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
           funcViewerCallback rep fh b = do
             C.emitEvent chan (C.PushContext (C.archNonce ares) fh rep b)
             C.emitEvent chan (C.ViewBlock (C.archNonce ares) rep)
-      let funcViewers = (MapF.Pair C.BaseRepr (FV.functionViewer (funcViewerCallback C.BaseRepr) FunctionCFGViewer C.BaseRepr))
+      let funcViewers = MapF.Pair C.BaseRepr (FV.functionViewer (funcViewerCallback C.BaseRepr) FunctionCFGViewer C.BaseRepr)
                         : [ MapF.Pair rep (FV.functionViewer (funcViewerCallback rep) FunctionCFGViewer rep)
                           | C.SomeIRRepr rep <- C.alternativeIRs (Proxy @(arch, s))
                           ]
