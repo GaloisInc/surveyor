@@ -37,16 +37,15 @@ import qualified Text.LLVM as TL
 import qualified What4.Expr.Builder as WEB
 import qualified What4.ProgramLoc as WPL
 import qualified What4.Solver as WS
-
-import What4.SatResult(SatResult(..))
-import What4.Solver.Adapter (solver_adapter_check_sat)
-import What4.Solver.Yices (yicesAdapter)
-import What4.Interface (bvIsNonzero, getCurrentProgramLoc, asBV)
-import Lang.Crucible.Simulator.RegMap (regValue)
+import           What4.SatResult(SatResult(..))
+import           What4.Solver.Adapter (solver_adapter_check_sat)
+import           What4.Interface (bvIsNonzero, getCurrentProgramLoc, asBV)
 
 import qualified Crux as C
 import qualified Crux.Types as C
 import qualified Crux.LLVM.Overrides as CLO
+import qualified Crux.Config.Solver as CCS
+import qualified Crux.Debug.Config as CDC
 import qualified Crux.Log as CL
 import qualified Crux.Model as CM
 import qualified Lang.Crucible.Backend as LCB
@@ -64,8 +63,8 @@ import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Lang.Crucible.Simulator.GlobalState as LCSG
 import qualified Lang.Crucible.Simulator.Profiling as LCSP
 import qualified Lang.Crucible.Types as LCT
+import           Lang.Crucible.Simulator.RegMap (regValue)
 
-import qualified Crux.Debug.Config as CDC
 import qualified Surveyor.Brick as SB
 import qualified Surveyor.Core as SC
 
@@ -73,7 +72,7 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                        , CLM.HasLLVMAnn sym
                        , CLM.HasPtrWidth wptr
                        , wptr ~ CLE.ArchWidth arch
-                       , sym ~ (WEB.ExprBuilder t st fs)
+                       , sym ~ WEB.ExprBuilder t st fs
                        , SC.Architecture arch' t
                        , SC.SymbolicArchitecture arch' t
                        , ext ~ CLI.LLVM arch
@@ -159,7 +158,7 @@ simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _
                   SC.SomeResult ares -> return ares
           let debuggerConfig = SB.DebuggerConfig (Proxy @SC.LLVM) (Proxy @(SC.CrucibleExt SC.LLVM)) llvmCon
           let debugger = SB.debuggerFeature debuggerConfig (WEB.exprCounter sym)
-          let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $ do
+          let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $
                 LCS.runOverrideSim LCT.UnitRepr $ do
                   registerFunctions cruxOpts debuggerConfig llvmModule translation
                   checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
@@ -173,6 +172,7 @@ do_breakpoint :: (wptr ~ CLE.ArchWidth arch)
               -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
 do_breakpoint _gv _sym _ = return ()
 
+-- TODO: export in crux
 lookupString :: (LCB.IsSymInterface sym, CLM.HasLLVMAnn sym, CLO.ArchOk arch)
              => LCS.GlobalVar CLM.Mem
              -> LCS.RegEntry sym (CLT.LLVMPointerType (CLE.ArchWidth arch))
@@ -182,6 +182,17 @@ lookupString mvar ptr =
      mem <- LCS.readGlobal mvar
      bytes <- liftIO (CLM.loadString sym mem (regValue ptr) Nothing)
      return (BS8.unpack (BS.pack bytes))
+
+-- TODO: export in crux
+withSolverAdapter :: CCS.SolverOffline -> (WS.SolverAdapter st -> a) -> a
+withSolverAdapter solverOff k =
+  case solverOff of
+    CCS.Boolector -> k WS.boolectorAdapter
+    CCS.DReal -> k WS.drealAdapter
+    CCS.SolverOnline CCS.CVC4 -> k WS.cvc4Adapter
+    CCS.SolverOnline CCS.STP -> k WS.stpAdapter
+    CCS.SolverOnline CCS.Yices -> k WS.yicesAdapter
+    CCS.SolverOnline CCS.Z3 -> k WS.z3Adapter
 
 do_debug_assert :: ( CLO.ArchOk arch
                   , LCB.IsSymInterface sym
@@ -197,27 +208,33 @@ do_debug_assert :: ( CLO.ArchOk arch
                 -> sym
                 -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> LCT.BVType 8 Ctx.::> CLT.LLVMPointerType (CLE.ArchWidth arch) Ctx.::> LCT.BVType 32)
                 -> C.OverM personality sym (CLI.LLVM arch) (LCS.RegValue sym LCT.UnitType)
-do_debug_assert _cruxOpts sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) =
-  do cond <- liftIO $ bvIsNonzero sym (regValue p)
-     file <- lookupString mvar pFile
-     l <- case asBV (regValue line) of
-            Just (BV.BV l)  -> return (fromInteger l)
-            Nothing -> return 0
-     let pos = WPL.SourcePos (T.pack file) l 0
-     loc <- liftIO $ getCurrentProgramLoc sym
-     let loc' = loc{ WPL.plSourceLoc = pos }
-     let msg = LCS.GenericSimError "crucible_debug_assert"
-     ret <- liftIO $ LCB.addDurableAssertion sym (LCB.LabeledPred cond (LCS.SimError loc' msg))
-     let adapter = yicesAdapter
-     let logData = WS.defaultLogData
-     satTest <- liftIO $ solver_adapter_check_sat adapter sym logData [cond] $ \satRes ->
-       case satRes of
-         Sat _ -> return True
-         _ -> return False
-     simState <- CMS.get
-     let ng = WEB.exprCounter sym
-     liftIO $ when (not satTest) . void $ SB.surveyorState sconf ng simState Nothing
-     return ret
+do_debug_assert cruxOpts sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) = do
+  cond <- liftIO $ bvIsNonzero sym (regValue p)
+  file <- lookupString mvar pFile
+  l <- case asBV (regValue line) of
+         Just (BV.BV l)  -> return (fromInteger l)
+         Nothing -> return 0
+  let pos = WPL.SourcePos (T.pack file) l 0
+  loc <- liftIO $ getCurrentProgramLoc sym
+  let loc' = loc{ WPL.plSourceLoc = pos }
+  let msg = LCS.GenericSimError "crucible_debug_assert"
+  ret <- liftIO $ LCB.addDurableAssertion sym (LCB.LabeledPred cond (LCS.SimError loc' msg))
+  let offSolver = case CCS.parseSolverConfig cruxOpts of
+                    Right (CCS.SingleOnlineSolver _onSolver) -> CCS.SolverOnline _onSolver
+                    Right (CCS.OnlineSolverWithOfflineGoals _ _offSolver) -> _offSolver
+                    Right (CCS.OnlyOfflineSolver _offSolver) -> _offSolver
+                    Right (CCS.OnlineSolverWithSeparateOnlineGoals _ _onSolver) -> CCS.SolverOnline _onSolver
+                    Left _ -> CCS.SolverOnline CCS.Yices
+  withSolverAdapter offSolver $ \adapter -> do
+    let logData = WS.defaultLogData
+    satTest <- liftIO $ solver_adapter_check_sat adapter sym logData [cond] $ \satRes ->
+      case satRes of
+        Sat _ -> return True
+        _ -> return False
+    simState <- CMS.get
+    let ng = WEB.exprCounter sym
+    liftIO $ when (not satTest) . void $ SB.surveyorState sconf ng simState Nothing
+    return ret
 
 checkEntryPoint :: ( CLO.ArchOk arch
                   , CL.Logs
@@ -239,7 +256,7 @@ checkEntryPoint nm mp =
 registerFunctions :: ( CLO.ArchOk arch
                     , LCB.IsSymInterface sym
                     , CLM.HasLLVMAnn sym
-                    , sym ~ (WEB.ExprBuilder t st fs)
+                    , sym ~ WEB.ExprBuilder t st fs
                     , SC.Architecture arch' t
                     , SC.SymbolicArchitecture arch' t
                     , ext ~ CLI.LLVM arch
