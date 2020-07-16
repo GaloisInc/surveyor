@@ -78,14 +78,15 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                        , SC.SymbolicArchitecture arch' t
                        , ext ~ CLI.LLVM arch
                        )
-                    => SB.DebuggerConfig t ext arch'
+                    => C.CruxOptions
+                    -> SB.DebuggerConfig t ext arch'
                     -> [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
-breakpointOverrides sconf =
+breakpointOverrides cruxOpts sconf =
   [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
        do_breakpoint
 
   , CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_debug_assert( i8, i8*, i32 ) |]
-       (do_debug_assert sconf)
+       (do_debug_assert cruxOpts sconf)
   ]
 
 
@@ -133,7 +134,7 @@ debugLLVM cruxOpts dbgOpts bcFilePath = do
   C.postprocessSimResult cruxOpts res
 
 simulateLLVMWithDebug :: C.CruxOptions -> CDC.DebugOptions -> FilePath -> C.SimulatorCallback
-simulateLLVMWithDebug _cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _maybeOnline -> do
+simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _maybeOnline -> do
   llvmModule <- parseLLVM bcFilePath
   halloc <- CFH.newHandleAllocator
 
@@ -160,7 +161,7 @@ simulateLLVMWithDebug _cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym 
           let debugger = SB.debuggerFeature debuggerConfig (WEB.exprCounter sym)
           let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $ do
                 LCS.runOverrideSim LCT.UnitRepr $ do
-                  registerFunctions debuggerConfig llvmModule translation
+                  registerFunctions cruxOpts debuggerConfig llvmModule translation
                   checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
           return (C.RunnableStateWithExtensions initSt [debugger])
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
@@ -190,12 +191,13 @@ do_debug_assert :: ( CLO.ArchOk arch
                   , SC.SymbolicArchitecture arch' t
                   , ext ~ CLI.LLVM arch
                   )
-                => SB.DebuggerConfig t ext arch'
+                => C.CruxOptions
+                -> SB.DebuggerConfig t ext arch'
                 -> LCS.GlobalVar CLM.Mem
                 -> sym
                 -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> LCT.BVType 8 Ctx.::> CLT.LLVMPointerType (CLE.ArchWidth arch) Ctx.::> LCT.BVType 32)
                 -> C.OverM personality sym (CLI.LLVM arch) (LCS.RegValue sym LCT.UnitType)
-do_debug_assert sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) =
+do_debug_assert _cruxOpts sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) =
   do cond <- liftIO $ bvIsNonzero sym (regValue p)
      file <- lookupString mvar pFile
      l <- case asBV (regValue line) of
@@ -242,11 +244,12 @@ registerFunctions :: ( CLO.ArchOk arch
                     , SC.SymbolicArchitecture arch' t
                     , ext ~ CLI.LLVM arch
                     )
-                  => SB.DebuggerConfig t ext arch'
+                  => C.CruxOptions
+                  -> SB.DebuggerConfig t ext arch'
                   -> TL.Module
                   -> CLT.ModuleTranslation arch
                   -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
-registerFunctions sconf llvm_module mtrans =
+registerFunctions cruxOpts sconf llvm_module mtrans =
   do let llvm_ctx = mtrans ^. CLT.transContext
      let ?lc = llvm_ctx ^. CLT.llvmTypeCtx
 
@@ -254,7 +257,7 @@ registerFunctions sconf llvm_module mtrans =
      let overrides = concat [ CLO.cruxLLVMOverrides
                             , CLO.svCompOverrides
                             , CLO.cbmcOverrides
-                            , breakpointOverrides sconf
+                            , breakpointOverrides cruxOpts sconf
                             ]
      CLI.register_llvm_overrides llvm_module [] overrides llvm_ctx
 
