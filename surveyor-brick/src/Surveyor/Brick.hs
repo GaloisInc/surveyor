@@ -302,18 +302,6 @@ emptyState mfp mloader ng customEventChan = do
              , C.sArchNonce = n0
              }
 
--- parentFrameCFG :: forall s st fs sym ext arch init reg
---                 . ( C.SymbolicArchitecture arch s
---                   , LCB.IsSymInterface sym
---                   , ext ~ C.CrucibleExt arch
---                   , sym ~ WEB.ExprBuilder s st fs
---                   )
---                => [LCSET.SomeFrame (LCSC.SimFrame sym ext)]
---                -> LCCC.SomeCFG (C.CrucibleExt arch) init reg
--- parentFrameCFG [] = error "No MF"
--- parentFrameCFG (LCSET.SomeFrame (LCSC.MF LCSC.CallFrame { LCSC._frameCFG = fcfg }) : _) = fcfg
--- parentFrameCFG (_ : fs) = parentFrameCFG fs
-
 stateFromContext :: forall arch s p sym ext rtp f a st fs
                   . ( C.SymbolicArchitecture arch s
                     , LCB.IsSymInterface sym
@@ -379,9 +367,7 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
           tc0 <- C.newTranslationCache
           ctxStk <- contextStackFromState ng tc0 ares sesID simState pfcfg
           let archState = C.ArchState { C.sAnalysisResult = ares
-                                      -- FIXME: Pick a context based on the stack in the simulator
                                       , C.sContext = ctxStk
-                                      -- FIXME: Construct a session for this with whatever we can pull out of simState
                                       , C.sSymExState = C.singleSessionState symbolicExecutionState
                                       , C.sIRCache = tc0
                                       , C.sArchDicts = MapF.fromList dicts
@@ -406,6 +392,7 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                      , C.sArchState = Just archState
                      , C.sUIMode = C.SomeUIMode C.SymbolicExecutionManager
                      }
+        _ -> error "OverrideFrame has no parent frame"
 
     LCSC.MF LCSC.CallFrame { LCSC._frameCFG = fcfg
                            } -> do

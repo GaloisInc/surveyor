@@ -168,7 +168,8 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  }
 
 data SymbolicExecutionException =
-  UnexpectedFrame T.Text T.Text
+    UnexpectedFrame T.Text T.Text
+  | NoParentFrame T.Text T.Text
   deriving (Show)
 
 instance CMC.Exception SymbolicExecutionException
@@ -202,6 +203,7 @@ suspendedState ng surveyorSymState crucSimState mbp =
                                   , suspendedCurrentValue = Nothing
                                   }
           return (Suspended symNonce st)
+        _ -> CMC.throwM (NoParentFrame "Override" bpName)
     LCSC.MF cf ->
       case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (fmap SCB.breakpointArguments mbp) of
         Some Ctx.Empty -> do
@@ -394,7 +396,6 @@ startSymbolicExecution :: (CA.Architecture arch s, CB.IsSymInterface sym)
                              )
 startSymbolicExecution eventChan ares st =
   case someCFG st of
-    -- Nothing -> error "Can't execute"
     (CCC.SomeCFG cfg) -> withSymConstraints st $ do
       let sym = symbolicBackend st
       let retRep = CCC.cfgReturnType cfg
