@@ -227,7 +227,8 @@ do_debug_assert cruxOpts sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> 
                     Left _ -> CCS.SolverOnline CCS.Yices
   withSolverAdapter offSolver $ \adapter -> do
     let logData = WS.defaultLogData
-    satTest <- liftIO $ solver_adapter_check_sat adapter sym logData [cond] $ \satRes ->
+    pathCond <- liftIO $ LCB.getPathCondition sym
+    satTest <- liftIO $ solver_adapter_check_sat adapter sym logData [pathCond, cond] $ \satRes ->
       case satRes of
         Sat _ -> return True
         _ -> return False
