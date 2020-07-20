@@ -191,19 +191,17 @@ suspendedState ng surveyorSymState crucSimState mbp =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
     LCSC.OF {} ->
-      case CSET.activeFrames (crucSimState ^. CSET.stateTree) of
-        _ : CSET.SomeFrame (LCSC.MF cf) : _ -> do
-          symNonce <- liftIO $ PN.freshNonce ng
-          let st = SuspendedState { suspendedSymState = surveyorSymState
-                                  , suspendedSimState = crucSimState
-                                  , suspendedCallFrame = cf
-                                  , suspendedBreakpoint = mbp
-                                  , suspendedRegVals = Ctx.empty
-                                  , suspendedRegSelection = Nothing
-                                  , suspendedCurrentValue = Nothing
-                                  }
-          return (Suspended symNonce st)
-        _ -> CMC.throwM (NoParentFrame "Override" bpName)
+      withParentFrame (CSET.activeFrames (crucSimState ^. CSET.stateTree)) $ \cf -> do
+        symNonce <- liftIO $ PN.freshNonce ng
+        let st = SuspendedState { suspendedSymState = surveyorSymState
+                                , suspendedSimState = crucSimState
+                                , suspendedCallFrame = cf
+                                , suspendedBreakpoint = mbp
+                                , suspendedRegVals = Ctx.empty
+                                , suspendedRegSelection = Nothing
+                                , suspendedCurrentValue = Nothing
+                                }
+        return (Suspended symNonce st)
     LCSC.MF cf ->
       case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (fmap SCB.breakpointArguments mbp) of
         Some Ctx.Empty -> do
@@ -234,6 +232,15 @@ suspendedState ng surveyorSymState crucSimState mbp =
     bpName :: T.Text
     bpName = fromMaybe "<Unnamed Breakpoint>" (SCB.breakpointName =<< mbp)
     topFrame = crucSimState ^. CSET.stateTree . CSET.actFrame
+
+    withParentFrame :: [CSET.SomeFrame (LCSC.SimFrame sym ext)]
+                    -> (forall blocks ret args. LCSC.CallFrame sym ext blocks ret args -> m t)
+                    -> m t
+    withParentFrame fs k =
+      case fs of
+        [] -> CMC.throwM (NoParentFrame "Override" bpName)
+        CSET.SomeFrame (LCSC.MF cf) : _ -> k cf
+        _ : _fs -> withParentFrame _fs k
 
 valuesFromVector :: proxy sym
                  -> DV.Vector (LCSR.RegValue sym LCT.AnyType)
