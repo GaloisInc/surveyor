@@ -13,7 +13,7 @@ module Crux.Debug.LLVM (
   ) where
 
 import           Control.Lens ( (^.), (&), (%~) )
-import           Control.Monad ( when, void )
+import           Control.Monad ( void )
 import qualified Control.Monad.Catch as CMC
 import qualified Control.Monad.State as CMS
 import           Control.Monad.IO.Class ( liftIO )
@@ -38,8 +38,8 @@ import qualified What4.Expr.Builder as WEB
 import qualified What4.ProgramLoc as WPL
 import qualified What4.Solver as WS
 import           What4.SatResult(SatResult(..))
-import           What4.Solver.Adapter (solver_adapter_check_sat)
-import           What4.Interface (bvIsNonzero, getCurrentProgramLoc, asBV)
+import           What4.Solver.Adapter ( solver_adapter_check_sat )
+import qualified What4.Interface as WI
 
 import qualified Crux as C
 import qualified Crux.Types as C
@@ -218,27 +218,27 @@ do_debug_assert :: ( CLO.ArchOk arch
                 -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> LCT.BVType 8 Ctx.::> CLT.LLVMPointerType (CLE.ArchWidth arch) Ctx.::> LCT.BVType 32)
                 -> C.OverM personality sym (CLI.LLVM arch) (LCS.RegValue sym LCT.UnitType)
 do_debug_assert offSolver sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) = do
-  cond <- liftIO $ bvIsNonzero sym (regValue p)
+  cond <- liftIO $ WI.bvIsNonzero sym (regValue p)
   file <- lookupString mvar pFile
-  l <- case asBV (regValue line) of
+  l <- case WI.asBV (regValue line) of
          Just (BV.BV l)  -> return (fromInteger l)
          Nothing -> return 0
   let pos = WPL.SourcePos (T.pack file) l 0
-  loc <- liftIO $ getCurrentProgramLoc sym
+  loc <- liftIO $ WI.getCurrentProgramLoc sym
   let loc' = loc{ WPL.plSourceLoc = pos }
   let msg = LCS.GenericSimError "crucible_debug_assert"
   ret <- liftIO $ LCB.addDurableAssertion sym (LCB.LabeledPred cond (LCS.SimError loc' msg))
-  withSolverAdapter offSolver $ \adapter -> do
+  simState <- CMS.get
+  liftIO . withSolverAdapter offSolver $ \adapter -> do
     let logData = WS.defaultLogData
-    pathCond <- liftIO $ LCB.getPathCondition sym
-    satTest <- liftIO $ solver_adapter_check_sat adapter sym logData [pathCond, cond] $ \satRes ->
+    negCond <- WI.notPred sym cond
+    pathCond <- LCB.getPathCondition sym
+    solver_adapter_check_sat adapter sym logData [pathCond, negCond] $ \satRes ->
       case satRes of
-        Sat _ -> return True
-        _ -> return False
-    simState <- CMS.get
-    let ng = WEB.exprCounter sym
-    liftIO $ when (not satTest) . void $ SB.surveyorState sconf ng simState Nothing
-    return ret
+        Sat _model -> do
+          let ng = WEB.exprCounter sym
+          void $ SB.surveyorState sconf ng simState Nothing
+        _ -> return ret
 
 checkEntryPoint :: ( CLO.ArchOk arch
                   , CL.Logs
