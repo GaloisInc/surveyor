@@ -82,10 +82,10 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                     -> [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
 breakpointOverrides cruxOpts sconf =
   [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
-       do_breakpoint
+      do_breakpoint
 
   , CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_debug_assert( i8, i8*, i32 ) |]
-       (do_debug_assert cruxOpts sconf)
+      (do_debug_assert (parseSolverOffline cruxOpts) sconf)
   ]
 
 
@@ -194,6 +194,15 @@ withSolverAdapter solverOff k =
     CCS.SolverOnline CCS.Yices -> k WS.yicesAdapter
     CCS.SolverOnline CCS.Z3 -> k WS.z3Adapter
 
+parseSolverOffline :: C.CruxOptions -> CCS.SolverOffline
+parseSolverOffline cruxOpts =
+  case CCS.parseSolverConfig cruxOpts of
+    Right (CCS.SingleOnlineSolver _onSolver) -> CCS.SolverOnline _onSolver
+    Right (CCS.OnlineSolverWithOfflineGoals _ _offSolver) -> _offSolver
+    Right (CCS.OnlyOfflineSolver _offSolver) -> _offSolver
+    Right (CCS.OnlineSolverWithSeparateOnlineGoals _ _onSolver) -> CCS.SolverOnline _onSolver
+    Left _ -> CCS.SolverOnline CCS.Yices
+
 do_debug_assert :: ( CLO.ArchOk arch
                   , LCB.IsSymInterface sym
                   , CLM.HasLLVMAnn sym
@@ -202,13 +211,13 @@ do_debug_assert :: ( CLO.ArchOk arch
                   , SC.SymbolicArchitecture arch' t
                   , ext ~ CLI.LLVM arch
                   )
-                => C.CruxOptions
+                => CCS.SolverOffline
                 -> SB.DebuggerConfig t ext arch'
                 -> LCS.GlobalVar CLM.Mem
                 -> sym
                 -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> LCT.BVType 8 Ctx.::> CLT.LLVMPointerType (CLE.ArchWidth arch) Ctx.::> LCT.BVType 32)
                 -> C.OverM personality sym (CLI.LLVM arch) (LCS.RegValue sym LCT.UnitType)
-do_debug_assert cruxOpts sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) = do
+do_debug_assert offSolver sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) = do
   cond <- liftIO $ bvIsNonzero sym (regValue p)
   file <- lookupString mvar pFile
   l <- case asBV (regValue line) of
@@ -219,12 +228,6 @@ do_debug_assert cruxOpts sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> 
   let loc' = loc{ WPL.plSourceLoc = pos }
   let msg = LCS.GenericSimError "crucible_debug_assert"
   ret <- liftIO $ LCB.addDurableAssertion sym (LCB.LabeledPred cond (LCS.SimError loc' msg))
-  let offSolver = case CCS.parseSolverConfig cruxOpts of
-                    Right (CCS.SingleOnlineSolver _onSolver) -> CCS.SolverOnline _onSolver
-                    Right (CCS.OnlineSolverWithOfflineGoals _ _offSolver) -> _offSolver
-                    Right (CCS.OnlyOfflineSolver _offSolver) -> _offSolver
-                    Right (CCS.OnlineSolverWithSeparateOnlineGoals _ _onSolver) -> CCS.SolverOnline _onSolver
-                    Left _ -> CCS.SolverOnline CCS.Yices
   withSolverAdapter offSolver $ \adapter -> do
     let logData = WS.defaultLogData
     pathCond <- liftIO $ LCB.getPathCondition sym
