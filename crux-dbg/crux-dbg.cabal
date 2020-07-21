@@ -19,11 +19,14 @@ library
   exposed-modules:     Crux.Debug.Config
                        Crux.Debug.LLVM
   build-depends:       base >=4.10 && <5,
+                       bv-sized,
+                       bytestring,
                        containers,
                        text,
                        exceptions,
                        lens,
                        parameterized-utils,
+                       mtl,
                        llvm-pretty,
                        llvm-pretty-bc-parser,
                        what4,
