@@ -47,6 +47,7 @@ import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.EvalStmt as LCS
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified What4.Expr.Builder as WEB
+import qualified Crux.Types as CT
 
 import           Surveyor.Brick.Attributes
 import qualified Surveyor.Brick.Command as SBC
@@ -313,8 +314,9 @@ stateFromContext :: forall arch s p sym ext rtp f a st fs
                  -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
                  -> LCSET.SimState p sym ext rtp f a
                  -> Maybe (C.Breakpoint sym)
+                 -> Maybe CT.ModelView
                  -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
-stateFromContext ng mkAnalysisResult chan simState bp = do
+stateFromContext ng mkAnalysisResult chan simState bp mv = do
   let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
   let simCtx = simState ^. LCSET.stateContext
   let halloc = simCtx ^. L.to LCSET.simHandleAllocator
@@ -564,11 +566,11 @@ debugger args@(DebuggerConfig {}) ng execSt =
     LCSET.CallState _retHdlr resolvedCall simState
       | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
           bp <- ioBP
-          surveyorState args ng simState (Just bp)
+          surveyorState args ng simState (Just bp) Nothing
     LCSET.TailCallState _v resolvedCall simState
       | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
           bp <- ioBP
-          surveyorState args ng simState (Just bp)
+          surveyorState args ng simState (Just bp) Nothing
     _ -> return LCS.ExecutionFeatureNoChange
   where
     proxy = Proxy @(arch, s)
@@ -583,10 +585,11 @@ surveyorState :: ( C.Architecture arch s
               -> PN.NonceGenerator IO s
               -> LCSET.SimState p sym ext rtp f a
               -> Maybe (C.Breakpoint sym)
+              -> Maybe CT.ModelView
               -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-surveyorState args@(DebuggerConfig {}) ng simCtx bp = do
+surveyorState args@(DebuggerConfig {}) ng simCtx bp mv = do
   customEventChan <- B.newBChan 100
   let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
-  s0 <- stateFromContext ng (debuggerCon args) chan simCtx bp
+  s0 <- stateFromContext ng (debuggerCon args) chan simCtx bp mv
   surveyorWith args customEventChan s0
   return LCS.ExecutionFeatureNoChange
