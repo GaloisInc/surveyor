@@ -54,6 +54,7 @@ library
                        text,
                        vector,
                        filepath,
+                       data-binary-ieee754,
                        Glob >= 0.10 && < 0.11,
                        bv-sized >= 1 && < 1.1,
                        prettyprinter,
