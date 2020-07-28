@@ -6,7 +6,7 @@ license:             BSD3
 license-file:        LICENSE
 author:              Tristan Ravitch
 maintainer:          tristan@galois.com
--- copyright:           
+-- copyright:
 category:            Reverse-Engineering
 build-type:          Simple
 extra-source-files:  ChangeLog.md
@@ -54,7 +54,7 @@ library
                        Surveyor.Core.State
                        Surveyor.Core.TranslationCache
                        Surveyor.Core.ValueNames
-  -- other-extensions:    
+  -- other-extensions:
   build-depends:       base >=4.10 && <5,
                        deepseq,
                        mtl,

@@ -84,6 +84,7 @@ import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as CT
 import qualified Lang.Crucible.Types as LCT
+import qualified Crux.Types as CT
 import qualified System.IO as IO
 import qualified System.Process as SP
 import qualified What4.Concrete as WCC
@@ -165,6 +166,7 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
                  , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
                  , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
+                 , suspendedModelView :: Maybe CT.ModelView
                  }
 
 data SymbolicExecutionException =
@@ -186,8 +188,9 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                -> SymbolicState arch s sym init reg
                -> CSET.SimState p sym ext rtp f a
                -> Maybe (SCB.Breakpoint sym)
+               -> Maybe (CT.ModelView)
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState ng surveyorSymState crucSimState mbp =
+suspendedState ng surveyorSymState crucSimState mbp mmv =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
     LCSC.OF {} ->
@@ -200,6 +203,7 @@ suspendedState ng surveyorSymState crucSimState mbp =
                                 , suspendedRegVals = Ctx.empty
                                 , suspendedRegSelection = Nothing
                                 , suspendedCurrentValue = Nothing
+                                , suspendedModelView = mmv
                                 }
         return (Suspended symNonce st)
     LCSC.MF cf ->
@@ -213,6 +217,7 @@ suspendedState ng surveyorSymState crucSimState mbp =
                                   , suspendedRegVals = Ctx.empty
                                   , suspendedRegSelection = Nothing
                                   , suspendedCurrentValue = Nothing
+                                  , suspendedModelView = mmv
                                   }
           return (Suspended symNonce st)
         Some valAssignment@(_ Ctx.:> _) -> do
@@ -225,6 +230,7 @@ suspendedState ng surveyorSymState crucSimState mbp =
                                   , suspendedRegVals = valAssignment
                                   , suspendedRegSelection = Just (Some anIndex)
                                   , suspendedCurrentValue = Nothing
+                                  , suspendedModelView = mmv
                                   }
           return (Suspended symNonce st)
 
@@ -382,6 +388,7 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solve
                               , symbolicRegs = regs
                               , symbolicGlobals = globals
                               , withSymConstraints = \a -> a
+                              , modelView = Nothing
                               }
     return (Initializing state)
 

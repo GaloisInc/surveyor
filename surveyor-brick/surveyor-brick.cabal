@@ -33,6 +33,7 @@ library
                        Surveyor.Brick.Widget.ValueSelector
                        Surveyor.Brick.Widget.ValueViewer
                        Surveyor.Brick.Widget.CallStackViewer
+                       Surveyor.Brick.Widget.ModelViewer
                        Brick.Match.Subword
                        Brick.Widget.FilterList
                        Brick.Widget.Graph

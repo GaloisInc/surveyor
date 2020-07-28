@@ -341,8 +341,9 @@ stateFromContext ng mkAnalysisResult chan simState bp mv = do
                                     -- Need to refactor so that they aren't part
                                     -- of this state
                                     , C.symbolicRegs = error "Initial symbolic regs"
+                                    , C.modelView = mv
                                     }
-        symbolicExecutionState <- C.suspendedState ng symSt simState bp
+        symbolicExecutionState <- C.suspendedState ng symSt simState bp mv
         let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
                                        , SBE.sBlockViewers = MapF.fromList blockViewers
                                        , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
@@ -400,10 +401,11 @@ stateFromContext ng mkAnalysisResult chan simState bp mv = do
                                   -- Need to refactor so that they aren't part
                                   -- of this state
                                   , C.symbolicRegs = error "Initial symbolic regs"
+                                  , C.modelView = mv
                                   }
       ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
       -- NOTE: This can throw an exception, but that is fine: the TUI is not yet up
-      symbolicExecutionState <- C.suspendedState ng symSt simState bp
+      symbolicExecutionState <- C.suspendedState ng symSt simState bp mv
       let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
                                      , SBE.sBlockViewers = MapF.fromList blockViewers
                                      , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
