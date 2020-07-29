@@ -206,10 +206,11 @@ parseSolverOffline cruxOpts =
 do_debug_assert :: ( CLO.ArchOk arch
                   , LCB.IsSymInterface sym
                   , CLM.HasLLVMAnn sym
-                  , sym ~ (WEB.ExprBuilder t st fs)
+                  , sym ~ WEB.ExprBuilder t st fs
                   , SC.Architecture arch' t
                   , SC.SymbolicArchitecture arch' t
                   , ext ~ CLI.LLVM arch
+                  , C.HasModel personality
                   )
                 => CCS.SolverOffline
                 -> SB.DebuggerConfig t ext arch'
@@ -235,9 +236,13 @@ do_debug_assert offSolver sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:>
     pathCond <- LCB.getPathCondition sym
     solver_adapter_check_sat adapter sym logData [pathCond, negCond] $ \satRes ->
       case satRes of
-        Sat _model -> do
+        Sat (ev, _) -> do
           let ng = WEB.exprCounter sym
-          void $ SB.surveyorState sconf ng simState Nothing
+          let simCtx = simState ^. LCSET.stateContext
+          let model = simCtx ^. LCSET.cruciblePersonality . C.personalityModel
+          modelVals <- CM.evalModel ev model
+          let mv = C.ModelView modelVals
+          void $ SB.surveyorState sconf ng simState (SC.SimModelView mv)
         _ -> return ret
 
 checkEntryPoint :: ( CLO.ArchOk arch

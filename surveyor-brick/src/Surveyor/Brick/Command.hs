@@ -24,7 +24,7 @@ module Surveyor.Brick.Command (
   mkExtension
   ) where
 
-import           Control.Lens ( (^.), (^?), _Just )
+import           Control.Lens ( (^?), _Just )
 import qualified Data.Functor.Const as C
 import           Data.Kind ( Type )
 import           Data.Maybe ( isJust )

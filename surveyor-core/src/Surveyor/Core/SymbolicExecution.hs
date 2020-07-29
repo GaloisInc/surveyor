@@ -51,11 +51,15 @@ module Surveyor.Core.SymbolicExecution (
   configuringSymbolicExecution,
   initializingSymbolicExecution,
   -- * Cleanup
-  cleanupSymbolicExecutionState
+  cleanupSymbolicExecutionState,
+  -- * Simulation data
+  SimulationData(..),
+  breakpointP,
+  modelViewP
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )
-import           Control.Lens ( (^.) )
+import           Control.Lens ( (^.), (^?) )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Control.Monad.Catch as CMC
@@ -84,6 +88,7 @@ import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as CT
 import qualified Lang.Crucible.Types as LCT
+import qualified Crux.Types as CT
 import qualified System.IO as IO
 import qualified System.Process as SP
 import qualified What4.Concrete as WCC
@@ -108,6 +113,7 @@ import qualified Surveyor.Core.Panic as SCP
 
 import           Surveyor.Core.SymbolicExecution.Config
 import           Surveyor.Core.SymbolicExecution.State
+import           Surveyor.Core.SymbolicExecution.Simulation
 
 -- Setup of the symbolic execution engine (parameters and globals)
 
@@ -165,6 +171,7 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
                  , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
                  , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
+                 , suspendedModelView :: Maybe CT.ModelView
                  }
 
 data SymbolicExecutionException =
@@ -185,9 +192,9 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                => PN.NonceGenerator IO s
                -> SymbolicState arch s sym init reg
                -> CSET.SimState p sym ext rtp f a
-               -> Maybe (SCB.Breakpoint sym)
+               -> SimulationData sym
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState ng surveyorSymState crucSimState mbp =
+suspendedState ng surveyorSymState crucSimState simData =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
     LCSC.OF {} ->
@@ -200,6 +207,7 @@ suspendedState ng surveyorSymState crucSimState mbp =
                                 , suspendedRegVals = Ctx.empty
                                 , suspendedRegSelection = Nothing
                                 , suspendedCurrentValue = Nothing
+                                , suspendedModelView = mmv
                                 }
         return (Suspended symNonce st)
     LCSC.MF cf ->
@@ -213,6 +221,7 @@ suspendedState ng surveyorSymState crucSimState mbp =
                                   , suspendedRegVals = Ctx.empty
                                   , suspendedRegSelection = Nothing
                                   , suspendedCurrentValue = Nothing
+                                  , suspendedModelView = mmv
                                   }
           return (Suspended symNonce st)
         Some valAssignment@(_ Ctx.:> _) -> do
@@ -225,10 +234,14 @@ suspendedState ng surveyorSymState crucSimState mbp =
                                   , suspendedRegVals = valAssignment
                                   , suspendedRegSelection = Just (Some anIndex)
                                   , suspendedCurrentValue = Nothing
+                                  , suspendedModelView = mmv
                                   }
           return (Suspended symNonce st)
 
   where
+    mbp = simData ^? breakpointP
+    mmv = simData ^? modelViewP
+
     bpName :: T.Text
     bpName = fromMaybe "<Unnamed Breakpoint>" (SCB.breakpointName =<< mbp)
     topFrame = crucSimState ^. CSET.stateTree . CSET.actFrame
@@ -382,6 +395,7 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solve
                               , symbolicRegs = regs
                               , symbolicGlobals = globals
                               , withSymConstraints = \a -> a
+                              , modelView = Nothing
                               }
     return (Initializing state)
 

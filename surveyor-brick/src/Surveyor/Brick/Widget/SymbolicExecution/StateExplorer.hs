@@ -31,6 +31,7 @@ import qualified Surveyor.Brick.Panic as SBP
 import qualified Surveyor.Core as C
 
 import qualified Surveyor.Brick.Widget.CallStackViewer as WCSV
+import qualified Surveyor.Brick.Widget.ModelViewer as WMV
 
 -- | Holds the state of the StateExplorer widget
 --
@@ -81,13 +82,15 @@ renderSymbolicExecutionStateExplorer :: forall arch s e
 renderSymbolicExecutionStateExplorer (C.Suspended _symNonce1 suspSt, StateExplorer _symNonce2 csv) valNames =
   case C.suspendedCallFrame suspSt of
     cf@LCSC.CallFrame { LCSC._frameCFG = fcfg } ->
-      B.vBox [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
-             , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
-             , B.txt "Breakpoint name:" B.<+> B.txt (fromMaybe "<Unnamed Breakpoint>" (C.breakpointName =<< mbp))
-             , WCSV.renderCallStackViewer True valNames csv
-             ]
+      B.vBox $ [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
+               , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
+               , B.txt "Breakpoint name:" B.<+> B.txt (fromMaybe "<Unnamed Breakpoint>" (C.breakpointName =<< mbp))
+               , WCSV.renderCallStackViewer True valNames csv
+               , B.txt "Model:" B.<+> (fromMaybe (B.txt "<Unavailable>") (WMV.renderModelViewer <$> mmv))
+               ]
   where
     mbp = C.suspendedBreakpoint suspSt
+    mmv = C.suspendedModelView suspSt
 
 -- | Handle events for the 'StateExplorer'
 --

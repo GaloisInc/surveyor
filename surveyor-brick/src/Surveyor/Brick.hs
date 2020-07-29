@@ -21,7 +21,7 @@ import           Brick.Markup ( (@?) )
 import qualified Brick.Markup as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
-import           Control.Lens ( (&), (^.), (.~) )
+import           Control.Lens ( (&), (^.), (^?), (.~) )
 import qualified Control.Lens as L
 import           Control.Monad ( join )
 import qualified Data.Foldable as F
@@ -312,9 +312,9 @@ stateFromContext :: forall arch s p sym ext rtp f a st fs
                  -> (PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s))
                  -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
                  -> LCSET.SimState p sym ext rtp f a
-                 -> Maybe (C.Breakpoint sym)
+                 -> C.SimulationData sym
                  -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
-stateFromContext ng mkAnalysisResult chan simState bp = do
+stateFromContext ng mkAnalysisResult chan simState simData = do
   let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
   let simCtx = simState ^. LCSET.stateContext
   let halloc = simCtx ^. L.to LCSET.simHandleAllocator
@@ -339,8 +339,9 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                                     -- Need to refactor so that they aren't part
                                     -- of this state
                                     , C.symbolicRegs = error "Initial symbolic regs"
+                                    , C.modelView = simData ^? C.modelViewP
                                     }
-        symbolicExecutionState <- C.suspendedState ng symSt simState bp
+        symbolicExecutionState <- C.suspendedState ng symSt simState simData
         let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
                                        , SBE.sBlockViewers = MapF.fromList blockViewers
                                        , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
@@ -398,10 +399,11 @@ stateFromContext ng mkAnalysisResult chan simState bp = do
                                   -- Need to refactor so that they aren't part
                                   -- of this state
                                   , C.symbolicRegs = error "Initial symbolic regs"
+                                  , C.modelView = simData ^? C.modelViewP
                                   }
       ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
       -- NOTE: This can throw an exception, but that is fine: the TUI is not yet up
-      symbolicExecutionState <- C.suspendedState ng symSt simState bp
+      symbolicExecutionState <- C.suspendedState ng symSt simState simData
       let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
                                      , SBE.sBlockViewers = MapF.fromList blockViewers
                                      , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
@@ -564,11 +566,11 @@ debugger args@(DebuggerConfig {}) ng execSt =
     LCSET.CallState _retHdlr resolvedCall simState
       | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
           bp <- ioBP
-          surveyorState args ng simState (Just bp)
+          surveyorState args ng simState (C.SimBreakpoint bp)
     LCSET.TailCallState _v resolvedCall simState
       | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
           bp <- ioBP
-          surveyorState args ng simState (Just bp)
+          surveyorState args ng simState (C.SimBreakpoint bp)
     _ -> return LCS.ExecutionFeatureNoChange
   where
     proxy = Proxy @(arch, s)
@@ -582,11 +584,11 @@ surveyorState :: ( C.Architecture arch s
               => DebuggerConfig s ext arch
               -> PN.NonceGenerator IO s
               -> LCSET.SimState p sym ext rtp f a
-              -> Maybe (C.Breakpoint sym)
+              -> C.SimulationData sym
               -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-surveyorState args@(DebuggerConfig {}) ng simCtx bp = do
+surveyorState args@(DebuggerConfig {}) ng simCtx simData = do
   customEventChan <- B.newBChan 100
   let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
-  s0 <- stateFromContext ng (debuggerCon args) chan simCtx bp
+  s0 <- stateFromContext ng (debuggerCon args) chan simCtx simData
   surveyorWith args customEventChan s0
   return LCS.ExecutionFeatureNoChange

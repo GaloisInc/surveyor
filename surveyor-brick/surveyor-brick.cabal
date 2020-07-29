@@ -33,6 +33,7 @@ library
                        Surveyor.Brick.Widget.ValueSelector
                        Surveyor.Brick.Widget.ValueViewer
                        Surveyor.Brick.Widget.CallStackViewer
+                       Surveyor.Brick.Widget.ModelViewer
                        Brick.Match.Subword
                        Brick.Widget.FilterList
                        Brick.Widget.Graph
@@ -53,6 +54,7 @@ library
                        text,
                        vector,
                        filepath,
+                       data-binary-ieee754,
                        Glob >= 0.10 && < 0.11,
                        bv-sized >= 1 && < 1.1,
                        prettyprinter,
@@ -72,6 +74,7 @@ library
                        what4,
                        crucible,
                        crucible-llvm,
+                       crux,
                        surveyor-core
   hs-source-dirs:      src
   default-language:    Haskell2010
