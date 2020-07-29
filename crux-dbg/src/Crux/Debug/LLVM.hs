@@ -241,7 +241,8 @@ do_debug_assert offSolver sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:>
           let simCtx = simState ^. LCSET.stateContext
           let model = simCtx ^. LCSET.cruciblePersonality . C.personalityModel
           modelVals <- CM.evalModel ev model
-          void $ SB.surveyorState sconf ng simState Nothing (Just (C.ModelView modelVals))
+          let mv = C.ModelView modelVals
+          void $ SB.surveyorState sconf ng simState (SC.SimModelView mv)
         _ -> return ret
 
 checkEntryPoint :: ( CLO.ArchOk arch

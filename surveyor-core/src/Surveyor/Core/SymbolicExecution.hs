@@ -51,11 +51,15 @@ module Surveyor.Core.SymbolicExecution (
   configuringSymbolicExecution,
   initializingSymbolicExecution,
   -- * Cleanup
-  cleanupSymbolicExecutionState
+  cleanupSymbolicExecutionState,
+  -- * Simulation data
+  SimulationData(..),
+  breakpointP,
+  modelViewP
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )
-import           Control.Lens ( (^.) )
+import           Control.Lens ( (^.), (^?) )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Control.Monad.Catch as CMC
@@ -109,6 +113,7 @@ import qualified Surveyor.Core.Panic as SCP
 
 import           Surveyor.Core.SymbolicExecution.Config
 import           Surveyor.Core.SymbolicExecution.State
+import           Surveyor.Core.SymbolicExecution.Simulation
 
 -- Setup of the symbolic execution engine (parameters and globals)
 
@@ -187,10 +192,9 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                => PN.NonceGenerator IO s
                -> SymbolicState arch s sym init reg
                -> CSET.SimState p sym ext rtp f a
-               -> Maybe (SCB.Breakpoint sym)
-               -> Maybe (CT.ModelView)
+               -> SimulationData sym
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState ng surveyorSymState crucSimState mbp mmv =
+suspendedState ng surveyorSymState crucSimState simData =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
     LCSC.OF {} ->
@@ -235,6 +239,9 @@ suspendedState ng surveyorSymState crucSimState mbp mmv =
           return (Suspended symNonce st)
 
   where
+    mbp = simData ^? breakpointP
+    mmv = simData ^? modelViewP
+
     bpName :: T.Text
     bpName = fromMaybe "<Unnamed Breakpoint>" (SCB.breakpointName =<< mbp)
     topFrame = crucSimState ^. CSET.stateTree . CSET.actFrame

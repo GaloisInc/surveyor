@@ -38,6 +38,7 @@ library
                        Surveyor.Core.SymbolicExecution
                        Surveyor.Core.SymbolicExecution.Config
                        Surveyor.Core.SymbolicExecution.Session
+                       Surveyor.Core.SymbolicExecution.Simulation
                        Surveyor.Core.SymbolicExecution.State
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events
