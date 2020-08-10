@@ -71,6 +71,7 @@ allCommands =
   , C.SomeCommand resetInstructionSelectionC
   , C.SomeCommand contextBackC
   , C.SomeCommand contextForwardC
+  , C.SomeCommand stepExecutionC
   , C.SomeCommand initializeSymbolicExecutionC
   , C.SomeCommand beginSymbolicExecutionSetupC
   , C.SomeCommand startSymbolicExecutionC
@@ -203,6 +204,16 @@ contextForwardC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.ContextForward
+
+stepExecutionC :: forall s st . Command s st '[]
+stepExecutionC =
+  C.Command "step-execution" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Step execution from the current breakpoint"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil ->
+      SCE.emitEvent customEventChan SCE.StepExecution
+
 
 setLogFileC :: forall s st . Command s st '[AR.FilePathType]
 setLogFileC =
