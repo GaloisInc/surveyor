@@ -22,6 +22,7 @@ import qualified Lang.Crucible.Simulator.EvalStmt as CSE
 import qualified Lang.Crucible.Simulator.RegMap as CSRM
 import qualified Lang.Crucible.Simulator.Operations as CSO
 import qualified Lang.Crucible.Simulator.CallFrame as CSCF
+import qualified Lang.Crucible.Types as CT
 
 import qualified What4.Config as WC
 import qualified What4.Interface as WI
@@ -55,18 +56,35 @@ handleDebuggingEvent s0 evt =
               let topFrame = simState0 ^. CSET.stateTree . CSET.actFrame
               let simFrame = topFrame ^. CSET.gpValue
 
-              simulatorState1 <- case vff of
-                CSET.VFFEnd vfv@(CSET.VFVCall _ cf _) ->
-                  case CSCF.frameReturnType (CSCF.fromCallFrame cf) of
-                    CCC.UnitRepr -> do
-                      let cont = CSO.performReturn "debug_assert" vfv (CSRM.RegEntry CCC.UnitRepr ())
+              case vff of
+                CSET.VFFEnd vfv@(CSET.VFVCall ctx (CSCF.MF frm) (CSET.ReturnToCrucible rtp stmts)) ->
+                  case rtp of
+                    CT.UnitRepr -> do
+                      let unit = CSRM.RegEntry CT.UnitRepr ()
+                      let cont = CSO.performReturn "debug_assert" vfv unit
                       res <- CSE.advanceCrucibleState cont simState0
                       case CSET.execStateSimState res of
-                        Just (CSET.SomeSimState simState1) ->
-                          return $! SymEx.Suspended symNonce (suspSt { SymEx.suspendedSimState = simState1 })
-                        Nothing -> return exst
+                        Nothing -> error "Failed to execute crucible step"
+                        Just (CSET.SomeSimState simState1) -> do
+                          let st' = SymEx.Suspended symNonce (suspSt { SymEx.suspendedSimState = simState1 })
+                          return $! SCS.State (s0 & SCS.lArchState . _Just . SCS.symExStateL
+                                                  %~ SymEx.mergeSessionState (SymEx.singleSessionState st'))
+{-
+              simulatorState1 <- case vff of
+                CSET.VFFEnd vfv@(CSET.VFVCall _ cf _) ->
+                  case cf of
+                    CSCF.MF crucCallFrame ->
+                      case CSCF.frameReturnType crucCallFrame of
+                        CCC.UnitRepr -> do
+                          let cont = CSO.performReturn "debug_assert" vfv (CSRM.RegEntry CCC.UnitRepr ())
+                          res <- CSE.advanceCrucibleState cont simState0
+                          case CSET.execStateSimState res of
+                            Just (CSET.SomeSimState simState1) ->
+                              return $! SymEx.Suspended symNonce (suspSt { SymEx.suspendedSimState = simState1 })
+                            Nothing -> return exst
 
 
               return $! SCS.State (s0 & SCS.lArchState . _Just . SCS.symExStateL
                                    %~ SymEx.mergeSessionState (SymEx.singleSessionState simulatorState1))
+-}
       | otherwise -> return $! SCS.State s0
