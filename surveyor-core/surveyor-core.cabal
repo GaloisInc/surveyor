@@ -35,6 +35,7 @@ library
                        Surveyor.Core.Handlers.Info
                        Surveyor.Core.Handlers.Logging
                        Surveyor.Core.Handlers.Context
+                       Surveyor.Core.Handlers.Debugging
                        Surveyor.Core.SymbolicExecution
                        Surveyor.Core.SymbolicExecution.Config
                        Surveyor.Core.SymbolicExecution.Session
