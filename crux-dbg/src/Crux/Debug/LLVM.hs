@@ -20,7 +20,6 @@ import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.BitVector.Sized as BV
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
-import qualified Data.IORef as IOR
 import qualified Data.LLVM.BitCode as DLB
 import qualified Data.Map.Strict as Map
 import           Data.Maybe ( fromMaybe )
@@ -143,9 +142,8 @@ simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _
   let llvmCtx = translation ^. CLT.transContext
 
   CLT.llvmPtrWidth llvmCtx $ \ptrW -> CLM.withPtrWidth ptrW $ do
-    bbMapRef <- IOR.newIORef Map.empty
+    let ?recordLLVMAnnotation = \_ _ -> return ()
     let ?lc = llvmCtx ^. CLT.llvmTypeCtx
-    let ?badBehaviorMap = bbMapRef
     let outHdl = ?outputConfig ^. CL.outputHandle
     let simCtx = setupSimCtx outHdl halloc sym (CLT.llvmMemVar llvmCtx) (CDC.memoryOptions dbgOpts) llvmCtx
     mem <- CLG.populateAllGlobals sym (CLT.globalInitMap translation) =<< CLG.initializeAllMemory sym llvmCtx llvmModule
@@ -162,7 +160,9 @@ simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _
                 LCS.runOverrideSim LCT.UnitRepr $ do
                   registerFunctions cruxOpts debuggerConfig llvmModule translation
                   checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
-          return (C.RunnableStateWithExtensions initSt [debugger])
+          -- FIXME: We can use this callback to collect live explanations in terms of solver state
+          let handleExplanation = \_ _ -> return mempty
+          return (C.RunnableStateWithExtensions initSt [debugger], handleExplanation)
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
 
 do_breakpoint :: (wptr ~ CLE.ArchWidth arch)
@@ -199,7 +199,9 @@ parseSolverOffline cruxOpts =
   case CCS.parseSolverConfig cruxOpts of
     Right (CCS.SingleOnlineSolver _onSolver) -> CCS.SolverOnline _onSolver
     Right (CCS.OnlineSolverWithOfflineGoals _ _offSolver) -> _offSolver
-    Right (CCS.OnlyOfflineSolver _offSolver) -> _offSolver
+    -- FIXME: This type should really be a non-empty list
+    Right (CCS.OnlyOfflineSolvers []) -> error "No solvers specified"
+    Right (CCS.OnlyOfflineSolvers (offSolver:_)) -> offSolver
     Right (CCS.OnlineSolverWithSeparateOnlineGoals _ _onSolver) -> CCS.SolverOnline _onSolver
     Left _ -> CCS.SolverOnline CCS.Yices
 

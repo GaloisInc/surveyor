@@ -31,7 +31,6 @@ import qualified Crux.Types as CruxT
 import qualified Data.BitVector.Sized as DBS
 import qualified Data.ByteString as BS
 import qualified Data.Foldable as F
-import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as M
 import           Data.Maybe ( catMaybes, fromMaybe, mapMaybe )
 import           Data.Parameterized.Classes
@@ -66,7 +65,7 @@ import           System.FilePath ( (</>) )
 import qualified System.FilePath as SFP
 import qualified Text.LLVM as LL
 import qualified Text.LLVM.PP as LL
-import qualified Text.PrettyPrint as PP
+import qualified Text.PrettyPrint.HughesPJ as TPP
 import           Text.Printf ( printf )
 import qualified What4.Expr.Builder as WEB
 import qualified What4.Interface as WI
@@ -420,8 +419,7 @@ llvmSymbolicInitializers :: (CB.IsSymInterface sym)
                                , LLVMPersonality sym
                                )
 llvmSymbolicInitializers (AnalysisResult (LLVMAnalysisResult llr) _) _sym = do
-  badBehaviorMap <- IOR.newIORef mempty
-  let ?badBehaviorMap = badBehaviorMap
+  let ?recordLLVMAnnotation = \_ _ -> return ()
   let ?ptrWidth = WI.knownNat @64
   let intrinsics = LLI.llvmIntrinsicTypes
   let funcBindings = CFH.emptyHandleMap
@@ -537,9 +535,10 @@ llvmExtensionStmtOperands :: AC.NonceCache s ctx
                           -> IO [Operand (AC.Crucible LLVM) s]
 llvmExtensionStmtOperands cache ng s =
   case s of
-    LE.LLVM_PushFrame gv -> do
+    LE.LLVM_PushFrame description gv -> do
+      n0 <- NG.freshNonce ng
       n1 <- NG.freshNonce ng
-      return [ AC.CrucibleOperand n1 (AC.GlobalVar gv) ]
+      return [ AC.CrucibleOperand n0 (AC.Syntax description), AC.CrucibleOperand n1 (AC.GlobalVar gv) ]
     LE.LLVM_PopFrame gv -> do
       n1 <- NG.freshNonce ng
       return [ AC.CrucibleOperand n1 (AC.GlobalVar gv) ]
@@ -584,7 +583,7 @@ llvmExtensionStmtOperands cache ng s =
              , AC.toRegisterOperand cache r
              , AC.toExtensionOperand n2 (Bytes bytes)
              ]
-    LE.LLVM_LoadHandle gv r argReprs retRepr -> do
+    LE.LLVM_LoadHandle gv _llvmRetType r argReprs retRepr -> do
       n1 <- NG.freshNonce ng
       n2 <- NG.freshNonce ng
       n3 <- NG.freshNonce ng
@@ -751,15 +750,15 @@ instance NFData (Instruction LLVM s) where
 instance NFData (Operand LLVM s) where
   rnf (LLVMOperand o) = o `seq` ()
 
-ppOperand :: (?config :: LL.Config) => LLVMOperand' -> PP.Doc
+ppOperand :: (?config :: LL.Config) => LLVMOperand' -> TPP.Doc
 ppOperand op =
   case op of
     Value v -> LL.ppValue v
     TypedValue tv -> LL.ppTyped LL.ppValue tv
     Type ty -> LL.ppType ty
-    ConstantInt i -> PP.int i
+    ConstantInt i -> TPP.int i
     BlockLabel l -> LL.ppLabel l
-    ConstantString s -> PP.text s
+    ConstantString s -> TPP.text s
     SwitchTarget t (val, target) -> LL.ppSwitchEntry t (val, target)
     Ordering ao -> LL.ppAtomicOrdering ao
     AtomicOp ao -> LL.ppAtomicOp ao
@@ -1060,8 +1059,7 @@ llvmLoadConcreteString simState repr rv =
               -- The pointer is NULL
               return Nothing
             Just False -> do
-              badBehaviorMap <- IOR.newIORef mempty
-              let ?badBehaviorMap = badBehaviorMap
+              let ?recordLLVMAnnotation = \_ _ -> return ()
               fmap decode <$> loadByByte mem id rv
     _ -> return Nothing
   where

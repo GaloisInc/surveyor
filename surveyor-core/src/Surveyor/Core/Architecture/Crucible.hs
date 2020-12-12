@@ -64,7 +64,7 @@ import qualified Lang.Crucible.CFG.Expr as C
 import qualified Lang.Crucible.FunctionHandle as CFH
 import           Numeric.Natural ( Natural )
 import qualified Renovate as R
-import qualified Text.PrettyPrint.ANSI.Leijen as PP
+import qualified Prettyprinter as PP
 import           Text.Printf ( printf )
 import qualified What4.FunctionName as WF
 import qualified What4.InterpretedFloatingPoint as WIF

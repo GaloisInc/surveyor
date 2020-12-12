@@ -23,6 +23,7 @@ import qualified Data.List.Split as L
 import           Data.Maybe ( catMaybes )
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
+import qualified Lumberjack as LJ
 import           System.FilePath ( takeExtension)
 
 import qualified SemMC.Architecture.PPC32.Opcodes as PPC32
@@ -138,13 +139,10 @@ asynchronouslyLoadElf ng customEventChan exePath = do
     -- throws without blocking the caller.
     worker <- A.async $ do
       bs <- BS.readFile exePath
-      case E.parseElf bs of
-        E.ElfHeaderError off msg ->
+      case E.decodeElfHeaderInfo bs of
+        Left (off, msg) ->
           SCE.emitEvent customEventChan (SCE.ErrorLoadingELFHeader off msg)
-        E.Elf32Res [] e32 -> loadElf ng customEventChan (E.Elf32 e32)
-        E.Elf64Res [] e64 -> loadElf ng customEventChan (E.Elf64 e64)
-        E.Elf32Res errs _ -> SCE.emitEvent customEventChan (SCE.ErrorLoadingELF errs)
-        E.Elf64Res errs _ -> SCE.emitEvent customEventChan (SCE.ErrorLoadingELF errs)
+        Right ehi -> loadElf ng customEventChan ehi
     C.putMVar mv worker
     eres <- A.waitCatch worker
     case eres of
@@ -159,7 +157,7 @@ asynchronouslyLoadElf ng customEventChan exePath = do
 -- across all of the streamed results for the same executable.  We need to
 -- generate the nonce under 'withElfConfig' so that we can capture the
 -- appropriate value of w.
-loadElf :: NG.NonceGenerator IO s -> C.Chan (SCE.Events s st) -> E.SomeElf E.Elf -> IO ()
+loadElf :: NG.NonceGenerator IO s -> C.Chan (SCE.Events s st) -> E.SomeElf E.ElfHeaderInfo -> IO ()
 loadElf ng customEventChan someElf = do
   -- FIXME: Make the float mode configurable
   sym <- SB.newSimpleBackend WEB.FloatRealRepr ng
@@ -187,5 +185,9 @@ loadElf ng customEventChan someElf = do
               ]
   R.withElfConfig someElf rcfgs $ \rc elf loadedBinary -> do
     hdlAlloc <- CFH.newHandleAllocator
-    (res, diags) <- R.analyzeElf rc hdlAlloc elf loadedBinary
+    -- FIXME: We can stream log messages to the console easily enough
+    (res, diags) <- R.analyzeElf nullLogger rc hdlAlloc elf loadedBinary
     SCE.emitEvent customEventChan (SCE.AnalysisFinished res diags)
+
+nullLogger :: LJ.LogAction IO msg
+nullLogger = LJ.LogAction $ \_ -> return ()

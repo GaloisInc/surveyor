@@ -44,7 +44,7 @@ import           Data.Word ( Word64 )
 import           Fmt ( (||+), (+|), (|+) )
 import qualified Fmt as Fmt
 import qualified Renovate as R
-import qualified Text.PrettyPrint.ANSI.Leijen as PP
+import qualified Prettyprinter as PP
 import           Text.Printf ( printf )
 import           Text.Read ( readMaybe )
 
@@ -232,8 +232,8 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
   opcode (MacawTermStmt stmt _) = macawTermStmtOpcode stmt
   prettyInstruction addr (MacawStmt stmt _ _) =
     case addr of
-      MacawAddress a -> T.pack (show (MC.ppStmt (\off -> PP.text (show (a + off))) stmt))
-      BlockNumber _ -> Fmt.fmt ("" +|MC.ppStmt (\off -> PP.text (show off)) stmt||+ "")
+      MacawAddress a -> T.pack (show (MC.ppStmt (\off -> PP.viaShow (a + off)) stmt))
+      BlockNumber _ -> Fmt.fmt ("" +|MC.ppStmt (\off -> PP.viaShow off) stmt||+ "")
       InstructionNumber i -> Fmt.fmt ("i" +|i|+ "")
   prettyInstruction _ (MacawInstructionStart _ _ stmt _) = T.pack (show stmt)
   prettyInstruction _ (MacawTermStmt stmt _) = T.pack (show stmt)
