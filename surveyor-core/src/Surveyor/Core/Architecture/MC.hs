@@ -5,10 +5,10 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeInType #-}
 {-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | Instantiations of the 'Architecture' class for machine code architectures
@@ -18,7 +18,6 @@ module Surveyor.Core.Architecture.MC (
   mkX86Result
   ) where
 
-import qualified Data.IORef as IOR
 import           GHC.TypeNats
 
 import           Control.DeepSeq ( NFData, rnf )
@@ -38,13 +37,11 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TE
-import qualified Data.Text.Prettyprint.Doc as PP
 import           Data.Word ( Word32, Word64 )
 import           Data.Void
-import qualified Fmt as Fmt
-import           Fmt ( (+|), (|+) )
 import           Numeric ( showHex )
-import qualified Text.PrettyPrint.HughesPJClass as HPJ
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 import           Text.Read ( readMaybe )
 
 import qualified Data.Macaw.BinaryLoader as MBL
@@ -122,32 +119,32 @@ macawExtensionOperandSelectable o =
 prettyMacawExtensionStmt :: MS.MacawStmtExtension arch f tp -> T.Text
 prettyMacawExtensionStmt s =
   case s of
-    MS.MacawReadMem {} -> "macaw:read-mem"
-    MS.MacawCondReadMem {} -> "macaw:cond-read-mem"
-    MS.MacawWriteMem {} -> "macaw:write-mem"
-    MS.MacawCondWriteMem {} -> "macaw:cond-write-mem"
-    MS.MacawGlobalPtr {} -> "macaw:global-ptr"
-    MS.MacawFreshSymbolic {} -> "macaw:fresh-symbolic"
-    MS.MacawLookupFunctionHandle {} -> "macaw:lookup-function-handle"
-    MS.MacawArchStmtExtension {} -> "macaw:arch-stmt-extension"
-    MS.MacawArchStateUpdate {} -> "macaw:arch-state-update"
-    MS.MacawInstructionStart {} -> "macaw:instruction-start"
-    MS.PtrEq {} -> "macaw:ptr-eq"
-    MS.PtrLeq {} -> "macaw:ptr-leq"
-    MS.PtrLt {} -> "macaw:ptr-lt"
-    MS.PtrMux {} -> "macaw:ptr-mux"
-    MS.PtrAdd {} -> "macaw:ptr-add"
-    MS.PtrSub {} -> "macaw:ptr-sub"
-    MS.PtrAnd {} -> "macaw:ptr-and"
+    MS.MacawReadMem {} -> T.pack "macaw:read-mem"
+    MS.MacawCondReadMem {} -> T.pack "macaw:cond-read-mem"
+    MS.MacawWriteMem {} -> T.pack "macaw:write-mem"
+    MS.MacawCondWriteMem {} -> T.pack "macaw:cond-write-mem"
+    MS.MacawGlobalPtr {} -> T.pack "macaw:global-ptr"
+    MS.MacawFreshSymbolic {} -> T.pack "macaw:fresh-symbolic"
+    MS.MacawLookupFunctionHandle {} -> T.pack "macaw:lookup-function-handle"
+    MS.MacawArchStmtExtension {} -> T.pack "macaw:arch-stmt-extension"
+    MS.MacawArchStateUpdate {} -> T.pack "macaw:arch-state-update"
+    MS.MacawInstructionStart {} -> T.pack "macaw:instruction-start"
+    MS.PtrEq {} -> T.pack "macaw:ptr-eq"
+    MS.PtrLeq {} -> T.pack "macaw:ptr-leq"
+    MS.PtrLt {} -> T.pack "macaw:ptr-lt"
+    MS.PtrMux {} -> T.pack "macaw:ptr-mux"
+    MS.PtrAdd {} -> T.pack "macaw:ptr-add"
+    MS.PtrSub {} -> T.pack "macaw:ptr-sub"
+    MS.PtrAnd {} -> T.pack "macaw:ptr-and"
 
 prettyMacawExtensionApp :: MS.MacawExprExtension arch f tp -> T.Text
 prettyMacawExtensionApp e =
   case e of
-    MS.MacawOverflows {} -> "macaw:overflows"
-    MS.PtrToBits {} -> "macaw:ptr-to-bits"
-    MS.BitsToPtr {} -> "macaw:bits-to-ptr"
-    MS.MacawNullPtr {} -> "macaw:nullptr"
-    MS.MacawBitcast {} -> "macaw:bitcast"
+    MS.MacawOverflows {} -> T.pack "macaw:overflows"
+    MS.PtrToBits {} -> T.pack "macaw:ptr-to-bits"
+    MS.BitsToPtr {} -> T.pack "macaw:bits-to-ptr"
+    MS.MacawNullPtr {} -> T.pack "macaw:nullptr"
+    MS.MacawBitcast {} -> T.pack "macaw:bitcast"
 
 data MacawOperand arch s where
   AddrRepr :: MM.AddrWidthRepr (MM.ArchAddrWidth arch) -> MacawOperand arch s
@@ -165,15 +162,18 @@ prettyMacawExtensionOperand :: (ShowF (MM.ArchReg arch), MM.MemWidth (MM.ArchAdd
                             -> T.Text
 prettyMacawExtensionOperand o =
   case o of
-    AddrRepr arep -> Fmt.fmt ("[" +| show arep |+ "]")
-    MemRepr mrep -> Fmt.fmt ("[" +| show mrep |+ "]")
-    MachineAddress addr -> T.pack (show addr)
-    MacawTypeRepr mrep -> Fmt.fmt ("[" +| show mrep |+ "]")
-    NatRepr mrep -> Fmt.fmt ("[" +| show mrep |+ "]")
-    MachineRegister r -> T.pack (showF r)
-    MacawOverflowOp oop -> T.pack (show oop)
-    Text t -> Fmt.fmt ("\"" +| t |+ "\"")
-    Offset off -> T.pack (show off)
+    AddrRepr arep -> asText (PP.brackets (PP.viaShow arep))
+    MemRepr mrep -> asText (PP.brackets (PP.viaShow mrep))
+    MachineAddress addr -> asText (PP.viaShow addr)
+    MacawTypeRepr mrep -> asText (PP.brackets (PP.viaShow mrep))
+    NatRepr mrep -> asText (PP.brackets (PP.viaShow mrep))
+    MachineRegister r -> asText (PP.pretty (showF r))
+    MacawOverflowOp oop -> asText (PP.viaShow oop)
+    Text t -> asText (PP.dquotes (PP.pretty t))
+    Offset off -> asText (PP.viaShow off)
+
+asText :: PP.Doc ann -> T.Text
+asText = PPT.renderStrict . PP.layoutCompact
 
 macawExtensionExprOperands :: (AC.CrucibleExtensionOperand arch ~ MacawOperand arch)
                            => AC.NonceCache s ctx
@@ -391,8 +391,8 @@ indexBinaryAnalysisResult addrCon bar = O.once idx
 -- * Unrecognized instructions
 mcSummarize :: BinaryAnalysisResult s o arch -> [(T.Text, T.Text)]
 mcSummarize bar =
-  [ ("Discovered Functions", T.pack (show (length (R.biFunctionEntries binfo))))
-  , ("Discovered Blocks", T.pack (show (length (R.biBlocks binfo))))
+  [ (T.pack "Discovered Functions", T.pack (show (length (R.biFunctionEntries binfo))))
+  , (T.pack "Discovered Blocks", T.pack (show (length (R.biBlocks binfo))))
   ]
   where
     binfo = rBlockInfo bar
@@ -459,7 +459,7 @@ mcFunctionBlocks toBlock bar concAddr =
     bi = rBlockInfo bar
     fb = R.biFunctions bi
 
-toInstPPC32 :: (PPC.Instruction PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC32)
+toInstPPC32 :: (R.Instruction PPC.PPC32 PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC32)
             -> (Address PPC.PPC32 s, Instruction PPC.PPC32 s)
 toInstPPC32 (i, addr) = (PPC32Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC32Instruction i)
@@ -472,7 +472,7 @@ toBlockPPC32 bar fh cb =
         , blockFunction = fh
         }
 
-toInstPPC64 :: (PPC.Instruction PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC64)
+toInstPPC64 :: (R.Instruction PPC.PPC64 PPC.OnlyEncoding (), R.ConcreteAddress PPC.PPC64)
             -> (Address PPC.PPC64 s, Instruction PPC.PPC64 s)
 toInstPPC64 (i, addr) = (PPC64Address (MM.absoluteAddr (R.absoluteAddress addr)),
                          PPC64Instruction i)
@@ -504,44 +504,47 @@ toInstX86 (i, addr) = (X86Address (MM.absoluteAddr (R.absoluteAddress addr)),
 ppcPrettyOperand :: (MM.MemWidth w) => MM.MemAddr w -> DPPC.Operand tp -> T.Text
 ppcPrettyOperand _addr op =
   case op of
-    DPPC.Abscondbrtarget off -> T.pack (show (HPJ.pPrint off))
-    DPPC.Absdirectbrtarget off -> T.pack (show (HPJ.pPrint off))
-    DPPC.Condbrtarget off -> T.pack (show (HPJ.pPrint off))
-    DPPC.Directbrtarget off -> T.pack (show (HPJ.pPrint off))
-    DPPC.Calltarget off -> T.pack (show (HPJ.pPrint off))
-    DPPC.Abscalltarget off -> T.pack (show (HPJ.pPrint off))
-    DPPC.Crbitm cr -> T.pack (show (HPJ.pPrint cr))
-    DPPC.Crbitrc cr -> T.pack (show (HPJ.pPrint cr))
-    DPPC.Crrc cr -> T.pack (show (HPJ.pPrint cr))
-    DPPC.Fprc fp -> T.pack (show (HPJ.pPrint fp))
-    DPPC.Gprc gp -> T.pack (show (HPJ.pPrint gp))
-    DPPC.Gprc_nor0 gp -> T.pack (show (HPJ.pPrint gp))
-    DPPC.I1imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.I32imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.S16imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.S16imm64 i -> T.pack (show (HPJ.pPrint i))
-    DPPC.S17imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.S17imm64 i -> T.pack (show (HPJ.pPrint i))
-    DPPC.S5imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U1imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U2imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U4imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U5imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U6imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U7imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U8imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U10imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U16imm i -> T.pack (show (HPJ.pPrint i))
-    DPPC.U16imm64 i -> T.pack (show (HPJ.pPrint i))
-    DPPC.Memrr m -> T.pack (show (HPJ.pPrint m))
-    DPPC.Memri m -> T.pack (show (HPJ.pPrint m))
-    DPPC.Memrix m -> T.pack (show (HPJ.pPrint m))
-    DPPC.Memrix16 m -> T.pack (show (HPJ.pPrint m))
-    DPPC.Vrrc vr -> T.pack (show (HPJ.pPrint vr))
-    DPPC.Vsrc vr -> T.pack (show (HPJ.pPrint vr))
+    DPPC.Abscondbrtarget off -> textViaShow off
+    DPPC.Absdirectbrtarget off -> textViaShow off
+    DPPC.Condbrtarget off -> textViaShow off
+    DPPC.Directbrtarget off -> textViaShow off
+    DPPC.Calltarget off -> textViaShow off
+    DPPC.Abscalltarget off -> textViaShow off
+    DPPC.Crbitm cr -> textViaShow cr
+    DPPC.Crbitrc cr -> textViaShow cr
+    DPPC.Crrc cr -> textViaShow cr
+    DPPC.Fprc fp -> textViaShow fp
+    DPPC.Gprc gp -> textViaShow gp
+    DPPC.Gprc_nor0 gp -> textViaShow gp
+    DPPC.I1imm i -> textViaShow i
+    DPPC.I32imm i -> textViaShow i
+    DPPC.S16imm i -> textViaShow i
+    DPPC.S16imm64 i -> textViaShow i
+    DPPC.S17imm i -> textViaShow i
+    DPPC.S17imm64 i -> textViaShow i
+    DPPC.S5imm i -> textViaShow i
+    DPPC.U1imm i -> textViaShow i
+    DPPC.U2imm i -> textViaShow i
+    DPPC.U4imm i -> textViaShow i
+    DPPC.U5imm i -> textViaShow i
+    DPPC.U6imm i -> textViaShow i
+    DPPC.U7imm i -> textViaShow i
+    DPPC.U8imm i -> textViaShow i
+    DPPC.U10imm i -> textViaShow i
+    DPPC.U16imm i -> textViaShow i
+    DPPC.U16imm64 i -> textViaShow i
+    DPPC.Memrr m -> textViaShow m
+    DPPC.Memri m -> textViaShow m
+    DPPC.Memrix m -> textViaShow m
+    DPPC.Memrix16 m -> textViaShow m
+    DPPC.Vrrc vr -> textViaShow vr
+    DPPC.Vsrc vr -> textViaShow vr
+
+textViaShow :: (Show a) => a -> T.Text
+textViaShow = PPT.renderStrict . PP.layoutCompact . PP.viaShow
 
 instance IR PPC.PPC32 s where
-  data Instruction PPC.PPC32 s = PPC32Instruction !(PPC.Instruction PPC.OnlyEncoding ())
+  data Instruction PPC.PPC32 s = PPC32Instruction !(R.Instruction PPC.PPC32 PPC.OnlyEncoding ())
   data Operand PPC.PPC32 s = forall x . PPC32Operand !(DPPC.Operand x)
   data Opcode PPC.PPC32 s = forall x y . PPC32Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC32 s = PPC32Address !(MM.MemAddr 32)
@@ -717,7 +720,7 @@ instance NFData (Operand PPC.PPC32 s) where
   rnf (PPC32Operand _) = ()
 
 instance IR PPC.PPC64 s where
-  data Instruction PPC.PPC64 s = PPC64Instruction !(PPC.Instruction PPC.OnlyEncoding ())
+  data Instruction PPC.PPC64 s = PPC64Instruction !(R.Instruction PPC.PPC64 PPC.OnlyEncoding ())
   data Operand PPC.PPC64 s = forall x . PPC64Operand !(DPPC.Operand x)
   data Opcode PPC.PPC64 s = forall x y . PPC64Opcode !(DPPC.Opcode x y)
   data Address PPC.PPC64 s = PPC64Address !(MM.MemAddr 64)
@@ -941,8 +944,7 @@ mcSymbolicInitializers _ares sym = do
   let intrinsics = CLLI.llvmIntrinsicTypes
   halloc <- CFH.newHandleAllocator
   let bindings = CFH.emptyHandleMap
-  badBehaviorMap <- IOR.newIORef mempty
-  let ?badBehaviorMap = badBehaviorMap
+  let ?recordLLVMAnnotation = \_ _ -> return ()
   MS.withArchEval archVals sym $ \archEvalFns -> do
     -- These values are not hard to get, but it will be easier after a branch is
     -- merged from macaw that redoes some of the details of memory access.
@@ -972,42 +974,42 @@ instance NFData (Operand X86.X86_64 s) where
   rnf (X86Operand _ _) = ()
 
 -- This whole bit is unfortunate - we can probably export ppValue from flexdis
-ppShowReg :: Show r => r -> HPJ.Doc
-ppShowReg r = HPJ.text (show r)
+ppShowReg :: Show r => r -> PP.Doc ann
+ppShowReg = PP.viaShow
 
 ppValue :: Word64 -- ^ Base address for offset printing.
                   -- This should be the address of the next instruction.
         -> FD.Value
-        -> HPJ.Doc
+        -> PP.Doc ann
 ppValue base v =
   case v of
-    FD.ControlReg   r    -> HPJ.text (show r)
-    FD.DebugReg     r    -> HPJ.text (show r)
-    FD.MMXReg       r    -> HPJ.text (show r)
-    FD.XMMReg       r    -> HPJ.text (show r)
-    FD.YMMReg       r    -> HPJ.text (show r)
-    FD.X87Register  n    -> HPJ.text "st" <> if n == 0 then HPJ.empty else HPJ.parens (HPJ.int n)
+    FD.ControlReg   r    -> PP.viaShow r
+    FD.DebugReg     r    -> PP.viaShow r
+    FD.MMXReg       r    -> PP.viaShow r
+    FD.XMMReg       r    -> PP.viaShow r
+    FD.YMMReg       r    -> PP.viaShow r
+    FD.X87Register  n    -> PP.pretty "st" <> if n == 0 then mempty else PP.parens (PP.pretty n)
     FD.SegmentValue r    -> ppShowReg    r
     -- do the "*" belong here or in ppAddrRef?
-    FD.FarPointer   addr -> HPJ.text "??FAR PTR??"            HPJ.<+> ppAddrRef    addr
+    FD.FarPointer   addr -> PP.pretty "??FAR PTR??"            PP.<+> ppAddrRef    addr
     FD.VoidMem      addr -> ppAddrRef addr
-    FD.Mem8         addr -> HPJ.text "BYTE PTR"    HPJ.<+> ppAddrRef addr
-    FD.Mem16        addr -> HPJ.text "WORD PTR"    HPJ.<+> ppAddrRef addr
-    FD.Mem32        addr -> HPJ.text "DWORD PTR"   HPJ.<+> ppAddrRef addr
-    FD.Mem64        addr -> HPJ.text "QWORD PTR"   HPJ.<+> ppAddrRef addr
-    FD.Mem128       addr -> HPJ.text "XMMWORD PTR" HPJ.<+> ppAddrRef addr
-    FD.Mem256       addr -> HPJ.text "YMMWORD PTR" HPJ.<+> ppAddrRef addr
-    FD.FPMem32      addr -> HPJ.text "DWORD PTR"   HPJ.<+> ppAddrRef addr
-    FD.FPMem64      addr -> HPJ.text "QWORD PTR"   HPJ.<+> ppAddrRef addr
-    FD.FPMem80      addr -> HPJ.text "TBYTE PTR"   HPJ.<+> ppAddrRef addr
+    FD.Mem8         addr -> PP.pretty "BYTE PTR"    PP.<+> ppAddrRef addr
+    FD.Mem16        addr -> PP.pretty "WORD PTR"    PP.<+> ppAddrRef addr
+    FD.Mem32        addr -> PP.pretty "DWORD PTR"   PP.<+> ppAddrRef addr
+    FD.Mem64        addr -> PP.pretty "QWORD PTR"   PP.<+> ppAddrRef addr
+    FD.Mem128       addr -> PP.pretty "XMMWORD PTR" PP.<+> ppAddrRef addr
+    FD.Mem256       addr -> PP.pretty "YMMWORD PTR" PP.<+> ppAddrRef addr
+    FD.FPMem32      addr -> PP.pretty "DWORD PTR"   PP.<+> ppAddrRef addr
+    FD.FPMem64      addr -> PP.pretty "QWORD PTR"   PP.<+> ppAddrRef addr
+    FD.FPMem80      addr -> PP.pretty "TBYTE PTR"   PP.<+> ppAddrRef addr
     FD.ByteImm      imm  -> ppImm imm
     FD.WordImm      imm  -> ppImm imm
     FD.DWordImm     (FD.Imm32Concrete imm)  -> ppImm imm
     FD.DWordImm     (FD.Imm32SymbolOffset sym off _signed) ->
-      HPJ.text (show sym) <> HPJ.text "+" <> ppImm off
+      PP.viaShow sym <> PP.pretty "+" <> ppImm off
     FD.QWordImm     (FD.UImm64Concrete imm)  -> ppImm imm
     FD.QWordImm     (FD.UImm64SymbolOffset symIdent off) ->
-      HPJ.text (show symIdent) <> HPJ.text"@" <> ppImm off
+      PP.viaShow symIdent <> PP.pretty "@" <> ppImm off
     FD.ByteSignedImm i8 -> ppImm i8
     FD.WordSignedImm i16 -> ppImm i16
     FD.DWordSignedImm i32 -> ppImm i32
@@ -1015,86 +1017,88 @@ ppValue base v =
     FD.WordReg      r    -> ppShowReg    r
     FD.DWordReg     r    -> ppShowReg    r
     FD.QWordReg     r    -> ppShowReg    r
-    FD.JumpOffset _ (FD.FixedOffset off)  -> HPJ.text (showHex (base+fromIntegral off) "")
+    FD.JumpOffset _ (FD.FixedOffset off)  -> ppHex (base+fromIntegral off)
     FD.JumpOffset _ (FD.RelativeOffset ioff sym off) ->
-      HPJ.text (show sym) <> HPJ.text "+" <> HPJ.int (fromIntegral off - fromIntegral (fromIntegral base + ioff))
+      PP.viaShow sym <> PP.pretty "+" <> PP.pretty (off - fromIntegral (fromIntegral base + ioff))
 
+ppHex :: (Integral a, Show a) => a -> PP.Doc ann
+ppHex i = PP.pretty (showHex i "")
 
-ppImm :: (Integral w, Show w) => w -> HPJ.Doc
-ppImm i | i >= 0 = HPJ.text "0x" <> HPJ.text (showHex i "")
+ppImm :: (Integral w, Show w) => w -> PP.Doc ann
+ppImm i | i >= 0 = PP.pretty "0x" <> ppHex i
           -- Print negation after converting to integer
           -- Recall that  "negate minBound = minBound" with types like Int16, Int32, Int64.
-        | otherwise = HPJ.text "-0x" <> HPJ.text (showHex (negate (toInteger i)) "")
+        | otherwise = PP.pretty "-0x" <> ppHex (negate (toInteger i))
 
-ppAddrRef :: FD.AddrRef -> HPJ.Doc
+ppAddrRef :: FD.AddrRef -> PP.Doc ann
 ppAddrRef addr =
   case addr of
     FD.Addr_32 seg base roff off ->
        case base of
          Just r | FD.isDefaultSeg32 seg r -> a
-                | seg == FD.FS -> HPJ.text (show seg) <> (HPJ.colon HPJ.<+> a)
-                | seg == FD.GS -> HPJ.text (show seg) <> (HPJ.colon HPJ.<+> a)
+                | seg == FD.FS -> PP.viaShow seg <> (PP.colon PP.<+> a)
+                | seg == FD.GS -> PP.viaShow seg <> (PP.colon PP.<+> a)
                 | otherwise -> a -- ((HPJ.text (show seg) <> colon) <+>)
          _ -> a
       where a = ppAddr base roff off
                                                           -- or rip? this is 32 bits ...
-    FD.IP_Offset_32 _seg off     -> HPJ.brackets $ HPJ.text "ip" <> appendDisplacement off
+    FD.IP_Offset_32 _seg off     -> PP.brackets $ PP.pretty "ip" <> appendDisplacement off
     FD.Offset_32 seg off         -> prefix seg off
     FD.Offset_64 seg off         -> prefix seg off
     FD.Addr_64 seg base roff off
-        | seg == FD.FS || seg == FD.GS -> HPJ.text (show seg) <> HPJ.colon <> a
+        | seg == FD.FS || seg == FD.GS -> PP.viaShow seg <> PP.colon <> a
         | isDef     -> a
         | otherwise -> a
       where a = ppAddr base roff off
             isDef = maybe False (FD.isDefaultSeg64 seg) base
 
-    FD.IP_Offset_64 _seg off -> HPJ.brackets $ HPJ.text "rip" <> appendDisplacement off
+    FD.IP_Offset_64 _seg off -> PP.brackets $ PP.pretty "rip" <> appendDisplacement off
   where
-    prefix seg off = ppShowReg seg <> HPJ.colon <> HPJ.text (show off)
+    prefix seg off = ppShowReg seg <> PP.colon <> PP.viaShow off
 
     ppAddr :: Show r
            => Maybe r -- Base value
            -> Maybe (Int, r) -- Relative offset
            -> FD.Displacement -- Offset
-           -> HPJ.Doc
+           -> PP.Doc ann
     ppAddr base roff off =
       case (base, roff) of
          (Nothing, Nothing)     -> prettyDisplacement off
          (Nothing, Just (n, r)) ->
-           HPJ.brackets (HPJ.text (show r) <> HPJ.text "*" <> HPJ.int n <> appendDisplacement off)
-         (Just r, Nothing)      -> HPJ.brackets $
-           HPJ.text (show r) <> appendDisplacement off
+           PP.brackets (PP.viaShow r <> PP.pretty "*" <> PP.pretty n <> appendDisplacement off)
+         (Just r, Nothing)      -> PP.brackets $
+           PP.viaShow r <> appendDisplacement off
          (Just r, Just (n, r')) ->
-           HPJ.brackets $
-             HPJ.text (show r) <> HPJ.text "+" <> HPJ.text (show r') <> HPJ.text "*" <> HPJ.int n <> appendDisplacement off
+           PP.brackets $
+             PP.viaShow r <> PP.pretty "+" <> PP.viaShow r' <> PP.pretty "*" <> PP.pretty n <> appendDisplacement off
 
-appendDisplacement :: FD.Displacement -> HPJ.Doc
-appendDisplacement FD.NoDisplacement = HPJ.text ""
+appendDisplacement :: FD.Displacement -> PP.Doc ann
+appendDisplacement FD.NoDisplacement = mempty
 appendDisplacement (FD.Disp32 (FD.Imm32Concrete x))
-  | x >  0    = HPJ.text ("+0x" ++ showHex x "")
-  | x == 0    = HPJ.text ""
-  | otherwise = HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int64)) "")
+  | x >  0    = PP.pretty "+0x" <> ppHex x
+  | x == 0    = mempty
+  | otherwise = PP.pretty "-0x" <> ppHex (negate (fromIntegral x :: Int64))
 appendDisplacement (FD.Disp32 off@(FD.Imm32SymbolOffset {})) =
-  HPJ.text ("Unsupported offset: " ++ show off)
+  PP.pretty ("Unsupported offset: " ++ show off)
 appendDisplacement (FD.Disp8 x)
-  | x >  0    = HPJ.text ("+0x" ++ showHex x "")
-  | x == 0    = HPJ.text ""
-  | otherwise = HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int16)) "")
+  | x >  0    = PP.pretty "+0x" <> ppHex x
+  | x == 0    = mempty
+  | otherwise = PP.pretty "-0x" <> ppHex (negate (fromIntegral x :: Int16))
 
-prettyDisplacement :: FD.Displacement -> HPJ.Doc
-prettyDisplacement FD.NoDisplacement = HPJ.text "0"
+prettyDisplacement :: FD.Displacement -> PP.Doc ann
+prettyDisplacement FD.NoDisplacement = PP.pretty "0"
 prettyDisplacement (FD.Disp32 (FD.Imm32Concrete x)) =
   if x >= 0 then
-    HPJ.text ("0x" ++ showHex x "")
+    PP.pretty "0x" <> ppHex x
    else
-    HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int64)) "")
+    PP.pretty "-0x" <> ppHex (negate (fromIntegral x :: Int64))
 prettyDisplacement (FD.Disp32 off@(FD.Imm32SymbolOffset {})) =
-  HPJ.text ("Unsupported offset: " ++ show off)
+  PP.pretty "Unsupported offset: " <> PP.viaShow off
 prettyDisplacement (FD.Disp8 x) =
   if x >= 0 then
-    HPJ.text ("0x" ++ showHex x "")
+    PP.pretty "0x" <> ppHex x
    else
-    HPJ.text ("-0x" ++ showHex (negate (fromIntegral x :: Int16)) "")
+    PP.pretty "-0x" <> ppHex (negate (fromIntegral x :: Int16))
 
 -- Symbolic execution support
 

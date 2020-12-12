@@ -3,6 +3,7 @@
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeInType #-}
 module Surveyor.Core.Loader.PPCConfig (
   ppcConfig
   ) where
@@ -45,7 +46,6 @@ ppcConfig :: forall sym w arch s fs st binFmt v
              , arch ~ SP.AnyPPC v
              , sym ~ SB.SimpleBackend s fs
              , R.InstructionAnnotation arch ~ RP.TargetAddress arch
-             , R.Instruction arch ~ RP.Instruction
              , A.Architecture arch s
              , KnownNat w
              , MS.SymArchConstraints arch

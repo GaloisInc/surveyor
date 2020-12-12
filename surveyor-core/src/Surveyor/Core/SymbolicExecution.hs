@@ -461,7 +461,7 @@ setupProfiling ref chan sid = do
   let profConf = CSP.ProfilingOptions { CSP.periodicProfileInterval = 0.1
                                       , CSP.periodicProfileAction = profileAction
                                       }
-  f <- CSP.profilingFeature profTab (Just profConf)
+  f <- CSP.profilingFeature profTab CSP.profilingEventFilter (Just profConf)
   m0 <- CSP.readMetrics profTab
   return (m0, f)
   where
@@ -558,7 +558,7 @@ withOnlineBackend :: forall fm s a
                   -> Solver
                   -> WEB.FloatModeRepr fm
                   -> T.Text
-                  -> (forall proxy solver sym . (sym ~ CBO.OnlineBackend s solver (WEB.Flags fm), WPO.OnlineSolver s solver, CB.IsSymInterface sym) => proxy solver -> sym -> IO a)
+                  -> (forall proxy solver sym . (sym ~ CBO.OnlineBackend s solver (WEB.Flags fm), WPO.OnlineSolver solver, CB.IsSymInterface sym) => proxy solver -> sym -> IO a)
                   -> IO a
 withOnlineBackend gen solver floatRep solverFilePath k = do
   let features = solverFeatures solver
@@ -569,7 +569,7 @@ withOnlineBackend gen solver floatRep solverFilePath k = do
       sym <- WEB.newExprBuilder floatRep st gen
       let proxy = Proxy @(SMT2.Writer WSC.CVC4)
       WC.extendConfig WSC.cvc4Options (WI.getConfiguration sym)
-      WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
+      WC.extendConfig (CBO.onlineBackendOptions st) (WI.getConfiguration sym)
 
       sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
       unless (T.null interactionFilePath) $ do
@@ -580,9 +580,9 @@ withOnlineBackend gen solver floatRep solverFilePath k = do
     Yices -> do
       st <- CBO.initialOnlineBackendState gen features
       sym <- WEB.newExprBuilder floatRep st gen
-      let proxy = Proxy @(WSY.Connection s)
+      let proxy = Proxy @WSY.Connection
       WC.extendConfig WSY.yicesOptions (WI.getConfiguration sym)
-      WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
+      WC.extendConfig (CBO.onlineBackendOptions st) (WI.getConfiguration sym)
 
       sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
       unless (T.null interactionFilePath) $ do
@@ -595,7 +595,7 @@ withOnlineBackend gen solver floatRep solverFilePath k = do
       sym <- WEB.newExprBuilder floatRep st gen
       let proxy = Proxy @(SMT2.Writer WSZ.Z3)
       WC.extendConfig WSZ.z3Options (WI.getConfiguration sym)
-      WC.extendConfig CBO.onlineBackendOptions (WI.getConfiguration sym)
+      WC.extendConfig (CBO.onlineBackendOptions st) (WI.getConfiguration sym)
 
       sifSetting <- WC.getOptionSetting CBO.solverInteractionFile (WI.getConfiguration sym)
       unless (T.null interactionFilePath) $ do
