@@ -181,6 +181,7 @@ module Surveyor.Core (
   HC.handleContextEvent,
   HI.handleInfoEvent,
   HL.handleLoggingEvent,
+  HD.handleDebuggingEvent,
   -- * Keymap
   K.Keymap,
   K.Key(..),
@@ -224,6 +225,7 @@ import qualified Surveyor.Core.Events as CE
 import qualified Surveyor.Core.Handlers.Context as HC
 import qualified Surveyor.Core.Handlers.Info as HI
 import qualified Surveyor.Core.Handlers.Logging as HL
+import qualified Surveyor.Core.Handlers.Debugging as HD
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.Loader as CL

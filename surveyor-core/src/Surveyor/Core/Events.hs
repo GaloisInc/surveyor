@@ -13,6 +13,7 @@ module Surveyor.Core.Events (
   InfoEvent(..),
   SymbolicExecutionEvent(..),
   ContextEvent(..),
+  DebuggingEvent(..),
   ToEvent(..),
   emitEvent
   ) where
@@ -131,6 +132,10 @@ data ContextEvent s st where
   SelectPreviousOperand :: PN.Nonce s (arch :: Type) -> ContextEvent s st
   ResetInstructionSelection :: PN.Nonce s (arch :: Type) -> ContextEvent s st
 
+-- | Events relating to the debugger
+data DebuggingEvent s st where
+  StepExecution :: DebuggingEvent s st
+
 type family EventExtension (st :: Type -> Type -> Type) :: Type -> (Type -> Type -> Type) -> Type
 
 -- | All of the events supported by Surveyor (with extensions for UI-specific events)
@@ -140,6 +145,7 @@ data Events s st where
   SymbolicExecutionEvent :: SymbolicExecutionEvent s st -> Events s st
   InfoEvent :: InfoEvent s st -> Events s st
   ContextEvent :: ContextEvent s st -> Events s st
+  DebuggingEvent :: DebuggingEvent s st -> Events s st
 
   -- | Apply an arbitrary state update based on some value that has been computed
   -- asynchronously (to avoid blocking the event loop with an expensive
@@ -162,6 +168,9 @@ instance ToEvent s st Events where
 
 instance ToEvent s st ContextEvent where
   toEvent = ContextEvent
+
+instance ToEvent s st DebuggingEvent where
+  toEvent = DebuggingEvent
 
 instance ToEvent s st LoggingEvent where
   toEvent = LoggingEvent

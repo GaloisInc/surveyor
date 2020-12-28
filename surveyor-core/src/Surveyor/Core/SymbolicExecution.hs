@@ -55,7 +55,8 @@ module Surveyor.Core.SymbolicExecution (
   -- * Simulation data
   SimulationData(..),
   breakpointP,
-  modelViewP
+  modelViewP,
+  setupProfiling
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )

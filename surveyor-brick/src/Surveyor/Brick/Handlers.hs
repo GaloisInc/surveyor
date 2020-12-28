@@ -138,6 +138,9 @@ handleCustomEvent s0 evt =
     C.ContextEvent ce -> do
       s1 <- C.handleContextEvent s0 ce
       B.continue s1
+    C.DebuggingEvent de -> do
+      s1 <- C.handleDebuggingEvent s0 de
+      B.continue s1
     C.ExtensionEvent ee -> handleExtensionEvent s0 ee
 
     -- We discard async state updates if the type of the state has changed in
