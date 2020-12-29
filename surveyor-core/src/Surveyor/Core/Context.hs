@@ -195,7 +195,7 @@ makeContext :: forall arch s ir
             -> CA.FunctionHandle arch s
             -> IR.IRRepr arch ir
             -> CA.Block ir s
-            -> IO (Context arch s, SE.SessionState arch s)
+            -> IO (Context arch s, SE.SymbolicExecutionState arch s SE.Config)
 makeContext ng tcache ares fh irrepr b =
   case irrepr of
     IR.BaseRepr -> do
@@ -229,7 +229,7 @@ makeContext ng tcache ares fh irrepr b =
                         , cBaseFunction = fh
                         , cSymExecSessionID = SE.symbolicSessionID ses0
                         }
-      return (ctx, SE.singleSessionState ses0)
+      return (ctx, ses0)
     _ -> do
       ses0 <- SE.initialSymbolicExecutionState ng
       bs <- makeAlternativeBlockState b irrepr
@@ -239,7 +239,7 @@ makeContext ng tcache ares fh irrepr b =
                         , cBaseFunction = fh
                         , cSymExecSessionID = SE.symbolicSessionID ses0
                         }
-      return (ctx, SE.singleSessionState ses0)
+      return (ctx, ses0)
 
 makeFunctionState :: (CA.Architecture arch s, CA.ArchConstraints ir s)
                   => TC.TranslationCache arch s

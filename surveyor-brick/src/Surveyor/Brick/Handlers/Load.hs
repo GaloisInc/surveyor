@@ -10,6 +10,7 @@ import qualified Brick as B
 import           Control.Lens ( (&), (^.), (.~), (%~), _Just )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Foldable as F
+import qualified Data.Map.Strict as Map
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Map as MapF
 import           Data.Parameterized.Some ( Some(..) )
@@ -123,7 +124,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              defFunc : _ -> do
                let pushContext (newContext, sessState) oldState =
                      oldState & C.lArchState . _Just . C.contextL %~ C.pushContext newContext
-                              & C.lArchState . _Just . C.symExStateL %~ C.mergeSessionState sessState
+                              & C.lArchState . _Just . C.symExStateL %~ C.updateSessionState sessState
                C.asynchronously (C.archNonce ares) (C.sEmitEvent s0) pushContext $ do
                  case C.functionBlocks ares defFunc of
                    b0 : _ -> do
@@ -178,8 +179,8 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                                        , SBE.sBlockViewers = MapF.fromList blockViewers
                                                        , SBE.sFunctionViewer = MapF.fromList funcViewers
                                                        , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                                       , SBE.sSymbolicExecutionManager =
-                                                         SEM.symbolicExecutionManager (Some (C.Configuring ses))
+                                                       , SBE.sSymbolicExecutionState =
+                                                         Map.singleton (ses ^. C.sessionID) (SEM.symbolicExecutionManager (Some (C.Configuring ses)))
                                                        }
                         return C.ArchState { C.sAnalysisResult = ares
                                            , C.sUIState = uiState

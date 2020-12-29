@@ -37,5 +37,5 @@ asText = T.pack . show . I.runIdentity
 -- Currently, it has no interaction and is read-only
 handleSymbolicExecutionMonitorEvent :: B.BrickEvent Names e
                                     -> C.SymbolicExecutionState arch s C.Execute
-                                    -> B.EventM Names (C.SymbolicExecutionState arch s C.Execute)
-handleSymbolicExecutionMonitorEvent _evt st = return st
+                                    -> B.EventM Names ()
+handleSymbolicExecutionMonitorEvent _evt _st = return ()

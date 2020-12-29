@@ -14,6 +14,7 @@ module Surveyor.Core.Logging (
   CLM.Severity(..),
   CLM.LogMessage(..),
   CLM.msgWith,
+  CLM.msgWithContext,
   CLM.Timestamped,
   CLM.Timestamp,
   CLM.logTime,

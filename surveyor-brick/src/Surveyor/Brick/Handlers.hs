@@ -23,17 +23,19 @@ module Surveyor.Brick.Handlers (
   SBE.functionSelectorG,
   SBE.functionViewerG,
   SBE.minibufferG,
-  SBE.symbolicExecutionManagerG
+  SBE.symbolicExecutionStateG
   ) where
 
 import qualified Brick as B
 import           Control.Lens ( (&), (^.), (.~), (%~), (^?), _Just )
+import qualified Control.Lens as L
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Control.NF as NF
 import qualified Data.Foldable as F
+import qualified Data.Map.Strict as Map
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.List as PL
-import           Data.Parameterized.Some ( viewSome )
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Graphics.Vty as V
 
 import           Prelude
@@ -111,12 +113,13 @@ handleVtyEvent s0@(C.State s) evt
           let s' = s & C.lArchState . _Just . C.contextL .~ cstk'
           B.continue $! C.State s'
     C.SomeUIMode C.SymbolicExecutionManager
-      | Just archState <- s ^. C.lArchState -> do
-          let manager0 = archState ^. C.lUIState . SBE.symbolicExecutionManagerL
-          manager1 <- SEM.handleSymbolicExecutionManagerEvent (B.VtyEvent evt) manager0
-          let st1 = SEM.symbolicExecutionManagerState manager1
-          let s' = s & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionManagerL .~ manager1
-                     & C.lArchState . _Just . C.symExStateL %~ C.mergeSessionState (viewSome C.singleSessionState st1)
+      | Just archState <- s ^. C.lArchState
+      , Just sessionID <- archState ^? C.contextL . C.currentContext . C.symExecSessionIDL
+      , Just sessions <- archState ^? C.symExStateL
+      , Just (Some symExState) <- C.lookupSessionState sessions sessionID
+      , Just manager0 <- archState ^. C.lUIState . SBE.symbolicExecutionStateL . L.at sessionID -> do
+          manager1 <- SEM.handleSymbolicExecutionManagerEvent s (B.VtyEvent evt) manager0 symExState
+          let s' = s & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionStateL %~ Map.insert sessionID manager1
           B.continue $! C.State s'
     C.SomeUIMode _m -> B.continue s0
 
@@ -128,7 +131,12 @@ handleCustomEvent :: (C.Architecture arch s)
 handleCustomEvent s0 evt =
   case evt of
     C.LoadEvent le -> handleLoadEvent s0 le
-    C.SymbolicExecutionEvent se -> handleSymbolicExecutionEvent s0 se
+    C.SymbolicExecutionEvent se -> do
+      -- Delegate to the core handler, then add a hook to do any special
+      -- handling required to keep the UI in sync (using the brick UI specific
+      -- handler)
+      C.State s1 <- C.handleSymbolicExecutionEvent s0 se
+      handleSymbolicExecutionEvent s1 se
     C.LoggingEvent le -> do
       s1 <- C.handleLoggingEvent s0 le
       B.continue s1

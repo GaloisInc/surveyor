@@ -55,5 +55,5 @@ renderExecResult _ eres =
 
 handleSymbolicExecutionInspectorEvent :: B.BrickEvent Names e
                                       -> C.SymbolicExecutionState arch s C.Inspect
-                                      -> B.EventM Names (C.SymbolicExecutionState arch s C.Inspect)
-handleSymbolicExecutionInspectorEvent _evt st = return st
+                                      -> B.EventM Names ()
+handleSymbolicExecutionInspectorEvent _evt _st = return ()
