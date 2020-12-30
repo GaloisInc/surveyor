@@ -118,7 +118,7 @@ module Surveyor.Core (
   SymEx.lookupSessionState,
   SymEx.emptySessionState,
   SymEx.singleSessionState,
-  SymEx.mergeSessionState,
+  SymEx.updateSessionState,
   SymEx.updateSessionMetrics,
   SymEx.SymbolicExecutionState(..),
   SymEx.SimulationData(..),
@@ -181,6 +181,8 @@ module Surveyor.Core (
   HC.handleContextEvent,
   HI.handleInfoEvent,
   HL.handleLoggingEvent,
+  HD.handleDebuggingEvent,
+  HS.handleSymbolicExecutionEvent,
   -- * Keymap
   K.Keymap,
   K.Key(..),
@@ -204,6 +206,7 @@ module Surveyor.Core (
   SCL.Severity(..),
   SCL.LogMessage(..),
   SCL.msgWith,
+  SCL.msgWithContext,
   SCL.Timestamped,
   SCL.Timestamp,
   SCL.timestamp,
@@ -224,6 +227,8 @@ import qualified Surveyor.Core.Events as CE
 import qualified Surveyor.Core.Handlers.Context as HC
 import qualified Surveyor.Core.Handlers.Info as HI
 import qualified Surveyor.Core.Handlers.Logging as HL
+import qualified Surveyor.Core.Handlers.Debugging as HD
+import qualified Surveyor.Core.Handlers.SymbolicExecution as HS
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.Loader as CL

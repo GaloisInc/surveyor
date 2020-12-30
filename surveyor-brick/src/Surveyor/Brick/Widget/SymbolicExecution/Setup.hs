@@ -28,5 +28,5 @@ renderSymbolicExecutionSetup (C.Initializing st) =
 
 handleSymbolicExecutionSetupEvent :: B.BrickEvent Names e
                                   -> C.SymbolicExecutionState arch s C.SetupArgs
-                                  -> B.EventM Names (C.SymbolicExecutionState arch s C.SetupArgs)
-handleSymbolicExecutionSetupEvent _ s = return s
+                                  -> B.EventM Names ()
+handleSymbolicExecutionSetupEvent _ _ = return ()

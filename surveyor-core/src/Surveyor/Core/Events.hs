@@ -13,6 +13,7 @@ module Surveyor.Core.Events (
   InfoEvent(..),
   SymbolicExecutionEvent(..),
   ContextEvent(..),
+  DebuggingEvent(..),
   ToEvent(..),
   emitEvent
   ) where
@@ -24,10 +25,12 @@ import qualified Data.Functor.Identity as I
 import           Data.Int ( Int64 )
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.Nonce as PN
+import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.Simulator.Profiling as CSP
+import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified What4.BaseTypes as WT
 
 import qualified Renovate as R
@@ -109,6 +112,18 @@ data SymbolicExecutionEvent s st where
   InitializeValueNamePrompt :: PN.Nonce s (arch :: Type) -> T.Text -> SymbolicExecutionEvent s st
   -- | Update the state with the name for a value
   NameValue :: PN.Nonce s (tp :: WT.BaseType) -> T.Text -> SymbolicExecutionEvent s st
+  -- | Update a pre-existing symbolic execution state
+  --
+  -- While this could be accomplished with asynchronous state update events,
+  -- splitting these changes out gives frontends a chance to process the event
+  -- and update UI elements as-needed.
+  UpdateSymbolicExecutionState :: PN.Nonce s arch -> SES.SymbolicExecutionState arch s k -> SymbolicExecutionEvent s st
+  -- | Set the "current" value in the symbolic execution context (for suspended
+  -- symbolic execution states)
+  --
+  -- The current value is used for a few commands.  The frontends can provide
+  -- different mechanisms for updating this value.
+  SetCurrentSymbolicExecutionValue :: PN.Nonce s (arch :: Type) -> PN.Nonce s (sym :: Type) -> CSS.SessionID s -> Maybe (Some (LMCR.RegEntry sym)) -> SymbolicExecutionEvent s st
 
 -- | Events that manipulate the current context or context stack
 data ContextEvent s st where
@@ -131,6 +146,10 @@ data ContextEvent s st where
   SelectPreviousOperand :: PN.Nonce s (arch :: Type) -> ContextEvent s st
   ResetInstructionSelection :: PN.Nonce s (arch :: Type) -> ContextEvent s st
 
+-- | Events relating to the debugger
+data DebuggingEvent s st where
+  StepExecution :: DebuggingEvent s st
+
 type family EventExtension (st :: Type -> Type -> Type) :: Type -> (Type -> Type -> Type) -> Type
 
 -- | All of the events supported by Surveyor (with extensions for UI-specific events)
@@ -140,6 +159,7 @@ data Events s st where
   SymbolicExecutionEvent :: SymbolicExecutionEvent s st -> Events s st
   InfoEvent :: InfoEvent s st -> Events s st
   ContextEvent :: ContextEvent s st -> Events s st
+  DebuggingEvent :: DebuggingEvent s st -> Events s st
 
   -- | Apply an arbitrary state update based on some value that has been computed
   -- asynchronously (to avoid blocking the event loop with an expensive
@@ -162,6 +182,9 @@ instance ToEvent s st Events where
 
 instance ToEvent s st ContextEvent where
   toEvent = ContextEvent
+
+instance ToEvent s st DebuggingEvent where
+  toEvent = DebuggingEvent
 
 instance ToEvent s st LoggingEvent where
   toEvent = LoggingEvent

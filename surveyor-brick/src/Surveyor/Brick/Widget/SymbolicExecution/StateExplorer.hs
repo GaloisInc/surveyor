@@ -16,6 +16,7 @@ module Surveyor.Brick.Widget.SymbolicExecution.StateExplorer (
 import qualified Brick as B
 import           Control.Lens ( (^.) )
 import qualified Control.Lens as L
+import           Control.Monad.IO.Class ( liftIO )
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Nonce as PN
@@ -76,10 +77,11 @@ stateExplorer (C.Suspended symNonce suspSt) =
 -- Eventually, this should provide some mechanisms for deeply inspecting the
 -- state (including arch-specific inspection of memory).
 renderSymbolicExecutionStateExplorer :: forall arch s e
-                                      . (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
+                                      . C.SymbolicExecutionState arch s C.Suspend
+                                     -> StateExplorer arch s e
                                      -> C.ValueNameMap s
                                      -> B.Widget Names
-renderSymbolicExecutionStateExplorer (C.Suspended _symNonce1 suspSt, StateExplorer _symNonce2 csv) valNames =
+renderSymbolicExecutionStateExplorer (C.Suspended _symNonce1 suspSt) (StateExplorer _symNonce2 csv) valNames =
   case C.suspendedCallFrame suspSt of
     cf@LCSC.CallFrame { LCSC._frameCFG = fcfg } ->
       B.vBox $ [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
@@ -96,13 +98,22 @@ renderSymbolicExecutionStateExplorer (C.Suspended _symNonce1 suspSt, StateExplor
 --
 -- This handles changing focus between the two sub-widgets via tab.  Beyond
 -- that, it delegates all events to the currently focused sub-widget.
-handleSymbolicExecutionStateExplorerEvent :: B.BrickEvent Names e
-                                          -> (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
-                                          -> B.EventM Names (C.SymbolicExecutionState arch s C.Suspend, StateExplorer arch s e)
-handleSymbolicExecutionStateExplorerEvent evt (C.Suspended symNonce1 suspSt, StateExplorer symNonce2 csv) = do
+handleSymbolicExecutionStateExplorerEvent :: C.S archEvt u arch s
+                                          -> B.BrickEvent Names e
+                                          -> C.SymbolicExecutionState arch s C.Suspend
+                                          -> StateExplorer arch s e
+                                          -> B.EventM Names (StateExplorer arch s e)
+handleSymbolicExecutionStateExplorerEvent s0 evt (C.Suspended symNonce1 suspSt) (StateExplorer symNonce2 csv) = do
   case PC.testEquality symNonce1 symNonce2 of
     Nothing -> SBP.panic "handleSymbolicExecutionExplorerEvent" ["Mismatched solver nonce"]
     Just PC.Refl -> do
       csv' <- WCSV.handleCallStackViewerEvent evt csv
+      -- Emit an event to update the underlying symbolic execution state (since
+      -- we don't have easy access to it in the event handler, and don't want to
+      -- make keeping everything in sync fragile)
       let suspSt' = suspSt { C.suspendedCurrentValue = WCSV.selectedValue csv' }
-      return (C.Suspended symNonce1 suspSt', StateExplorer symNonce2 csv')
+      let archNonce = s0 ^. C.lNonce
+      let newState = C.Suspended symNonce1 suspSt'
+      let sessionID = C.symbolicSessionID newState
+      liftIO $ C.sEmitEvent s0 (C.SetCurrentSymbolicExecutionValue archNonce symNonce1 sessionID (WCSV.selectedValue csv'))
+      return (StateExplorer symNonce2 csv')

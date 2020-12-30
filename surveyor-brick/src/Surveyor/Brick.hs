@@ -25,6 +25,7 @@ import           Control.Lens ( (&), (^.), (^?), (.~) )
 import qualified Control.Lens as L
 import           Control.Monad ( join )
 import qualified Data.Foldable as F
+import qualified Data.Map.Strict as Map
 import           Data.Maybe ( fromMaybe, mapMaybe, isJust )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Map as MapF
@@ -99,8 +100,8 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
       case comp of
         C.Unspecified -> ""
         C.Loader -> "Loader" @? "log-component"
-        C.EventHandler nm -> PPT.renderStrict (PP.layoutCompact ("Event[" PP.<+> PP.pretty nm PP.<+> "]")) @? "log-component"
-        C.CommandCallback nm -> PPT.renderStrict (PP.layoutCompact ("Command[" PP.<+> PP.pretty nm PP.<+> "]")) @? "log-component"
+        C.EventHandler nm -> PPT.renderStrict (PP.layoutCompact ("Event[" <> PP.pretty nm <> "]")) @? "log-component"
+        C.CommandCallback nm -> PPT.renderStrict (PP.layoutCompact ("Command[" <> PP.pretty nm <> "]")) @? "log-component"
         C.EchoAreaUpdate -> ""
 
     renderTime tm = PPT.renderStrict (PP.layoutCompact (PP.pretty tm)) @? "log-time"
@@ -204,10 +205,14 @@ drawUIMode binFileName archState s uim =
       | otherwise -> drawAppShell s (B.txt (T.pack ("Missing function view for IR: " ++ show repr)))
     C.SemanticsViewer ->
       drawAppShell s (ISV.renderInstructionSemanticsViewer binfo (archState ^. C.contextG) ISV.instructionSemanticsViewer)
-    C.SymbolicExecutionManager -> do
-      let valNames = s ^. C.lValueNames
-      let sem = archState ^. BH.symbolicExecutionManagerG
-      drawAppShell s (SEM.renderSymbolicExecutionManager sem valNames)
+    C.SymbolicExecutionManager
+      | Just sessionID <- archState ^? C.contextL . C.currentContext . C.symExecSessionIDL
+      , Just sessions <- archState ^? C.symExStateL
+      , Just (Some symExState) <- C.lookupSessionState sessions sessionID
+      , Just manager <- archState ^. BH.symbolicExecutionStateG . L.at sessionID -> do
+          let valNames = s ^. C.lValueNames
+          drawAppShell s (SEM.renderSymbolicExecutionManager manager symExState valNames)
+      | otherwise -> drawAppShell s (B.txt (T.pack "No symbolic execution state"))
   where
     binfo = C.sAnalysisResult archState
 
@@ -346,8 +351,8 @@ stateFromContext ng mkAnalysisResult chan simState simData = do
                                        , SBE.sBlockViewers = MapF.fromList blockViewers
                                        , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
                                        , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                       , SBE.sSymbolicExecutionManager =
-                                         SEM.symbolicExecutionManager (Some symbolicExecutionState)
+                                       , SBE.sSymbolicExecutionState =
+                                         Map.singleton sesID (SEM.symbolicExecutionManager (Some symbolicExecutionState))
                                        }
         tc0 <- C.newTranslationCache
         ctxStk <- contextStackFromState ng tc0 ares sesID simState pfcfg
@@ -408,8 +413,8 @@ stateFromContext ng mkAnalysisResult chan simState simData = do
                                      , SBE.sBlockViewers = MapF.fromList blockViewers
                                      , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
                                      , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                     , SBE.sSymbolicExecutionManager =
-                                       SEM.symbolicExecutionManager (Some symbolicExecutionState)
+                                     , SBE.sSymbolicExecutionState =
+                                       Map.singleton sesID (SEM.symbolicExecutionManager (Some symbolicExecutionState))
                                      }
       let archState = C.ArchState { C.sAnalysisResult = ares
                                   -- FIXME: Pick a context based on the stack in the simulator

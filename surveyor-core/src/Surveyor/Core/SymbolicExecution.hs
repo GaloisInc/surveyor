@@ -29,9 +29,10 @@ module Surveyor.Core.SymbolicExecution (
   emptySessionState,
   singleSessionState,
   lookupSessionState,
-  mergeSessionState,
+  updateSessionState,
   updateSessionMetrics,
   -- * The state of the symbolic execution automaton
+  SymExK,
   Config,
   SetupArgs,
   Execute,
@@ -55,7 +56,8 @@ module Surveyor.Core.SymbolicExecution (
   -- * Simulation data
   SimulationData(..),
   breakpointP,
-  modelViewP
+  modelViewP,
+  setupProfiling
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )
@@ -88,8 +90,6 @@ import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as CT
 import qualified Lang.Crucible.Types as LCT
-import qualified Crux.Types as CT
-import qualified System.IO as IO
 import qualified System.Process as SP
 import qualified What4.Concrete as WCC
 import qualified What4.Config as WC
@@ -117,62 +117,6 @@ import           Surveyor.Core.SymbolicExecution.Simulation
 
 -- Setup of the symbolic execution engine (parameters and globals)
 
--- | Data kind for the symbolic execution state machine
-data SymExK = Config | SetupArgs | Execute | Inspect | Suspend
-
-type Config = 'Config
-type SetupArgs = 'SetupArgs
-type Execute = 'Execute
-type Inspect = 'Inspect
-type Suspend = 'Suspend
-
-data SymbolicExecutionState arch s (k :: SymExK) where
-  -- | Holds the current configuration during symbolic execution setup
-  --
-  -- We establish the user's solver choice (and basic configuration
-  -- w.r.t. floating point modes) early, as it could have an effect on the next
-  -- stage.
-  Configuring :: SymbolicExecutionConfig s -> SymbolicExecutionState arch s Config
-  -- | Holds the current set of initial register values (that can be
-  -- incrementally modified via the UI/messages).  The type of the CFG fixes the
-  -- shape of the initial registers.  It also contains initial values for global
-  -- variables and other memory objects.
-  Initializing :: (CB.IsSymInterface sym)
-               => SymbolicState arch s sym init reg
-               -> SymbolicExecutionState arch s SetupArgs
-  -- | Holds the state of the symbolic execution engine while it is executing.
-  -- This includes incremental metrics and output, as well as the means to
-  -- interrupt execution
-  Executing :: ExecutionProgress s -> SymbolicExecutionState arch s Execute
-  -- | The state after symbolic execution has completed.  This has enough
-  -- information to start examining and querying the solver about the result
-  Inspecting :: (CB.IsSymInterface sym)
-             => CSP.Metrics I.Identity
-             -> SymbolicState arch s sym init reg
-             -> CSET.ExecResult (CA.CruciblePersonality arch sym)
-                                sym
-                                (CA.CrucibleExt arch)
-                                (CS.RegEntry sym reg)
-             -> SymbolicExecutionState arch s Inspect
-  Suspended :: ( CB.IsSymInterface sym
-               , CA.Architecture arch s
-               , ext ~ CA.CrucibleExt arch
-               , sym ~ WEB.ExprBuilder s st fs
-               )
-            => PN.Nonce s sym
-            -> SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s
-            -> SymbolicExecutionState arch s Suspend
-
-data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
-  SuspendedState { suspendedSymState :: SymbolicState arch s sym init reg
-                 , suspendedSimState :: CSET.SimState p sym ext rtp f a
-                 , suspendedCallFrame :: LCSC.CallFrame sym ext blocks ret args
-                 , suspendedBreakpoint :: Maybe (SCB.Breakpoint sym)
-                 , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
-                 , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
-                 , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
-                 , suspendedModelView :: Maybe CT.ModelView
-                 }
 
 data SymbolicExecutionException =
     UnexpectedFrame T.Text T.Text
@@ -267,18 +211,6 @@ valuesFromVector _ v = go 0 (Some Ctx.empty)
           LCSR.AnyValue tp val ->
             go (idx + 1) (Some (Ctx.extend ctx (LMCR.RegEntry tp val)))
 
-
-instance NFData (SymbolicExecutionState arch s k) where
-  rnf s =
-    case s of
-      Configuring cfg -> cfg `deepseq` ()
-      Initializing symState ->
-        -- We can't really make a meaningful instance for this one
-        symState `seq` ()
-      Executing progress -> progress `deepseq` ()
-      Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
-      Suspended _ symState -> symState `seq` ()
-
 -- | A wrapper around all of the dynamically updatable symbolic execution state
 --
 -- We need this because updating data dynamically updated in the context stack
@@ -311,8 +243,11 @@ singleSessionState s =
 emptySessionState :: SessionState arch s
 emptySessionState = SessionState { unSessionState = Map.empty }
 
-mergeSessionState :: SessionState arch s -> SessionState arch s -> SessionState arch s
-mergeSessionState (SessionState m) (SessionState m') = SessionState { unSessionState = Map.union m m'  }
+-- | Add the given 'SymbolicExecutionState' to the 'SessionState', overwriting
+-- any existing entry under that session id
+updateSessionState :: SymbolicExecutionState arch s k -> SessionState arch s -> SessionState arch s
+updateSessionState session (SessionState m) =
+  SessionState (Map.insert (symbolicSessionID session) (Some session) m)
 
 -- | Updates the given session ID with additional metrics IFF that 'SessionID'
 -- corresponds to a session in the 'Executing' state.
@@ -328,17 +263,6 @@ updateSessionMetrics sid metrics ss@(SessionState m) =
       let ep' = progress { executionMetrics = metrics }
       in SessionState $ Map.insert sid (Some (Executing ep')) m
     _ -> ss
-
-data ExecutionProgress s =
-  ExecutionProgress { executionMetrics :: CSP.Metrics I.Identity
-                    , executionOutputHandle :: IO.Handle
-                    , executionConfig :: SymbolicExecutionConfig s
-                    }
-
-instance NFData (ExecutionProgress s) where
-  rnf ep =
-    executionConfig ep `deepseq` ()
-
 
 -- FIXME: Assign a unique nonce to each symbolic execution session so that we
 -- can associate metrics with the correct session as they come out of the
@@ -363,12 +287,12 @@ symbolicSessionID s = symbolicExecutionConfig s L.^. sessionID
 
 -- | Construct the default state of the symbolic execution automaton
 -- (initializing with the default symbolic execution configuration)
-initialSymbolicExecutionState :: PN.NonceGenerator IO s -> IO (SymbolicExecutionState arch s 'Config)
+initialSymbolicExecutionState :: PN.NonceGenerator IO s -> IO (SymbolicExecutionState arch s Config)
 initialSymbolicExecutionState ng = Configuring <$> defaultSymbolicExecutionConfig ng
 
 -- | Construct an initial symbolic execution state with a user-provided
 -- configuration
-configuringSymbolicExecution :: SymbolicExecutionConfig s -> SymbolicExecutionState arch s 'Config
+configuringSymbolicExecution :: SymbolicExecutionConfig s -> SymbolicExecutionState arch s Config
 configuringSymbolicExecution = Configuring
 
 -- | Construct a symbolic execution state that is ready for the user to start
@@ -378,8 +302,8 @@ initializingSymbolicExecution :: forall s arch init reg
                               => PN.NonceGenerator IO s
                               -> SymbolicExecutionConfig s
                               -> CCC.SomeCFG (CA.CrucibleExt arch) init reg
-                              -> IO (SymbolicExecutionState arch s 'SetupArgs)
-initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig sid solver floatRep solverFilePath) scfg@(CCC.SomeCFG cfg) = do
+                              -> IO (SymbolicExecutionState arch s SetupArgs)
+initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig _sid solver floatRep solverFilePath) scfg@(CCC.SomeCFG cfg) = do
   withOnlineBackend gen solver floatRep solverFilePath $ \_proxy sym -> do
     regs <- FC.traverseFC (allocateSymbolicEntry (Proxy @(arch, s)) sym) (CCC.cfgArgTypes cfg)
     -- FIXME: We don't really have a good way to enumerate all of the

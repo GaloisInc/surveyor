@@ -12,6 +12,7 @@ module Surveyor.Core.Logging.Message (
   Severity(..),
   LogMessage(..),
   msgWith,
+  msgWithContext,
   -- * Timestamp support
   Timestamped,
   logTime,
@@ -27,6 +28,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Time.Clock as TC
 import qualified Data.Time.Format as TF
+import qualified GHC.Stack as GS
 import qualified Lumberjack as L
 
 data Source = Unspecified
@@ -56,14 +58,28 @@ data LogMessage =
   LogMessage { logLevel :: !Severity
              , logSource :: !Source
              , logText :: [T.Text]
+             , logContext :: GS.CallStack
              }
 
+-- | Create a new empty log message
+--
+-- This is intended to be filled in by modifying the 'logLevel', 'logText', and
+-- 'logSource' as necessary.
 msgWith :: LogMessage
 msgWith = LogMessage { logLevel = Debug
                      , logText = mempty
                      , logSource = Unspecified
+                     , logContext = GS.emptyCallStack
                      }
 
+-- | Create a new empty log message that incorporates the current calling
+-- context (up to the limitations of 'GS.HasCallStack')
+msgWithContext :: (GS.HasCallStack) => LogMessage
+msgWithContext = msgWith { logContext = GS.callStack }
+
+-- | A wrapper around another 'L.LogAction' that adds a timestamp
+--
+-- The types appear backwards because this is intended to be used with 'DFC.Contravariant'
 addTimestamp :: (MonadIO m) => L.LogAction m (Timestamped msg) -> L.LogAction m msg
 addTimestamp a = L.LogAction $ \msg -> do
   t <- Timestamp <$> liftIO TC.getCurrentTime

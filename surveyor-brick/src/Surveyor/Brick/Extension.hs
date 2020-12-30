@@ -25,14 +25,15 @@ module Surveyor.Brick.Extension (
   blockViewerG,
   functionViewersL,
   functionViewerG,
-  symbolicExecutionManagerL,
-  symbolicExecutionManagerG
+  symbolicExecutionStateL,
+  symbolicExecutionStateG
   ) where
 
 import           Control.Lens ( (^.), (&), (%~) )
 import qualified Control.Lens as L
 import qualified Control.NF as NF
 import           Data.Kind ( Type )
+import qualified Data.Map.Strict as Map
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
@@ -71,7 +72,7 @@ data BrickUIState arch s =
                , sBlockSelector :: !(BS.BlockSelector arch s)
                , sBlockViewers :: !(MapF.MapF (C.IRRepr arch) (BV.BlockViewer arch s))
                , sFunctionViewer :: !(MapF.MapF (C.IRRepr arch) (FV.FunctionViewer arch s))
-               , sSymbolicExecutionManager :: !(SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
+               , sSymbolicExecutionState :: !(Map.Map (C.SessionID s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s))
                }
   deriving (Generic)
 
@@ -84,7 +85,7 @@ L.makeLensesFor
   , ("sBlockSelector", "blockSelectorL")
   , ("sBlockViewers", "blockViewersL")
   , ("sFunctionViewer", "functionViewersL")
-  , ("sSymbolicExecutionManager", "symbolicExecutionManagerL") ]
+  , ("sSymbolicExecutionState", "symbolicExecutionStateL") ]
   ''BrickUIState
 
 type instance C.EventExtension (C.S BrickUIExtension BrickUIState) = BrickUIEvent
@@ -135,5 +136,5 @@ blockViewerG rep = L.to (\as -> MapF.lookup rep (as ^. C.lUIState . blockViewers
 functionViewerG :: C.IRRepr arch ir -> L.Getter (C.ArchState BrickUIState arch s) (Maybe (FV.FunctionViewer arch s ir))
 functionViewerG rep = L.to (\as -> MapF.lookup rep (as ^. C.lUIState . functionViewersL))
 
-symbolicExecutionManagerG :: L.Getter (C.ArchState BrickUIState arch s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s)
-symbolicExecutionManagerG = L.to (^. C.lUIState . symbolicExecutionManagerL)
+symbolicExecutionStateG :: L.Getter (C.ArchState BrickUIState arch s) (Map.Map (C.SessionID s) (SEM.SymbolicExecutionManager (C.Events s (C.S BrickUIExtension BrickUIState)) arch s))
+symbolicExecutionStateG = L.to (^. C.lUIState . symbolicExecutionStateL)

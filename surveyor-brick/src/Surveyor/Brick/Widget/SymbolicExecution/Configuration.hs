@@ -17,6 +17,8 @@ import           Brick ( (<+>) )
 import qualified Brick as B
 import           Brick.Forms ( (@@=) )
 import qualified Brick.Forms as B
+import           Control.Lens ( (^.) )
+import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Text as T
 import qualified What4.Expr.Builder as WEB
 
@@ -45,9 +47,14 @@ renderSymbolicExecutionConfigurator :: B.Form (C.SymbolicExecutionConfig s) e Na
                                     -> B.Widget Names
 renderSymbolicExecutionConfigurator = B.renderForm
 
-handleSymbolicExecutionConfiguratorEvent :: B.BrickEvent Names e
+handleSymbolicExecutionConfiguratorEvent :: C.S archEvt u arch s
+                                         -> B.BrickEvent Names e
                                          -> B.Form (C.SymbolicExecutionConfig s) e Names
-                                         -> B.EventM Names (C.SymbolicExecutionState arch s C.Config, B.Form (C.SymbolicExecutionConfig s) e Names)
-handleSymbolicExecutionConfiguratorEvent evt f = do
+                                         -> B.EventM Names (B.Form (C.SymbolicExecutionConfig s) e Names)
+handleSymbolicExecutionConfiguratorEvent s0 evt f = do
   f' <- B.handleFormEvent evt f
-  return (C.Configuring (B.formState f'), f')
+  -- We update the real symbolic execution state using an event instead of
+  -- attempting to manage it directly, so that it is easier to have a single
+  -- canonical symbolic execution state that cannot get out of sync.
+  liftIO $ C.sEmitEvent s0 (C.UpdateSymbolicExecutionState (s0 ^. C.lNonce) (C.Configuring (B.formState f')))
+  return f'
