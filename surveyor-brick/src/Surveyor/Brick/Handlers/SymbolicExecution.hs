@@ -4,11 +4,9 @@ module Surveyor.Brick.Handlers.SymbolicExecution ( handleSymbolicExecutionEvent 
 
 import qualified Brick as B
 import           Control.Lens ( (&), (^.), (%~), _Just )
-import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Map.Strict as Map
 import qualified Data.Parameterized.Classes as PC
 import           Data.Parameterized.Some ( Some(..) )
-import qualified Data.Text as T
 import           GHC.Stack ( HasCallStack )
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
@@ -41,12 +39,6 @@ handleSymbolicExecutionEvent s0 evt =
           -- Whenever the symbolic execution state changes, we need to rebuild
           -- the UI for the corresponding session ID
           let sessionID = C.symbolicSessionID newState
-
-          let msg = C.msgWithContext { C.logLevel = C.Debug
-                                     , C.logText = [ T.pack ("Updating widget for session " ++ show sessionID) ]
-                                     }
-          liftIO $ C.logMessage s0 msg
-
           let manager = SEM.symbolicExecutionManager (Some newState)
           let s1 = s0 & C.lArchState . _Just . C.lUIState . SBE.symbolicExecutionStateL %~ Map.insert sessionID manager
           B.continue (C.State s1)

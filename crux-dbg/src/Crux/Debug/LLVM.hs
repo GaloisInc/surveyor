@@ -30,6 +30,9 @@ import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
 import           Data.String ( fromString )
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TE
+import           GHC.TypeLits ( type (<=) )
 import qualified System.Exit as SE
 import qualified System.IO as IO
 import qualified Text.LLVM as TL
@@ -81,7 +84,7 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                     -> [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
 breakpointOverrides cruxOpts sconf =
   [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
-      do_breakpoint
+      (do_breakpoint sconf)
 
   , CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_debug_assert( i8, i8*, i32 ) |]
       (do_debug_assert (parseSolverOffline cruxOpts) sconf)
@@ -155,22 +158,44 @@ simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _
                 case SC.llvmAnalysisResultFromModule ng nonce hdlAlloc llvmModule (Some translation) of
                   SC.SomeResult ares -> return ares
           let debuggerConfig = SB.DebuggerConfig (Proxy @SC.LLVM) (Proxy @(SC.CrucibleExt SC.LLVM)) llvmCon
-          let debugger = SB.debuggerFeature debuggerConfig (WEB.exprCounter sym)
           let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $
                 LCS.runOverrideSim LCT.UnitRepr $ do
                   registerFunctions cruxOpts debuggerConfig llvmModule translation
                   checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
           -- FIXME: We can use this callback to collect live explanations in terms of solver state
           let handleExplanation = \_ _ -> return mempty
-          return (C.RunnableStateWithExtensions initSt [debugger], handleExplanation)
+          let executionFeatures = []
+          return (C.RunnableStateWithExtensions initSt executionFeatures, handleExplanation)
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
 
-do_breakpoint :: (wptr ~ CLE.ArchWidth arch)
-              => LCS.GlobalVar CLM.Mem
+do_breakpoint :: ( wptr ~ CLE.ArchWidth arch
+                 , ext ~ CLI.LLVM arch
+                 , sym ~ WEB.ExprBuilder t st fs
+                 , SC.SymbolicArchitecture arch' t
+                 , LCB.IsSymInterface sym
+                 , 1 <= wptr
+                 , 16 <= wptr
+                 )
+              => SB.DebuggerConfig t ext arch'
+              -> LCS.GlobalVar CLM.Mem
               -> sym
               -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> CLT.LLVMPointerType wptr Ctx.::> LCT.VectorType LCT.AnyType)
               -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
-do_breakpoint _gv _sym _ = return ()
+do_breakpoint sconf memVar sym (Ctx.Empty Ctx.:> breakpointNamePtr Ctx.:> breakpointValues) = do
+  let ?ptrWidth = CLM.ptrWidth (LCS.regValue breakpointNamePtr)
+  let ?recordLLVMAnnotation = \_ _ -> return ()
+  let ng = WEB.exprCounter sym
+  simState <- CMS.get
+  bpName <- case LCSG.lookupGlobal memVar (simState ^. LCSET.stateGlobals) of
+              Nothing -> return "<Unnamed Breakpoint>"
+              Just memImpl -> do
+                chars <- liftIO $ CLM.loadString sym memImpl (LCS.regValue breakpointNamePtr) Nothing
+                return (TE.decodeUtf8With TE.lenientDecode (BS.pack chars))
+  let bp = SC.Breakpoint { SC.breakpointType = SC.UnconditionalBreakpoint
+                         , SC.breakpointName = Just bpName
+                         , SC.breakpointArguments = LCS.regValue breakpointValues
+                         }
+  void $ liftIO $ SB.surveyorState sconf ng simState (SC.SimBreakpoint bp)
 
 -- TODO: export in crux
 lookupString :: (LCB.IsSymInterface sym, CLM.HasLLVMAnn sym, CLO.ArchOk arch)
