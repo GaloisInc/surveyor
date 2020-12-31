@@ -19,6 +19,8 @@ library
   exposed-modules:     Crux.Debug.Config
                        Crux.Debug.LLVM
   build-depends:       base >=4.10 && <5,
+                       async,
+                       brick,
                        bv-sized,
                        bytestring,
                        containers,

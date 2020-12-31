@@ -19,6 +19,8 @@ module Surveyor.Core.Commands (
   selectPreviousOperandC,
   resetInstructionSelectionC,
   contextBackC,
+  stepExecutionC,
+  continueExecutionC,
   contextForwardC,
   initializeSymbolicExecutionC,
   beginSymbolicExecutionSetupC,
@@ -72,6 +74,7 @@ allCommands =
   , C.SomeCommand contextBackC
   , C.SomeCommand contextForwardC
   , C.SomeCommand stepExecutionC
+  , C.SomeCommand continueExecutionC
   , C.SomeCommand initializeSymbolicExecutionC
   , C.SomeCommand beginSymbolicExecutionSetupC
   , C.SomeCommand startSymbolicExecutionC
@@ -214,6 +217,14 @@ stepExecutionC =
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.StepExecution
 
+continueExecutionC :: forall s st . Command s st '[]
+continueExecutionC =
+  C.Command "continue-execution" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Continue execution from the stopped location"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil ->
+      SCE.emitEvent customEventChan SCE.ContinueExecution
 
 setLogFileC :: forall s st . Command s st '[AR.FilePathType]
 setLogFileC =

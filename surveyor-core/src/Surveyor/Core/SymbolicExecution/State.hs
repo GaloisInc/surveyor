@@ -20,6 +20,7 @@ module Surveyor.Core.SymbolicExecution.State (
 import           Control.DeepSeq ( NFData(..), deepseq )
 import qualified Crux.Types as CT
 import qualified Data.Functor.Identity as I
+import qualified Data.IORef as IOR
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
@@ -36,6 +37,7 @@ import qualified What4.Expr as WEB
 
 import qualified Surveyor.Core.Architecture as CA
 import           Surveyor.Core.SymbolicExecution.Config
+import qualified Surveyor.Core.SymbolicExecution.ExecutionFeature as SCEF
 
 data SymbolicState arch s sym init reg =
   SymbolicState { symbolicConfig :: SymbolicExecutionConfig s
@@ -111,6 +113,14 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
                  , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
                  , suspendedModelView :: Maybe CT.ModelView
+                 , suspendedResumeUnmodified :: IO ()
+                 -- ^ Resume symbolic execution with an unmodified symbolic
+                 -- execution state
+                 , suspendedDebugFeatureConfig :: IOR.IORef SCEF.DebuggerFeatureState
+                 -- ^ The reference to the debug feature state; this allows the
+                 -- debugger to toggle the debug feature execution mode before
+                 -- it resumes execution, enabling either single stepping (or
+                 -- controlled stepping) or general continuation.
                  }
 
 data ExecutionProgress s =

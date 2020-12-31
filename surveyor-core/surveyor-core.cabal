@@ -39,6 +39,9 @@ library
                        Surveyor.Core.Handlers.SymbolicExecution
                        Surveyor.Core.SymbolicExecution
                        Surveyor.Core.SymbolicExecution.Config
+                       Surveyor.Core.SymbolicExecution.DebugMonitor
+                       Surveyor.Core.SymbolicExecution.ExecutionFeature
+                       Surveyor.Core.SymbolicExecution.Override
                        Surveyor.Core.SymbolicExecution.Session
                        Surveyor.Core.SymbolicExecution.Simulation
                        Surveyor.Core.SymbolicExecution.State

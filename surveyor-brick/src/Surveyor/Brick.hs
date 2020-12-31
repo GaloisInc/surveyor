@@ -10,9 +10,9 @@
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Brick (
   surveyor,
-  DebuggerConfig(..),
-  debuggerFeature,
-  surveyorState
+  surveyorWith,
+  emptyState,
+  emptyArchState
   ) where
 
 import qualified Brick as B
@@ -23,31 +23,20 @@ import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.Lens ( (&), (^.), (^?), (.~) )
 import qualified Control.Lens as L
-import           Control.Monad ( join )
 import qualified Data.Foldable as F
 import qualified Data.Map.Strict as Map
-import           Data.Maybe ( fromMaybe, mapMaybe, isJust )
+import           Data.Maybe ( fromMaybe, mapMaybe )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
-import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
 import qualified Data.Traversable as T
 import           Data.Void ( Void )
 import qualified Graphics.Vty as V
-
-import qualified Lang.Crucible.Backend as LCB
-import qualified Lang.Crucible.CFG.Core as LCCC
-import qualified Lang.Crucible.CFG.Extension as LCCE
-import qualified Lang.Crucible.FunctionHandle as CFH
-import qualified Lang.Crucible.Simulator.CallFrame as LCSC
-import qualified Lang.Crucible.Simulator.EvalStmt as LCS
-import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
-import qualified What4.Expr.Builder as WEB
 
 import           Surveyor.Brick.Attributes
 import qualified Surveyor.Brick.Command as SBC
@@ -212,6 +201,8 @@ drawUIMode binFileName archState s uim =
       , Just manager <- archState ^. BH.symbolicExecutionStateG . L.at sessionID -> do
           let valNames = s ^. C.lValueNames
           drawAppShell s (SEM.renderSymbolicExecutionManager manager symExState valNames)
+      | Just sessionID <- archState ^? C.contextL . C.currentContext . C.symExecSessionIDL ->
+        drawAppShell s (B.txt (T.pack ("No symbolic execution state for session ID " ++ show sessionID)))
       | otherwise -> drawAppShell s (B.txt (T.pack "No symbolic execution state"))
   where
     binfo = C.sAnalysisResult archState
@@ -246,14 +237,13 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
   mloader <- T.traverse (C.asynchronouslyLoad ng chan) mExePath
   s0 <- emptyState mExePath mloader ng chan
-  let sconf = DebuggerConfig (Proxy @Void) (Proxy @()) (error "Void loader")
-  surveyorWith sconf customEventChan s0
+  surveyorWith customEventChan s0
 
-surveyorWith :: DebuggerConfig s ext arch
-             -> B.BChan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
+surveyorWith :: (C.Architecture arch s)
+             => B.BChan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
              -> C.S BH.BrickUIExtension BH.BrickUIState arch s
              -> IO ()
-surveyorWith (DebuggerConfig {}) chan s0 = do
+surveyorWith chan s0 = do
   let app = B.App { B.appDraw = appDraw
                   , B.appChooseCursor = appChooseCursor
                   , B.appHandleEvent = BH.appHandleEvent
@@ -307,153 +297,56 @@ emptyState mfp mloader ng customEventChan = do
              , C.sArchNonce = n0
              }
 
-stateFromContext :: forall arch s p sym ext rtp f a st fs
-                  . ( C.SymbolicArchitecture arch s
-                    , LCB.IsSymInterface sym
-                    , ext ~ C.CrucibleExt arch
-                    , sym ~ WEB.ExprBuilder s st fs
-                    )
-                 => PN.NonceGenerator IO s
-                 -> (PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s))
-                 -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
-                 -> LCSET.SimState p sym ext rtp f a
-                 -> C.SimulationData sym
-                 -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
-stateFromContext ng mkAnalysisResult chan simState simData = do
-  let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
-  let simCtx = simState ^. LCSET.stateContext
-  let halloc = simCtx ^. L.to LCSET.simHandleAllocator
+emptyArchState :: forall s arch
+                . (C.Architecture arch s, C.ArchConstraints arch s)
+               => Maybe FilePath
+               -> PN.NonceGenerator IO s
+               -> PN.Nonce s arch
+               -> IO (C.AnalysisResult arch s)
+               -> C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
+               -> IO (C.S BH.BrickUIExtension BH.BrickUIState arch s)
+emptyArchState mfp ng n0 mkAnalysisResult chan = do
   let addrParser _s = Nothing
-  case topFrame ^. LCSET.gpValue of
-    LCSC.RF {} -> error "Unexpected return value"
-    LCSC.OF LCSC.OverrideFrame {} -> do
-      n0 <- PN.freshNonce ng
-      ares <- mkAnalysisResult ng n0 halloc
-      symCfg <- C.defaultSymbolicExecutionConfig ng
-      let sesID = symCfg ^. C.sessionID
+  let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
+  fileLogger <- C.defaultLogFile >>= C.logToFile
 
-      withParentFrameCFG (LCSET.activeFrames (simState ^. LCSET.stateTree)) $ \pfcfg -> do
-        let symSt = C.SymbolicState { C.symbolicConfig = symCfg
-                                    , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
-                                    , C.withSymConstraints = \a -> a
-                                    , C.someCFG = LCCC.SomeCFG pfcfg
-                                    , C.symbolicGlobals = topFrame ^. LCSET.gpGlobals
-                                    -- FIXME: We can't actually get these since
-                                    -- they are lost to the ether at this point
-                                    --
-                                    -- Need to refactor so that they aren't part
-                                    -- of this state
-                                    , C.symbolicRegs = error "Initial symbolic regs"
-                                    , C.modelView = simData ^? C.modelViewP
-                                    }
-        symbolicExecutionState <- C.suspendedState ng symSt simState simData
-        let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
-                                       , SBE.sBlockViewers = MapF.fromList blockViewers
-                                       , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
-                                       , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                       , SBE.sSymbolicExecutionState =
-                                         Map.singleton sesID (SEM.symbolicExecutionManager (Some symbolicExecutionState))
-                                       }
-        tc0 <- C.newTranslationCache
-        ctxStk <- contextStackFromState ng tc0 ares sesID simState pfcfg
-        let archState = C.ArchState { C.sAnalysisResult = ares
-                                    , C.sContext = ctxStk
-                                    , C.sSymExState = C.singleSessionState symbolicExecutionState
-                                    , C.sIRCache = tc0
-                                    , C.sArchDicts = MapF.fromList dicts
-                                    , C.sUIState = uiState
-                                    }
-        let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
-        return C.S { C.sInputFile = Nothing
-                   , C.sLoader = Nothing
-                   , C.sLogStore = mempty
-                   , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState chan
-                                                      , C.sFileLogger = Nothing
-                                                      }
-                   , C.sDiagnosticLevel = C.Debug
-                   , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
-                   , C.sAppState = C.Ready
-                   , C.sNonceGenerator = ng
-                   , C.sKeymap = SBK.defaultKeymap (Just n0)
-                   , C.sArchNonce = n0
-                   , C.sEventChannel = chan
-                   , C.sUIExtension = uiExt
-                   , C.sValueNames = C.initialValueNames (Proxy @arch) simState
-                   , C.sArchState = Just archState
-                   , C.sUIMode = C.SomeUIMode C.SymbolicExecutionManager
-                   }
+  ares <- mkAnalysisResult
 
-    LCSC.MF LCSC.CallFrame { LCSC._frameCFG = fcfg
-                           } -> do
-      n0 <- PN.freshNonce ng
-      ares <- mkAnalysisResult ng n0 halloc
-      let uiExt = SBC.mkExtension (C.writeChan chan) n0 addrParser "M-x"
-      tc0 <- C.newTranslationCache
+  let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
+                                 , SBE.sBlockViewers = MapF.fromList blockViewers
+                                 , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
+                                 , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
+                                 , SBE.sSymbolicExecutionState = Map.empty
+                                 }
+  tc0 <- C.newTranslationCache
+  let ctxStk = C.emptyContextStack
+  let archState = C.ArchState { C.sAnalysisResult = ares
+                              , C.sContext = ctxStk
+                              , C.sSymExState = C.emptySessionState
+                              , C.sIRCache = tc0
+                              , C.sArchDicts = MapF.fromList dicts
+                              , C.sUIState = uiState
+                              }
 
-      symCfg <- C.defaultSymbolicExecutionConfig ng
-      let sesID = symCfg ^. C.sessionID
-
-      let symSt = C.SymbolicState { C.symbolicConfig = symCfg
-                                  , C.symbolicBackend = simCtx ^. LCSET.ctxSymInterface
-                                  , C.withSymConstraints = \a -> a
-                                  , C.someCFG = LCCC.SomeCFG fcfg
-                                  , C.symbolicGlobals = topFrame ^. LCSET.gpGlobals
-                                  -- FIXME: We can't actually get these since
-                                  -- they are lost to the ether at this point
-                                  --
-                                  -- Need to refactor so that they aren't part
-                                  -- of this state
-                                  , C.symbolicRegs = error "Initial symbolic regs"
-                                  , C.modelView = simData ^? C.modelViewP
-                                  }
-      ctxStk <- contextStackFromState ng tc0 ares sesID simState fcfg
-      -- NOTE: This can throw an exception, but that is fine: the TUI is not yet up
-      symbolicExecutionState <- C.suspendedState ng symSt simState simData
-      let uiState = SBE.BrickUIState { SBE.sBlockSelector = BS.emptyBlockSelector
-                                     , SBE.sBlockViewers = MapF.fromList blockViewers
-                                     , SBE.sFunctionViewer = MapF.fromList (funcViewers ares)
-                                     , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
-                                     , SBE.sSymbolicExecutionState =
-                                       Map.singleton sesID (SEM.symbolicExecutionManager (Some symbolicExecutionState))
-                                     }
-      let archState = C.ArchState { C.sAnalysisResult = ares
-                                  -- FIXME: Pick a context based on the stack in the simulator
-                                  , C.sContext = ctxStk
-                                  -- FIXME: Construct a session for this with whatever we can pull out of simState
-                                  , C.sSymExState = C.singleSessionState symbolicExecutionState
-                                  , C.sIRCache = tc0
-                                  , C.sArchDicts = MapF.fromList (dicts)
-                                  , C.sUIState = uiState
-                                  }
-      return C.S { C.sInputFile = Nothing
-                 , C.sLoader = Nothing
-                 , C.sLogStore = mempty
-                 , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState chan
-                                                    , C.sFileLogger = Nothing
-                                                    }
-                 , C.sDiagnosticLevel = C.Debug
-                 , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
-                 , C.sAppState = C.Ready
-                 , C.sNonceGenerator = ng
-                 , C.sKeymap = SBK.defaultKeymap (Just n0)
-                 , C.sArchNonce = n0
-                 , C.sEventChannel = chan
-                 , C.sUIExtension = uiExt
-                 , C.sValueNames = C.initialValueNames (Proxy @arch) simState
-                 , C.sArchState = Just archState
-                 , C.sUIMode = C.SomeUIMode C.SymbolicExecutionManager
-                 }
-
+  return C.S { C.sInputFile = mfp
+             , C.sLoader = Nothing
+             , C.sLogStore = mempty
+             , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState chan
+                                                , C.sFileLogger = Just fileLogger
+                                                }
+             , C.sDiagnosticLevel = C.Debug
+             , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
+             , C.sUIMode = C.SomeUIMode C.Diags
+             , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
+             , C.sEventChannel = chan
+             , C.sNonceGenerator = ng
+             , C.sValueNames = C.emptyValueNameMap
+             , C.sKeymap = SBK.defaultKeymap Nothing
+             , C.sUIExtension = uiExt
+             , C.sArchState = Just archState
+             , C.sArchNonce = n0
+             }
   where
-    withParentFrameCFG :: [LCSET.SomeFrame (LCSC.SimFrame sym ext)]
-                       -> (forall blocks init ret . LCCC.CFG ext blocks init ret -> t)
-                       -> t
-    withParentFrameCFG fs k =
-      case fs of
-        [] -> error "No parent frame"
-        LCSET.SomeFrame (LCSC.MF LCSC.CallFrame { LCSC._frameCFG = pfcfg }) : _ -> k pfcfg
-        _ : _fs -> withParentFrameCFG _fs k
-
     dicts :: [MapF.Pair (C.IRRepr arch) (C.ArchDict arch s)]
     dicts = MapF.Pair C.BaseRepr C.ArchDict
           : [ MapF.Pair rep C.ArchDict
@@ -482,118 +375,9 @@ stateFromContext ng mkAnalysisResult chan simState simData = do
 
 
 
--- | Construct a context stack from a 'LCSET.SimState' and current CFG
---
--- NOTE: This needs to be made more robust against failure.  If no matching
--- functions in our 'C.AnalysisResult' is found, we'll return the empty
--- 'C.ContextStack'.
---
--- FIXME: It would be great to fully populate the context stack with all of the
--- functions in the active simulation tree.  The SimState argument will be
--- needed for this
---
--- FIXME: The search for our function corresponding to the CFG is currently very
--- inefficient (linear) - we need to index everything sufficiently to make this
--- efficient for all architectures.
-contextStackFromState :: forall arch s p sym ext rtp f a blocks initialArgs ret
-                       . (C.Architecture arch s, LCB.IsSymInterface sym, ext ~ C.CrucibleExt arch)
-                      => PN.NonceGenerator IO s
-                      -> C.TranslationCache arch s
-                      -> C.AnalysisResult arch s
-                      -> C.SessionID s
-                      -> LCSET.SimState p sym ext rtp f a
-                      -> LCCC.CFG ext blocks initialArgs ret
-                      -> IO (C.ContextStack arch s)
-contextStackFromState ng tc ares sesID _simState cfg = do
-  allCfgs <- mapM toCFG (C.functions ares)
-  case join (F.find (matchesCFG cfg) allCfgs) of
-    Nothing -> return C.emptyContextStack
-    Just (fh, LCCC.AnyCFG _) -> do
-      mAltIR <- C.asAlternativeIR C.CrucibleRepr ares fh
-      case mAltIR of
-        Nothing -> return C.emptyContextStack
-        Just ([], _) -> return C.emptyContextStack
-        Just (b0:_, _blockMap) -> do
-          -- 'makeContext' returns a symbolic execution context; we actually
-          -- have our own we want to use instead
-          (curCtx, _sid) <- C.makeContext ng tc ares fh C.CrucibleRepr b0
-          let curCtx' = curCtx { C.cSymExecSessionID = sesID }
-          return C.ContextStack { C.cStack = Seq.singleton curCtx'
-                                , C.cStackIndex = Nothing
-                                }
-  where
-    withCfgNonce c k = k (CFH.handleID (LCCC.cfgHandle c))
-
-    matchesCFG _ Nothing = False
-    matchesCFG targetCfg (Just (_fh, LCCC.AnyCFG thisCfg)) =
-      withCfgNonce targetCfg $ \targetNonce ->
-        withCfgNonce thisCfg $ \thisNonce -> isJust (PC.testEquality thisNonce targetNonce)
-
-    toCFG fh = do
-      mcfg <- C.crucibleCFG ares fh
-      return ((fh,) <$> mcfg)
--- | This crucible 'LCS.ExecutionFeature' captures the simulator state at a
--- breakpoint and starts up Surveyor(-Brick) to interactively inspect it.
---
--- For now, it simply returns execution to Crucible with no modifications after
--- Surveyor exits.  It could be extended in the future to persist state
--- modifications.
-debuggerFeature :: forall ext sym p rtp arch s st fs
-                 . ( LCB.IsSymInterface sym
-                   , LCCE.IsSyntaxExtension ext
-                   , sym ~ WEB.ExprBuilder s st fs
-                   , p ~ C.CruciblePersonality arch sym
-                   )
-                => DebuggerConfig s ext arch
-                -> PN.NonceGenerator IO s
-                -> LCS.ExecutionFeature p sym ext rtp
-debuggerFeature args ng = LCS.ExecutionFeature (debugger args ng)
-
-data DebuggerConfig s ext arch =
-  (C.Architecture arch s, C.SymbolicArchitecture arch s, ext ~ C.CrucibleExt arch) =>
-  DebuggerConfig { _debuggerArchProxy :: Proxy arch
-                 , _debuggerExtProxy :: Proxy ext
-                 , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
-                 }
-
-debugger :: forall sym ext s st fs p rtp arch
-          . ( LCB.IsSymInterface sym
-            , LCCE.IsSyntaxExtension ext
-            , sym ~ WEB.ExprBuilder s st fs
-            , p ~ C.CruciblePersonality arch sym
-            )
-         => DebuggerConfig s ext arch
-         -> PN.NonceGenerator IO s
-         -> LCSET.ExecState p sym ext rtp
-         -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-debugger args@(DebuggerConfig {}) ng execSt =
-  case execSt of
-    LCSET.CallState _retHdlr resolvedCall simState
-      | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
-          bp <- ioBP
-          surveyorState args ng simState (C.SimBreakpoint bp)
-    LCSET.TailCallState _v resolvedCall simState
-      | Just ioBP <- C.classifyBreakpoint proxy simState resolvedCall -> do
-          bp <- ioBP
-          surveyorState args ng simState (C.SimBreakpoint bp)
-    _ -> return LCS.ExecutionFeatureNoChange
-  where
-    proxy = Proxy @(arch, s)
-
--- | Initialize Surveyor to navigate an active symbolic execution state
-surveyorState :: ( C.Architecture arch s
-                 , C.SymbolicArchitecture arch s
-                 , LCB.IsSymInterface sym
-                 , sym ~ WEB.ExprBuilder s st fs
-                 )
-              => DebuggerConfig s ext arch
-              -> PN.NonceGenerator IO s
-              -> LCSET.SimState p sym ext rtp f a
-              -> C.SimulationData sym
-              -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-surveyorState args@(DebuggerConfig {}) ng simCtx simData = do
-  customEventChan <- B.newBChan 100
-  let chan = C.mkChan (B.readBChan customEventChan) (B.writeBChan customEventChan)
-  s0 <- stateFromContext ng (debuggerCon args) chan simCtx simData
-  surveyorWith args customEventChan s0
-  return LCS.ExecutionFeatureNoChange
+-- data DebuggerConfig s ext arch =
+--   (C.Architecture arch s, C.SymbolicArchitecture arch s, ext ~ C.CrucibleExt arch) =>
+--   DebuggerConfig { _debuggerArchProxy :: Proxy arch
+--                  , _debuggerExtProxy :: Proxy ext
+--                  , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
+--                  }

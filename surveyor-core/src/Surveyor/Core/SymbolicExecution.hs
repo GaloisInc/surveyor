@@ -17,6 +17,7 @@ module Surveyor.Core.SymbolicExecution (
   SymbolicExecutionConfig(..),
   SomeFloatModeRepr(..),
   defaultSymbolicExecutionConfig,
+  defaultSymbolicExecutionConfigWith,
   Solver(..),
   configSolverL,
   configFloatReprL,
@@ -90,6 +91,7 @@ import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as CT
 import qualified Lang.Crucible.Types as LCT
+import qualified Surveyor.Core.SymbolicExecution.ExecutionFeature as SCEF
 import qualified System.Process as SP
 import qualified What4.Concrete as WCC
 import qualified What4.Config as WC
@@ -136,11 +138,30 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                => PN.NonceGenerator IO s
                -> SymbolicState arch s sym init reg
                -> CSET.SimState p sym ext rtp f a
-               -> SimulationData sym
+               -> Maybe (SimulationData sym)
+               -> IO ()
+               -- ^ An action to run in order to resume execution with an unmodified state
+               -> IOR.IORef SCEF.DebuggerFeatureState
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState ng surveyorSymState crucSimState simData =
+suspendedState ng surveyorSymState crucSimState mSimData resumeAction debugConf =
   case topFrame ^. CSET.gpValue of
-    LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
+    LCSC.RF {} ->
+      -- FIXME: Need to do some better signaling that this is a return frame
+      -- (there isn't much to interact with)
+      withParentFrame (CSET.activeFrames (crucSimState ^. CSET.stateTree)) $ \cf -> do
+        symNonce <- liftIO $ PN.freshNonce ng
+        let st = SuspendedState { suspendedSymState = surveyorSymState
+                                , suspendedSimState = crucSimState
+                                , suspendedCallFrame = cf
+                                , suspendedBreakpoint = mbp
+                                , suspendedRegVals = Ctx.empty
+                                , suspendedRegSelection = Nothing
+                                , suspendedCurrentValue = Nothing
+                                , suspendedModelView = mmv
+                                , suspendedResumeUnmodified = resumeAction
+                                , suspendedDebugFeatureConfig = debugConf
+                                }
+        return (Suspended symNonce st)
     LCSC.OF {} ->
       withParentFrame (CSET.activeFrames (crucSimState ^. CSET.stateTree)) $ \cf -> do
         symNonce <- liftIO $ PN.freshNonce ng
@@ -152,6 +173,8 @@ suspendedState ng surveyorSymState crucSimState simData =
                                 , suspendedRegSelection = Nothing
                                 , suspendedCurrentValue = Nothing
                                 , suspendedModelView = mmv
+                                , suspendedResumeUnmodified = resumeAction
+                                , suspendedDebugFeatureConfig = debugConf
                                 }
         return (Suspended symNonce st)
     LCSC.MF cf ->
@@ -166,6 +189,8 @@ suspendedState ng surveyorSymState crucSimState simData =
                                   , suspendedRegSelection = Nothing
                                   , suspendedCurrentValue = Nothing
                                   , suspendedModelView = mmv
+                                  , suspendedResumeUnmodified = resumeAction
+                                  , suspendedDebugFeatureConfig = debugConf
                                   }
           return (Suspended symNonce st)
         Some valAssignment@(_ Ctx.:> _) -> do
@@ -179,12 +204,14 @@ suspendedState ng surveyorSymState crucSimState simData =
                                   , suspendedRegSelection = Just (Some anIndex)
                                   , suspendedCurrentValue = Nothing
                                   , suspendedModelView = mmv
+                                  , suspendedResumeUnmodified = resumeAction
+                                  , suspendedDebugFeatureConfig = debugConf
                                   }
           return (Suspended symNonce st)
 
   where
-    mbp = simData ^? breakpointP
-    mmv = simData ^? modelViewP
+    mbp = mSimData >>= (^? breakpointP)
+    mmv = mSimData >>= (^? modelViewP)
 
     bpName :: T.Text
     bpName = fromMaybe "<Unnamed Breakpoint>" (SCB.breakpointName =<< mbp)
