@@ -12,7 +12,6 @@ import qualified Data.Text as T
 import           GHC.Stack ( HasCallStack )
 
 import qualified Surveyor.Core.Architecture as SCA
-import qualified Surveyor.Core.Context as CCX
 import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.State as SCS
@@ -25,9 +24,8 @@ handleDebuggingEvent :: (SCA.Architecture arch s, MonadIO m, HasCallStack)
                      -> m (SCS.State e u s)
 handleDebuggingEvent s0 evt =
   case evt of
-    SCE.StepExecution
-      | Just sessionID <- s0 ^? SCS.lArchState . _Just . SCS.contextL . CCX.currentContext . CCX.symExecSessionIDL
-      , Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
+    SCE.StepExecution sessionID
+      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
       , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
           let msg = SCL.msgWith { SCL.logText = [ T.pack ("Stepping session " ++ show sessionID)
                                                 ]
@@ -49,9 +47,8 @@ handleDebuggingEvent s0 evt =
           return $! SCS.State s0
       | otherwise -> return $! SCS.State s0
 
-    SCE.ContinueExecution
-      | Just sessionID <- s0 ^? SCS.lArchState . _Just . SCS.contextL . CCX.currentContext . CCX.symExecSessionIDL
-      , Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
+    SCE.ContinueExecution sessionID
+      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
       , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
           let msg = SCL.msgWith { SCL.logText = [ T.pack ("Stepping session " ++ show sessionID)
                                                 ]
@@ -61,6 +58,15 @@ handleDebuggingEvent s0 evt =
           let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
           liftIO $ IOR.atomicWriteIORef execFeatureStateRef SCEF.Inactive
           liftIO $ SymEx.suspendedResumeUnmodified suspSt
+
+          return $! SCS.State s0
+      | otherwise -> return $! SCS.State s0
+
+    SCE.InterruptExecution sessionID
+      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
+      , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
+          let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
+          liftIO $ IOR.atomicWriteIORef execFeatureStateRef SCEF.Monitoring
 
           return $! SCS.State s0
       | otherwise -> return $! SCS.State s0

@@ -180,8 +180,13 @@ data ContextEvent s st where
 
 -- | Events relating to the debugger
 data DebuggingEvent s st where
-  StepExecution :: DebuggingEvent s st
-  ContinueExecution :: DebuggingEvent s st
+  -- | Step the given symbolic execution session by one step
+  StepExecution :: CSS.SessionID s -> DebuggingEvent s st
+  -- | Continue the given symbolic execution session
+  ContinueExecution :: CSS.SessionID s ->  DebuggingEvent s st
+  -- | Interrupt the given symbolic execution, stopping it at the next
+  -- crucible hook point
+  InterruptExecution :: CSS.SessionID s ->  DebuggingEvent s st
 
 type family EventExtension (st :: Type -> Type -> Type) :: Type -> (Type -> Type -> Type) -> Type
 
