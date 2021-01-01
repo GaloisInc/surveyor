@@ -24,7 +24,6 @@ import qualified Data.BitVector.Sized as BV
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Foldable as F
-import qualified Data.IORef as IOR
 import qualified Data.LLVM.BitCode as DLB
 import qualified Data.Map.Strict as Map
 import           Data.Maybe ( fromMaybe )
@@ -40,7 +39,6 @@ import qualified Data.Text.Encoding.Error as TE
 import           GHC.TypeLits ( type (<=) )
 import qualified System.Exit as SE
 import qualified System.IO as IO
-import qualified System.Posix.Signals as SPS
 import qualified Text.LLVM as TL
 import qualified What4.Expr.Builder as WEB
 import qualified What4.Interface as WI
@@ -76,6 +74,7 @@ import qualified Lang.Crucible.Types as LCT
 
 import qualified Surveyor.Brick as SB
 import qualified Surveyor.Core as SC
+import qualified Crux.Debug.Interrupt as CBI
 
 breakpointOverrides :: ( LCB.IsSymInterface sym
                        , CLM.HasLLVMAnn sym
@@ -210,7 +209,7 @@ simulateLLVMWithDebug debuggerHandleVar cruxOpts dbgOpts bcFilePath = C.Simulato
           debugMonitorTask <- A.async (SC.debugMonitor initializeUIOnce surveyorChan debuggerConfig)
           -- Set up an interrupt handler to allow users to interrupt crux-dbg
           -- with SIGUSR2 (and bring up the UI)
-          installInterruptHandler (SC.debuggerConfigStateVar debuggerConfig)
+          CBI.installInterruptHandler (SC.debuggerConfigStateVar debuggerConfig)
 
           -- This is the action to run when the symbolic execution ends - tear
           -- down the helper threads and signal the debugger to exit the GUI.
@@ -444,24 +443,3 @@ llvmMetrics llvmCtxt =
         Just mem -> return $ toInteger (f mem)
         Nothing -> CMC.throwM MemoryMissingFromGlobalVars
 
--- | Install a handler that responds to SIGUSR2 by setting the debug execution
--- feature to 'Monitoring' mode so that the next step will interrupt (and bring
--- up the debugger).
---
--- This only needs to change the execution feature mode, because the first
--- message sent from the debug execution feature in monitor mode will initialize
--- the UI
---
--- NOTE: The handler will only fire once (to bring up the UI).  If the user
--- closes the UI, we would need to reinstall the handler... this is to avoid
--- multiple UI instantiations at once.  To really make this robust, we might
--- need a bit of a redesign to the init-once UI initialization (to reset it).
---
--- NOTE: This is currently UNIX only.  Another approach (using
--- GHC.ConsoleHandler) will be required for Windows.
-installInterruptHandler :: IOR.IORef SC.DebuggerFeatureState -> IO ()
-installInterruptHandler ref = do
-  _ <- SPS.installHandler SPS.sigUSR2 (SPS.CatchOnce handler) Nothing
-  return ()
-  where
-    handler = IOR.writeIORef ref SC.Monitoring
