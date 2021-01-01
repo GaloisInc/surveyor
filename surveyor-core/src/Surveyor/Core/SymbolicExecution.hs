@@ -32,6 +32,7 @@ module Surveyor.Core.SymbolicExecution (
   lookupSessionState,
   updateSessionState,
   updateSessionMetrics,
+  cleanupActiveSessions,
   -- * The state of the symbolic execution automaton
   SymExK,
   Config,
@@ -275,6 +276,32 @@ emptySessionState = SessionState { unSessionState = Map.empty }
 updateSessionState :: SymbolicExecutionState arch s k -> SessionState arch s -> SessionState arch s
 updateSessionState session (SessionState m) =
   SessionState (Map.insert (symbolicSessionID session) (Some session) m)
+
+-- | Traverse the suspended symbolic execution states and set them all to continue
+--
+-- We need to do this when shutting down surveyor, otherwise the sessions will
+-- be deadlocked on the execution feature.  It could be handled externally
+-- (e.g., in crux-dbg), but it is still important to do it in the standalone
+-- surveyor-brick.
+--
+-- Note that this does not terminate the symbolic execution engine instances, as
+-- the invoking tool (e.g., crux-dbg) might want to continue.
+cleanupActiveSessions :: forall arch s . SessionState arch s -> IO ()
+cleanupActiveSessions (SessionState sessions) = mapM_ cleanupActiveSession sessions
+  where
+    cleanupActiveSession :: Some (SymbolicExecutionState arch s) -> IO ()
+    cleanupActiveSession (Some symExState) =
+      case symExState of
+        Suspended _ suspSt -> do
+          -- Disable monitoring mode for this instance and then restart
+          -- execution
+          IOR.writeIORef (suspendedDebugFeatureConfig suspSt) SCEF.Inactive
+          suspendedResumeUnmodified suspSt
+        Configuring {} -> return ()
+        Initializing {} -> return ()
+        Executing {} -> return ()
+        Inspecting {} -> return ()
+
 
 -- | Updates the given session ID with additional metrics IFF that 'SessionID'
 -- corresponds to a session in the 'Executing' state.

@@ -161,4 +161,7 @@ handleCustomEvent s0 evt =
 
     C.Exit -> do
       liftIO (F.traverse_ C.cancelLoader (C.sLoader s0))
+      case s0 ^. C.lArchState of
+        Nothing -> return ()
+        Just archState -> liftIO (C.cleanupActiveSessions (archState ^. C.symExStateL))
       B.halt (C.State s0)
