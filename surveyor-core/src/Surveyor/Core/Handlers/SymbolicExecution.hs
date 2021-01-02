@@ -222,9 +222,6 @@ makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction
     let msg = SCL.msgWith { SCL.logText = [T.pack "Making a suspended state"]
                           }
     liftIO $ SCS.logMessage s0 msg
-    -- FIXME: The suspended state needs to be extended with extra
-    -- storage for the data required to resume the symbolic execution
-    -- process
     symExState <- liftIO $ SymEx.suspendedState (WEB.exprCounter sym) symState simState reason resumeAction debugConf
 
     liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState archNonce symExState)

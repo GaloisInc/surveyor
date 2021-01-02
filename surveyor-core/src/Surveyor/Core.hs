@@ -142,7 +142,6 @@ module Surveyor.Core (
   SymEx.updateSessionMetrics,
   SymEx.cleanupActiveSessions,
   SymEx.SymbolicExecutionState(..),
-  SymEx.SimulationData(..),
   SymEx.SuspendedState(..),
   SCSS.SuspendedReason(..),
   SymEx.suspendedState,
@@ -161,8 +160,6 @@ module Surveyor.Core (
   SymEx.configSolverL,
   SymEx.configFloatReprL,
   SymEx.solverInteractionFileL,
-  SymEx.breakpointP,
-  SymEx.modelViewP,
   -- ** Breakpoints
   SB.Breakpoint(..),
   SB.BreakpointType(..),

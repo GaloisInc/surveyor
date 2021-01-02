@@ -372,12 +372,3 @@ emptyArchState mfp ng n0 mkAnalysisResult chan = do
                        ]
 
     proxy = Proxy @(arch, s)
-
-
-
--- data DebuggerConfig s ext arch =
---   (C.Architecture arch s, C.SymbolicArchitecture arch s, ext ~ C.CrucibleExt arch) =>
---   DebuggerConfig { _debuggerArchProxy :: Proxy arch
---                  , _debuggerExtProxy :: Proxy ext
---                  , debuggerCon :: PN.NonceGenerator IO s -> PN.Nonce s arch -> CFH.HandleAllocator -> IO (C.AnalysisResult arch s)
---                  }

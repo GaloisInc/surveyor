@@ -43,7 +43,6 @@ library
                        Surveyor.Core.SymbolicExecution.ExecutionFeature
                        Surveyor.Core.SymbolicExecution.Override
                        Surveyor.Core.SymbolicExecution.Session
-                       Surveyor.Core.SymbolicExecution.Simulation
                        Surveyor.Core.SymbolicExecution.State
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events

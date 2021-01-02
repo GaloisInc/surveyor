@@ -54,12 +54,7 @@ module Surveyor.Core.SymbolicExecution (
   configuringSymbolicExecution,
   initializingSymbolicExecution,
   -- * Cleanup
-  cleanupSymbolicExecutionState,
-  -- * Simulation data
-  SimulationData(..),
-  breakpointP,
-  modelViewP,
-  setupProfiling
+  cleanupSymbolicExecutionState
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )
@@ -115,10 +110,6 @@ import qualified Surveyor.Core.Panic as SCP
 
 import           Surveyor.Core.SymbolicExecution.Config
 import           Surveyor.Core.SymbolicExecution.State
-import           Surveyor.Core.SymbolicExecution.Simulation
-
--- Setup of the symbolic execution engine (parameters and globals)
-
 
 data SymbolicExecutionException =
     UnexpectedFrame T.Text T.Text
