@@ -15,14 +15,23 @@ import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified What4.Expr.Builder as WEB
 
 import qualified Surveyor.Core.Architecture as SCA
+import qualified Surveyor.Core.SymbolicExecution.State as SCSSt
 import qualified Surveyor.Core.SymbolicExecution.Session as SCSSe
-import qualified Surveyor.Core.SymbolicExecution.Simulation as SCSS
 
+-- | This is a wrapper around all of the data generated when symbolic execution is suspended
+--
+-- This includes a reason for the suspension, as well as the simulator state
+-- (and some nonces used to witness type equality).  This is the bundle of data
+-- sent from whatever suspended execution to surveyor.
+--
+-- Note that in the case of a suspended symbolic execution step (from the
+-- execution feature), the 'LCSET.SimState' is duplicated between this data and
+-- the 'LCSET.ExecState' in the reason.
 data CrucibleSimState s p sym ext where
   CrucibleSimState :: PN.Nonce s (rtp, f)
                    -> PN.Nonce s args
                    -> LCSET.SimState p sym ext rtp f args
-                   -> SCSS.SimulationData sym
+                   -> SCSSt.SuspendedReason p sym ext rtp
                    -> CrucibleSimState s p sym ext
 
 data ReturnSimState s p sym ext where

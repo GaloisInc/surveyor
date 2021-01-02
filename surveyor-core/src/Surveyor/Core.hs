@@ -144,6 +144,7 @@ module Surveyor.Core (
   SymEx.SymbolicExecutionState(..),
   SymEx.SimulationData(..),
   SymEx.SuspendedState(..),
+  SCSS.SuspendedReason(..),
   SymEx.suspendedState,
   SymEx.Config,
   SymEx.SetupArgs,
@@ -260,5 +261,6 @@ import qualified Surveyor.Core.SymbolicExecution as SymEx
 import qualified Surveyor.Core.SymbolicExecution.DebugMonitor as SCSD
 import qualified Surveyor.Core.SymbolicExecution.ExecutionFeature as SCEF
 import qualified Surveyor.Core.SymbolicExecution.Override as SCSO
+import qualified Surveyor.Core.SymbolicExecution.State as SCSS
 import qualified Surveyor.Core.TranslationCache as TC
 import qualified Surveyor.Core.ValueNames as SCV

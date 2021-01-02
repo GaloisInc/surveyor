@@ -29,10 +29,16 @@ runInitOnce mv = do
     Just act -> act
 
 
--- | Monitor the
+-- | Monitor the channel of events from the debugger execution feature.
+--
+-- This reads events off of the channel and converts them into Surveyor events
+-- to be processed by the main event loop.
 --
 -- NOTE: This function is synchronous; most callers will want to run it in a
 -- separate thread
+--
+-- NOTE: This function terminates when a 'Nothing' event is received on the
+-- channel (allowing orchestration code to cleanly shut down the thread).
 debugMonitor :: MV.MVar (IO ())
              -> SCC.Chan (SCE.Events s st)
              -> SEEF.DebuggerConfig s p sym arch ext
@@ -46,7 +52,14 @@ debugMonitor initOnce chan conf@(SEEF.DebuggerConfig archNonce sessionID fromFea
       SCC.writeChan chan (SCE.toEvent (SCE.DebugMonitorEvent archNonce sessionID state toFeature featureState))
       debugMonitor initOnce chan conf
 
-
+-- | Monitor the channel of events from debug overrides.
+--
+-- This reads events off of the channel and converts them into Surveyor events
+-- for the main event loop.
+--
+-- NOTE: This function is synchronous and intended to be run in a separate thread.
+--
+-- NOTE: This loop terminates when a 'Nothing' is received on the channel.
 overrideMonitor :: MV.MVar (IO ())
                 -> SCC.Chan (SCE.Events s st)
                 -> SEEF.DebuggerConfig s p sym arch ext

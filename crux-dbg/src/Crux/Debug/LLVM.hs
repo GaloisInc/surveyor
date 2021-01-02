@@ -54,6 +54,7 @@ import qualified Crux.LLVM.Overrides as CLO
 import qualified Crux.Log as CL
 import qualified Crux.Model as CM
 import qualified Crux.Types as C
+import qualified Crux.Types as CT
 import qualified Lang.Crucible.Backend as LCB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.FunctionHandle as CFH
@@ -76,7 +77,7 @@ import qualified Surveyor.Brick as SB
 import qualified Surveyor.Core as SC
 import qualified Crux.Debug.Interrupt as CBI
 
-breakpointOverrides :: ( LCB.IsSymInterface sym
+debugOverrides :: ( LCB.IsSymInterface sym
                        , CLM.HasLLVMAnn sym
                        , CLM.HasPtrWidth wptr
                        , wptr ~ CLE.ArchWidth arch
@@ -88,7 +89,7 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                     => C.CruxOptions
                     -> SC.OverrideConfig t (SC.LLVMPersonality sym) sym arch' ext
                     -> [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
-breakpointOverrides cruxOpts sconf =
+debugOverrides cruxOpts sconf =
   [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
       (do_breakpoint sconf)
 
@@ -268,7 +269,7 @@ do_breakpoint conf memVar sym (Ctx.Empty Ctx.:> breakpointNamePtr Ctx.:> breakpo
                          , SC.breakpointName = Just bpName
                          , SC.breakpointArguments = LCS.regValue breakpointValues
                          }
-  enterDebugger conf ng simState (SC.SimBreakpoint bp)
+  enterDebugger conf ng simState (SC.SuspendedBreakpoint bp)
 
 -- | Inform the waiting debugger (via the message channel) that the symbolic
 -- execution engine has stopped in an override.
@@ -280,7 +281,7 @@ enterDebugger :: ( ext ~ CLI.LLVM arch
               => SC.OverrideConfig s p sym arch' ext
               -> PN.NonceGenerator IO s
               -> LCSET.SimState p sym ext rtp (LCSC.OverrideLang ret) ('Just args)
-              -> SC.SimulationData sym
+              -> SC.SuspendedReason p sym ext rtp
               -> LCS.OverrideSim p sym (CLI.LLVM arch) rtp args ret ()
 enterDebugger (SC.OverrideConfig _archNonce _sessionID toDebugger fromDebugger) ng simState breakReason = do
   rtpNonce <- liftIO $ PN.freshNonce ng
@@ -367,15 +368,14 @@ do_debug_assert offSolver conf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> 
           let model = simCtx ^. LCSET.cruciblePersonality . C.personalityModel
           modelVals <- CM.evalModel ev model
           let mv = C.ModelView modelVals
-          let simData = SC.SimModelView mv
-          return (WantDebug simData)
+          return (WantDebug mv)
         _ -> return NoDebug
   case wantDebug of
     NoDebug -> return ()
     WantDebug simData -> do
-      enterDebugger conf ng simState simData
+      enterDebugger conf ng simState (SC.SuspendedAssertionFailure simData)
 
-data WantDebug sym = WantDebug (SC.SimulationData sym) | NoDebug
+data WantDebug sym = WantDebug CT.ModelView | NoDebug
 
 checkEntryPoint :: ( CLO.ArchOk arch
                   , CL.Logs
@@ -416,7 +416,7 @@ registerFunctions cruxOpts sconf llvm_module mtrans =
      let overrides = concat [ CLO.cruxLLVMOverrides
                             , CLO.svCompOverrides
                             , CLO.cbmcOverrides
-                            , breakpointOverrides cruxOpts sconf
+                            , debugOverrides cruxOpts sconf
                             ]
      CLI.register_llvm_overrides llvm_module [] overrides llvm_ctx
 

@@ -51,6 +51,7 @@ import qualified Surveyor.Core as SC
 -- frames, while treating them relatively uniformly.
 data CallStackEntry arch s sym where
   BreakpointFrame :: Maybe T.Text -> CallStackEntry arch s sym
+  AssertionFrame :: CallStackEntry arch s sym
   CallFrame :: LCSC.SimFrame sym (SC.CrucibleExt arch) l args -> CallStackEntry arch s sym
 
 -- | Another type wrapper that adds a phantom type parameter so that we can
@@ -87,23 +88,35 @@ L.makeLenses ''CallStackViewer
 --
 -- Future developments should be able to inspect the registers for each call
 -- frame (as if they were the breakpoint registers)
-callStackViewer :: forall proxy arch sym s ctx e st fs
+callStackViewer :: forall proxy arch sym s ctx e st fs p rtp ext
                  . (sym ~ WEB.ExprBuilder s st fs)
                 => proxy arch
-                -> Maybe T.Text
-                -- ^ Breakpoint name
+                -> SC.SuspendedReason p sym ext rtp
+                -- ^ The reason that execution was suspended; this changes how
+                -- we render the call stack, as we'll add a phantom entry for
+                -- the breakpoint (if this is a breakpoint)
                 -> Ctx.Assignment (LMCR.RegEntry sym) ctx
                 -- ^ Breakpoint captured values
                 -> [LCSET.SomeFrame (LCSC.SimFrame sym (SC.CrucibleExt arch))]
                 -- ^ Frames on the stack of the symbolic execution engine
                 -> CallStackViewer arch s sym e
-callStackViewer proxy bpName bpVals simFrames = CallStackViewer frmList fr
+callStackViewer proxy reason capturedValues simFrames =
+  case reason of
+    SC.SuspendedBreakpoint bp ->
+      let bpEntry = BreakpointFrame (SC.breakpointName bp)
+          bpViewers = FC.fmapFC regViewer capturedValues
+          bpFrame = CallStackFrame bpEntry (SBV.valueSelectorForm (Just 0) capturedValues) bpViewers
+      in CallStackViewer (makeFrameList [bpFrame]) fr
+    SC.SuspendedAssertionFailure {} ->
+      -- FIXME: We can add a separate special frame for the assertion to view the model
+      let assertionViewers = FC.fmapFC regViewer capturedValues
+          afFrame = CallStackFrame AssertionFrame (SBV.valueSelectorForm Nothing capturedValues) assertionViewers
+      in CallStackViewer (makeFrameList [afFrame]) fr
+    SC.SuspendedExecutionStep {} ->
+      CallStackViewer (makeFrameList []) fr
   where
-    bpEntry = BreakpointFrame bpName
-    bpViewers = FC.fmapFC regViewer bpVals
-    bpFrame = CallStackFrame bpEntry (SBV.valueSelectorForm (Just 0) bpVals) bpViewers
-    frames = bpFrame : map (fromSimFrame proxy) simFrames
-    frmList = BL.list SBN.CallStackViewer (DV.fromList frames) 1
+    frames = map (fromSimFrame proxy) simFrames
+    makeFrameList extraFrames = BL.list SBN.CallStackViewer (DV.fromList (extraFrames ++ frames)) 1
 
     fr = BF.focusRing [ SBN.CallStackViewer, SBN.BreakpointValueSelectorForm, SBN.BreakpointValueViewer ]
 
@@ -197,6 +210,7 @@ renderCallStackFrame :: proxy arch -> Bool -> CallStackFrame arch s sym e -> B.W
 renderCallStackFrame proxy hasFocus (CallStackFrame cse _ _) =
   case cse of
     BreakpointFrame mName -> B.txt (fromMaybe "<Unnamed Breakpoint>" mName)
+    AssertionFrame -> B.txt "<Failed Assertion>"
     CallFrame sf -> renderSomeFrame proxy hasFocus sf
 
 renderSomeFrame :: proxy arch -> Bool -> LCSC.SimFrame sym (SC.CrucibleExt arch) l args -> B.Widget SBN.Names

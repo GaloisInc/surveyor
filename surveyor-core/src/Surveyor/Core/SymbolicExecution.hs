@@ -63,7 +63,7 @@ module Surveyor.Core.SymbolicExecution (
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )
-import           Control.Lens ( (^.), (^?) )
+import           Control.Lens ( (^.) )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Control.Monad.Catch as CMC
@@ -71,7 +71,6 @@ import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.Functor.Identity as I
 import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as Map
-import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
@@ -123,10 +122,21 @@ import           Surveyor.Core.SymbolicExecution.Simulation
 
 data SymbolicExecutionException =
     UnexpectedFrame T.Text T.Text
-  | NoParentFrame T.Text T.Text
+  | NoParentFrame T.Text
   deriving (Show)
 
 instance CMC.Exception SymbolicExecutionException
+
+-- | Extract the arguments captured by the breakpoint (if the reason for
+-- suspending execution was a breakpoint)
+--
+-- If the reason for suspending was not a breakpoint, simply return Nothing
+breakpointArguments :: SuspendedReason p sym ext rtp -> Maybe (DV.Vector (LCSR.AnyValue sym))
+breakpointArguments rsn =
+  case rsn of
+    SuspendedBreakpoint bp -> Just (SCB.breakpointArguments bp)
+    SuspendedAssertionFailure {} -> Nothing
+    SuspendedExecutionStep {} -> Nothing
 
 suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                 . ( CB.IsSymInterface sym
@@ -139,12 +149,14 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                => PN.NonceGenerator IO s
                -> SymbolicState arch s sym init reg
                -> CSET.SimState p sym ext rtp f a
-               -> Maybe (SimulationData sym)
+               -> SuspendedReason p sym ext rtp
+               -- ^ The reason that the symbolic execution was suspended
                -> IO ()
                -- ^ An action to run in order to resume execution with an unmodified state
                -> IOR.IORef SCEF.DebuggerFeatureState
+               -- ^ The configuration flag for the debugging execution feature
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState ng surveyorSymState crucSimState mSimData resumeAction debugConf =
+suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} ->
       -- FIXME: Need to do some better signaling that this is a return frame
@@ -154,44 +166,43 @@ suspendedState ng surveyorSymState crucSimState mSimData resumeAction debugConf 
         let st = SuspendedState { suspendedSymState = surveyorSymState
                                 , suspendedSimState = crucSimState
                                 , suspendedCallFrame = cf
-                                , suspendedBreakpoint = mbp
                                 , suspendedRegVals = Ctx.empty
                                 , suspendedRegSelection = Nothing
                                 , suspendedCurrentValue = Nothing
-                                , suspendedModelView = mmv
                                 , suspendedResumeUnmodified = resumeAction
                                 , suspendedDebugFeatureConfig = debugConf
+                                , suspendedReason = reason
                                 }
         return (Suspended symNonce st)
     LCSC.OF {} ->
+      -- The top-level frame is an override frame (i.e., we are in a breakpoint/assert override)
       withParentFrame (CSET.activeFrames (crucSimState ^. CSET.stateTree)) $ \cf -> do
         symNonce <- liftIO $ PN.freshNonce ng
         let st = SuspendedState { suspendedSymState = surveyorSymState
                                 , suspendedSimState = crucSimState
                                 , suspendedCallFrame = cf
-                                , suspendedBreakpoint = mbp
                                 , suspendedRegVals = Ctx.empty
                                 , suspendedRegSelection = Nothing
                                 , suspendedCurrentValue = Nothing
-                                , suspendedModelView = mmv
                                 , suspendedResumeUnmodified = resumeAction
                                 , suspendedDebugFeatureConfig = debugConf
+                                , suspendedReason = reason
                                 }
         return (Suspended symNonce st)
     LCSC.MF cf ->
-      case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (fmap SCB.breakpointArguments mbp) of
+      -- The top-level frame is inside of a function somewhere (but not imminently returning)
+      case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (breakpointArguments reason) of
         Some Ctx.Empty -> do
           symNonce <- liftIO $ PN.freshNonce ng
           let st = SuspendedState { suspendedSymState = surveyorSymState
                                   , suspendedSimState = crucSimState
                                   , suspendedCallFrame = cf
-                                  , suspendedBreakpoint = mbp
                                   , suspendedRegVals = Ctx.empty
                                   , suspendedRegSelection = Nothing
                                   , suspendedCurrentValue = Nothing
-                                  , suspendedModelView = mmv
                                   , suspendedResumeUnmodified = resumeAction
                                   , suspendedDebugFeatureConfig = debugConf
+                                  , suspendedReason = reason
                                   }
           return (Suspended symNonce st)
         Some valAssignment@(_ Ctx.:> _) -> do
@@ -200,22 +211,16 @@ suspendedState ng surveyorSymState crucSimState mSimData resumeAction debugConf 
           let st = SuspendedState { suspendedSymState = surveyorSymState
                                   , suspendedSimState = crucSimState
                                   , suspendedCallFrame = cf
-                                  , suspendedBreakpoint = mbp
                                   , suspendedRegVals = valAssignment
                                   , suspendedRegSelection = Just (Some anIndex)
                                   , suspendedCurrentValue = Nothing
-                                  , suspendedModelView = mmv
                                   , suspendedResumeUnmodified = resumeAction
                                   , suspendedDebugFeatureConfig = debugConf
+                                  , suspendedReason = reason
                                   }
           return (Suspended symNonce st)
 
   where
-    mbp = mSimData >>= (^? breakpointP)
-    mmv = mSimData >>= (^? modelViewP)
-
-    bpName :: T.Text
-    bpName = fromMaybe "<Unnamed Breakpoint>" (SCB.breakpointName =<< mbp)
     topFrame = crucSimState ^. CSET.stateTree . CSET.actFrame
 
     withParentFrame :: [CSET.SomeFrame (LCSC.SimFrame sym ext)]
@@ -223,7 +228,7 @@ suspendedState ng surveyorSymState crucSimState mSimData resumeAction debugConf 
                     -> m t
     withParentFrame fs k =
       case fs of
-        [] -> CMC.throwM (NoParentFrame "Override" bpName)
+        [] -> CMC.throwM (NoParentFrame "Override")
         CSET.SomeFrame (LCSC.MF cf) : _ -> k cf
         _ : _fs -> withParentFrame _fs k
 
@@ -373,7 +378,6 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig _sid solv
                               , symbolicRegs = regs
                               , symbolicGlobals = globals
                               , withSymConstraints = \a -> a
-                              , modelView = Nothing
                               }
     return (Initializing state)
 

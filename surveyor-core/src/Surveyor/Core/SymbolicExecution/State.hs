@@ -8,6 +8,7 @@ module Surveyor.Core.SymbolicExecution.State (
   SymbolicState(..),
   SymbolicExecutionState(..),
   SuspendedState(..),
+  SuspendedReason(..),
   ExecutionProgress(..),
   SymExK,
   Config,
@@ -46,7 +47,6 @@ data SymbolicState arch s sym init reg =
                 , symbolicRegs :: Ctx.Assignment (CS.RegEntry sym) init
                 , symbolicGlobals :: CS.SymGlobalState sym
                 , withSymConstraints :: forall a . (CB.IsSymInterface sym) => a -> a
-                , modelView :: Maybe CT.ModelView
                 }
 
 -- | Data kind for the symbolic execution state machine
@@ -99,6 +99,18 @@ data SymbolicExecutionState arch s (k :: SymExK) where
             -> SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s
             -> SymbolicExecutionState arch s Suspend
 
+-- | The reason that execution was suspended
+data SuspendedReason p sym ext rtp where
+  -- | The user set a breakpoint that was encountered (either via override or
+  -- explicitly in the UI)
+  SuspendedBreakpoint :: SCB.Breakpoint sym -> SuspendedReason p sym ext rtp
+  -- | The execution is suspended because an assertion has failed and we have a
+  -- model containing values that demonstrate the potential assertion failure
+  SuspendedAssertionFailure :: CT.ModelView -> SuspendedReason p sym ext rtp
+  -- | The execution is suspended because the execution feature has paused (due
+  -- to single stepping)
+  SuspendedExecutionStep :: CSET.ExecState p sym ext rtp -> SuspendedReason p sym ext rtp
+
 -- | The actual data for a suspended symbolic execution state
 --
 -- It is a separate data type because the record names are useful and would be
@@ -108,11 +120,9 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
   SuspendedState { suspendedSymState :: SymbolicState arch s sym init reg
                  , suspendedSimState :: CSET.SimState p sym ext rtp f a
                  , suspendedCallFrame :: LCSC.CallFrame sym ext blocks ret args
-                 , suspendedBreakpoint :: Maybe (SCB.Breakpoint sym)
                  , suspendedRegVals :: Ctx.Assignment (LMCR.RegEntry sym) ctx
                  , suspendedRegSelection :: Maybe (Some (Ctx.Index ctx))
                  , suspendedCurrentValue :: Maybe (Some (LMCR.RegEntry sym))
-                 , suspendedModelView :: Maybe CT.ModelView
                  , suspendedResumeUnmodified :: IO ()
                  -- ^ Resume symbolic execution with an unmodified symbolic
                  -- execution state
@@ -121,6 +131,8 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  -- debugger to toggle the debug feature execution mode before
                  -- it resumes execution, enabling either single stepping (or
                  -- controlled stepping) or general continuation.
+                 , suspendedReason :: SuspendedReason p sym ext rtp
+                 -- ^ The reason execution has been suspended
                  }
 
 data ExecutionProgress s =
