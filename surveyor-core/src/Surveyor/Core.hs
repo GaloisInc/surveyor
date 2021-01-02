@@ -165,7 +165,6 @@ module Surveyor.Core (
   -- ** Breakpoints
   SB.Breakpoint(..),
   SB.BreakpointType(..),
-  SB.classifyBreakpoint,
   -- ** Modifiers
   CCX.resetBlockSelection,
   CCX.selectNextInstruction,
