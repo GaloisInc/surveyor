@@ -27,4 +27,5 @@ data Names = DiagnosticView
            | BreakpointValueSelectorForm
            | BreakpointValueViewer
            | CallStackViewer
+           | CallStackBlockViewer
   deriving (Eq, Ord, Show)

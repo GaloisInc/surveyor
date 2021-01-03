@@ -16,6 +16,7 @@ module Surveyor.Core.Context (
   emptyContextStack,
   makeContext,
   selectedIndex,
+  toInstructionList,
   -- * Modifiers
   resetBlockSelection,
   selectNextInstruction,

@@ -1,3 +1,4 @@
+{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -54,6 +55,18 @@ instance Architecture Void s where
   crucibleCFG _ _ = return Nothing
   freshSymbolicEntry _ _ _ = Nothing
   symbolicInitializers (AnalysisResult (VoidAnalysisResult v) _) _ = absurd v
+  fromCrucibleBlock = Nothing
+
+data VoidJVMOperand s = VoidJVMOperand Void
+
+instance CrucibleExtension Void where
+  type CrucibleExtensionOperand Void = VoidJVMOperand
+  extensionOperandSelectable _ _ = False
+  extensionStmtOperands _ _ _ = error "Impossible"
+  extensionExprOperands _ _ _ = error "Impossible"
+  prettyExtensionStmt _ _ = error "Impossible"
+  prettyExtensionApp _ _  = error "Impossible"
+  prettyExtensionOperand _ (VoidJVMOperand v) = absurd v
 
 instance Eq (Address Void s) where
   VoidAddress v == _ = absurd v

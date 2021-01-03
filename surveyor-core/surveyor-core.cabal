@@ -21,6 +21,7 @@ library
                        Surveyor.Core.Architecture.Crucible
                        Surveyor.Core.Architecture.JVM
                        Surveyor.Core.Architecture.LLVM
+                       Surveyor.Core.Architecture.NonceCache
                        Surveyor.Core.Architecture.Macaw
                        Surveyor.Core.Architecture.MC
                        Surveyor.Core.Architecture.Void

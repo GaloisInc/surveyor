@@ -22,12 +22,14 @@ module Surveyor.Brick.Widget.CallStackViewer (
 
 import qualified Brick as B
 import qualified Brick.Focus as BF
+import qualified Brick.Widgets.Border as BB
 import qualified Brick.Widgets.List as BL
 import           Control.Lens ( (^.), (&), (.~), (%~) )
 import qualified Control.Lens as L
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Context as Ctx
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
@@ -43,6 +45,7 @@ import qualified What4.Expr.Builder as WEB
 import qualified What4.FunctionName as WFN
 
 import qualified Surveyor.Brick.Names as SBN
+import qualified Surveyor.Brick.Widget.BlockViewer as SBB
 import qualified Surveyor.Brick.Widget.ValueSelector as SBV
 import qualified Surveyor.Brick.Widget.ValueViewer as WVV
 import qualified Surveyor.Core as SC
@@ -67,6 +70,9 @@ data WrappedViewer s sym (tp :: LCCC.CrucibleType) where
 --  - The 'SBV.ValueSelectorForm' is a form that allows the user to select the
 --    value they want to view out of the current frame
 --  - The 'Ctx.Assignment' caches the 'WVV.ValueViewer' widgets constructed for each viewable value
+--  - The 'SC.Block' is the (translation of) the Crucible block corresponding to
+--    the code in this frame; it may be absent for frame types with no
+--    associated CFG block (e.g., a Return frame)
 --
 -- The former two are tracked and cached so that they don't need to be rebuilt
 -- and to preserve any state that is built up (i.e., so that switching between
@@ -75,6 +81,7 @@ data CallStackFrame arch s sym e where
   CallStackFrame :: CallStackEntry arch s sym
                  -> SBV.ValueSelectorForm s sym ctx e
                  -> Ctx.Assignment (WrappedViewer s sym) ctx
+                 -> Maybe (SC.Block (SC.Crucible arch) s)
                  -> CallStackFrame arch s sym e
 
 data CallStackViewer arch s sym e =
@@ -89,8 +96,11 @@ L.makeLenses ''CallStackViewer
 -- Future developments should be able to inspect the registers for each call
 -- frame (as if they were the breakpoint registers)
 callStackViewer :: forall proxy arch sym s ctx e st fs p rtp ext
-                 . (sym ~ WEB.ExprBuilder s st fs)
+                 . ( sym ~ WEB.ExprBuilder s st fs
+                   , SC.Architecture arch s
+                   )
                 => proxy arch
+                -> PN.NonceGenerator IO s
                 -> SC.SuspendedReason p sym ext rtp
                 -- ^ The reason that execution was suspended; this changes how
                 -- we render the call stack, as we'll add a phantom entry for
@@ -99,48 +109,63 @@ callStackViewer :: forall proxy arch sym s ctx e st fs p rtp ext
                 -- ^ Breakpoint captured values
                 -> [LCSET.SomeFrame (LCSC.SimFrame sym (SC.CrucibleExt arch))]
                 -- ^ Frames on the stack of the symbolic execution engine
-                -> CallStackViewer arch s sym e
-callStackViewer proxy reason capturedValues simFrames =
+                -> IO (CallStackViewer arch s sym e)
+callStackViewer proxy ng reason capturedValues simFrames = do
+  frames <- mapM (fromSimFrame proxy ng) simFrames
+  let makeFrameList extraFrames = BL.list SBN.CallStackViewer (DV.fromList (extraFrames ++ frames)) 1
   case reason of
-    SC.SuspendedBreakpoint bp ->
+    SC.SuspendedBreakpoint bp -> do
       let bpEntry = BreakpointFrame (SC.breakpointName bp)
-          bpViewers = FC.fmapFC regViewer capturedValues
-          bpFrame = CallStackFrame bpEntry (SBV.valueSelectorForm (Just 0) capturedValues) bpViewers
-      in CallStackViewer (makeFrameList [bpFrame]) fr
-    SC.SuspendedAssertionFailure {} ->
+      let bpViewers = FC.fmapFC regViewer capturedValues
+      let bpFrame = CallStackFrame bpEntry (SBV.valueSelectorForm (Just 0) capturedValues) bpViewers Nothing
+      return (CallStackViewer (makeFrameList [bpFrame]) fr)
+    SC.SuspendedAssertionFailure {} -> do
       -- FIXME: We can add a separate special frame for the assertion to view the model
       let assertionViewers = FC.fmapFC regViewer capturedValues
-          afFrame = CallStackFrame AssertionFrame (SBV.valueSelectorForm Nothing capturedValues) assertionViewers
-      in CallStackViewer (makeFrameList [afFrame]) fr
+      let afFrame = CallStackFrame AssertionFrame (SBV.valueSelectorForm Nothing capturedValues) assertionViewers Nothing
+      return (CallStackViewer (makeFrameList [afFrame]) fr)
     SC.SuspendedExecutionStep {} ->
-      CallStackViewer (makeFrameList []) fr
+      return (CallStackViewer (makeFrameList []) fr)
   where
-    frames = map (fromSimFrame proxy) simFrames
-    makeFrameList extraFrames = BL.list SBN.CallStackViewer (DV.fromList (extraFrames ++ frames)) 1
-
     fr = BF.focusRing [ SBN.CallStackViewer, SBN.BreakpointValueSelectorForm, SBN.BreakpointValueViewer ]
 
-fromSimFrame :: (sym ~ WEB.ExprBuilder s st fs)
+fromSimFrame :: ( sym ~ WEB.ExprBuilder s st fs
+                , SC.Architecture arch s
+                )
              => proxy arch
+             -> PN.NonceGenerator IO s
              -> LCSET.SomeFrame (LCSC.SimFrame sym (SC.CrucibleExt arch))
-             -> CallStackFrame arch s sym e
-fromSimFrame proxy (LCSET.SomeFrame sf) =
-  withFrameRegs proxy sf $ \nArgs regs ->
+             -> IO (CallStackFrame arch s sym e)
+fromSimFrame proxy ng (LCSET.SomeFrame sf) =
+  withFrameRegs proxy sf $ \nArgs mCFG regs -> do
     let viewers = FC.fmapFC regViewer regs
-    in CallStackFrame entry (SBV.valueSelectorForm nArgs regs) viewers
+    mBlock <- case (mCFG, SC.fromCrucibleBlock) of
+      (Just (cfg, blockID), Just fromCruc) -> Just <$> buildBlock ng fromCruc cfg blockID
+      _ -> return Nothing
+    return (CallStackFrame entry (SBV.valueSelectorForm nArgs regs) viewers mBlock)
   where
     entry = CallFrame sf
 
+buildBlock :: PN.NonceGenerator IO s
+           -> (PN.NonceGenerator IO s -> LCCC.CFG ext blocks init ret -> LCCC.Block ext blocks ret args -> a)
+           -> LCCC.CFG ext blocks init ret
+           -> LCCC.BlockID blocks args
+           -> a
+buildBlock ng fromCruc cfg blockID  =
+  fromCruc ng cfg (LCCC.getBlock blockID (LCCC.cfgBlockMap cfg))
+
 withFrameRegs :: proxy arch
               -> LCSC.SimFrame sym (SC.CrucibleExt arch) l args
-              -> (forall ctx . Maybe Int -> Ctx.Assignment (LMCR.RegEntry sym) ctx -> a)
+              -> (forall ctx blocks init ret tp . Maybe Int -> Maybe (LCCC.CFG (SC.CrucibleExt arch) blocks init ret, LCCC.BlockID blocks tp) -> Ctx.Assignment (LMCR.RegEntry sym) ctx -> a)
               -> a
 withFrameRegs _ sf k =
   case sf of
     LCSC.OF oframe ->
       -- Pass Nothing to label all override frame values
-      k Nothing (oframe ^. LCSC.overrideRegMap . L.to LMCR.regMap)
-    LCSC.MF mframe@(LCSC.CallFrame { LCSC._frameCFG = cfg }) ->
+      k Nothing Nothing (oframe ^. LCSC.overrideRegMap . L.to LMCR.regMap)
+    LCSC.MF mframe@(LCSC.CallFrame { LCSC._frameCFG = cfg
+                                   , LCSC._frameBlockID = Some blockID
+                                   }) ->
       -- Either label all of the arguments if this block is the entry block OR
       -- label no arguments (because the block args are just locals)
       --
@@ -149,8 +174,8 @@ withFrameRegs _ sf k =
       let nArgs = if mframe ^. LCSC.frameBlockID == Some (LCCC.cfgEntryBlockID cfg)
                   then cfgArgCount cfg
                   else 0
-      in k (Just nArgs) (mframe ^. LCSC.frameRegs . L.to LMCR.regMap)
-    LCSC.RF _name e -> k Nothing (Ctx.Empty Ctx.:> e)
+      in k (Just nArgs) (Just (cfg, blockID)) (mframe ^. LCSC.frameRegs . L.to LMCR.regMap)
+    LCSC.RF _name e -> k Nothing Nothing (Ctx.Empty Ctx.:> e)
 
 -- | Return the number of formal parameters to the CFG
 cfgArgCount :: LCCC.CFG ext blocks ctx ret -> Int
@@ -166,23 +191,43 @@ regViewer :: (sym ~ WEB.ExprBuilder s st fs)
 regViewer re = WrappedViewer (WVV.valueViewer (LMCR.regType re) (LMCR.regValue re))
 
 renderCallStackViewer :: forall arch s sym e st fs
-                       . (sym ~ WEB.ExprBuilder s st fs)
+                       . ( sym ~ WEB.ExprBuilder s st fs
+                         , SC.Architecture arch s
+                         , SC.CrucibleExtension arch
+                         )
                       => Bool
                       -> SC.ValueNameMap s
                       -> CallStackViewer arch s sym e
                       -> B.Widget SBN.Names
 renderCallStackViewer hasFocus valNames cs =
-  B.hBox [ B.vBox [ B.txt "Call Stack"
-                  , BL.renderList (renderCallStackFrame (Proxy @arch)) (hasFocus && stackSelected) (cs ^. frameList)
-                  ]
-         , renderValueSelector (hasFocus && valSelSelected) (cs ^. frameList . L.to BL.listSelectedElement)
-         , renderSelectedValue (hasFocus && viewerSelected) valNames (cs ^. frameList . L.to BL.listSelectedElement)
+  B.hBox [ BB.borderWithLabel (B.txt "Call Stack") stackEntries
+         , BB.borderWithLabel (B.txt "Values In Scope") $
+              renderValueSelector (hasFocus && valSelSelected) (cs ^. frameList . L.to BL.listSelectedElement)
+         , BB.borderWithLabel (B.txt "Selected Value") $
+              renderSelectedValue (hasFocus && viewerSelected) valNames (cs ^. frameList . L.to BL.listSelectedElement)
+         , cfgWidget
          ]
   where
+    stackEntries = BL.renderList (renderCallStackFrame (Proxy @arch)) (hasFocus && stackSelected) (cs ^. frameList)
+
+    blockViewer = SBB.blockViewer SBN.CallStackBlockViewer SC.CrucibleRepr
+
     curSel = cs ^. focusRing . L.to BF.focusGetCurrent
     stackSelected = Just SBN.CallStackViewer == curSel
     valSelSelected = Just SBN.BreakpointValueSelectorForm == curSel
     viewerSelected = Just SBN.BreakpointValueViewer == curSel
+
+    cfgWidget = fromMaybe B.emptyWidget $ do
+      (_, CallStackFrame _ _ _ mBlock) <- cs ^. frameList . L.to BL.listSelectedElement
+      block <- mBlock
+      let blockState = SC.BlockState { SC.bsBlock = block
+                                     , SC.bsSelection = SC.NoSelection
+                                     , SC.bsList = SC.toInstructionList block
+                                     , SC.bsBlockMapping = Nothing
+                                     , SC.bsWithConstraints = \a -> a
+                                     , SC.bsRepr = SC.CrucibleRepr
+                                     }
+      return (BB.borderWithLabel (B.txt "BasicBlock") (SBB.renderBlockViewer blockState blockViewer))
 
 -- | This renders the form that lets the user select the value in the current
 -- stack frame to view
@@ -190,7 +235,7 @@ renderValueSelector :: Bool -> Maybe (Int, CallStackFrame arch s sym e) -> B.Wid
 renderValueSelector _hasFocus mf =
   case mf of
     Nothing -> B.emptyWidget
-    Just (_, CallStackFrame _ selForm _viewers) ->
+    Just (_, CallStackFrame _ selForm _viewers _block) ->
       SBV.renderValueSelectorForm selForm
 
 renderSelectedValue :: (sym ~ WEB.ExprBuilder s st fs)
@@ -200,14 +245,14 @@ renderSelectedValue :: (sym ~ WEB.ExprBuilder s st fs)
                     -> B.Widget SBN.Names
 renderSelectedValue hasFocus valNames mf =
   case mf of
-    Just (_, CallStackFrame _ selForm viewers)
+    Just (_, CallStackFrame _ selForm viewers _block)
       | Just (Some idx) <- SBV.selectedIndex selForm
       , WrappedViewer vv <- viewers Ctx.! idx ->
         WVV.renderValueViewer hasFocus valNames vv
     _ -> B.emptyWidget
 
 renderCallStackFrame :: proxy arch -> Bool -> CallStackFrame arch s sym e -> B.Widget SBN.Names
-renderCallStackFrame proxy hasFocus (CallStackFrame cse _ _) =
+renderCallStackFrame proxy hasFocus (CallStackFrame cse _ _ _) =
   case cse of
     BreakpointFrame mName -> B.txt (fromMaybe "<Unnamed Breakpoint>" mName)
     AssertionFrame -> B.txt "<Failed Assertion>"
@@ -245,16 +290,16 @@ handleCallStackViewerEvent evt cs0 =
           fl' <- BL.handleListEvent ve (cs0 ^. frameList)
           return (cs0 & frameList .~ fl')
       | BF.focusGetCurrent (cs0 ^. focusRing) == Just SBN.BreakpointValueViewer
-      , Just (listIdx, CallStackFrame cse selForm viewers) <- cs0 ^. frameList . L.to BL.listSelectedElement
+      , Just (listIdx, CallStackFrame cse selForm viewers block) <- cs0 ^. frameList . L.to BL.listSelectedElement
       , Just (Some idx) <- SBV.selectedIndex selForm
       , WrappedViewer vv <- viewers Ctx.! idx -> do
           vv' <- WVV.handleValueViewerEvent ve vv
-          let frame = CallStackFrame cse selForm (L.set (PC.ixF idx) (WrappedViewer vv') viewers)
+          let frame = CallStackFrame cse selForm (L.set (PC.ixF idx) (WrappedViewer vv') viewers) block
           return (cs0 & frameList . BL.listElementsL %~ (DV.// [(listIdx, frame)]))
       | BF.focusGetCurrent (cs0 ^. focusRing) == Just SBN.BreakpointValueSelectorForm
-      , Just (listIdx, CallStackFrame cse selForm viewers) <- cs0 ^. frameList . L.to BL.listSelectedElement -> do
+      , Just (listIdx, CallStackFrame cse selForm viewers block) <- cs0 ^. frameList . L.to BL.listSelectedElement -> do
           selForm' <- SBV.handleValueSelectorFormEvent evt selForm
-          let frame = CallStackFrame cse selForm' viewers
+          let frame = CallStackFrame cse selForm' viewers block
           return (cs0 & frameList . BL.listElementsL %~ (DV.// [(listIdx, frame)]))
     _ -> return cs0
 
@@ -266,7 +311,7 @@ handleCallStackViewerEvent evt cs0 =
 -- (if any).
 selectedValue :: (sym ~ WEB.ExprBuilder s st fs) => CallStackViewer arch s sym e -> Maybe (Some (LMCR.RegEntry sym))
 selectedValue csv = do
-  (_, CallStackFrame _cse selForm viewers) <- csv ^. frameList . L.to BL.listSelectedElement
+  (_, CallStackFrame _cse selForm viewers _) <- csv ^. frameList . L.to BL.listSelectedElement
   Some selValIdx <- SBV.selectedIndex selForm
   case viewers Ctx.! selValIdx of
     WrappedViewer vv ->

@@ -20,13 +20,10 @@ module Surveyor.Core.Architecture.Crucible (
   CrucibleExtension(..),
   crucibleForMCBlocks,
   -- * Utilities for writing arch-specific backends
-  NonceCache,
   toRegisterOperand,
   allocateRegister,
   toExtensionOperand,
   Instruction(..),
-  initialCache,
-  cacheSize,
   Operand(..),
   CrucibleOperand(..),
   crucibleStmtOperands,
@@ -41,7 +38,6 @@ import           Control.Lens ( (^.) )
 import qualified Data.BitVector.Sized as DBS
 import qualified Data.Foldable as F
 import           Data.Functor.Const ( Const(Const, getConst) )
-import           Data.Kind ( Type )
 import qualified Data.Macaw.CFG as MC
 import qualified Data.Macaw.Symbolic as MS
 import qualified Data.Map as Map
@@ -72,27 +68,9 @@ import qualified What4.Symbol as WS
 import qualified What4.Utils.StringLiteral as WSL
 
 import           Surveyor.Core.Architecture.Class
+import qualified Surveyor.Core.Architecture.NonceCache as SCAN
 import           Surveyor.Core.IRRepr ( Crucible )
 import qualified Surveyor.Core.OperandList as OL
-
--- | The type of the crucible extension for this architecture
---
--- For machine code architectures, it will be the MacawExt.  It will be
--- different for JVM and LLVM
-class CrucibleExtension arch where
-  type family CrucibleExtensionOperand arch :: Type -> Type
-  prettyExtensionStmt :: proxy arch -> C.StmtExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
-  prettyExtensionApp :: proxy arch -> C.ExprExtension (CrucibleExt arch) (C.Reg ctx) tp -> T.Text
-  prettyExtensionOperand :: proxy arch -> CrucibleExtensionOperand arch s -> T.Text
-  extensionExprOperands :: NonceCache s ctx
-                        -> PN.NonceGenerator IO s
-                        -> C.ExprExtension (CrucibleExt arch) (C.Reg ctx) tp
-                        -> IO [Operand (Crucible arch) s]
-  extensionStmtOperands :: NonceCache s ctx
-                        -> PN.NonceGenerator IO s
-                        -> C.StmtExtension (CrucibleExt arch) (C.Reg ctx) tp
-                        -> IO [Operand (Crucible arch) s]
-  extensionOperandSelectable :: proxy arch -> CrucibleExtensionOperand arch s -> Bool
 
 -- | Build a 'BlockMapping' for a given function, mapping machine code blocks to
 -- their crucible equivalents.  Note: there are some cases where some blocks
@@ -170,7 +148,7 @@ toMCCrucibleBlock :: forall arch s blocks ret ctx
                   -> C.Block (CrucibleExt arch) blocks ret ctx
                   -> IO (Const (Maybe (Block arch s), Block (Crucible arch) s) ctx)
 toMCCrucibleBlock ng blockIndex faddr fh b = do
-  c0 <- initialCache ng (C.blockInputs b)
+  c0 <- SCAN.initialCache ng (C.blockInputs b)
   let baddr = BlockAddr faddr (Ctx.indexVal (C.blockIDIndex (C.blockID b)))
   (mMinAddr, stmts) <- buildBlock c0 baddr 0 (b ^. C.blockStmts)
   let cb = Block { blockFunction = fh
@@ -184,7 +162,7 @@ toMCCrucibleBlock ng blockIndex faddr fh b = do
         Nothing -> return (Const (Nothing, cb))
     Nothing -> return (Const (Nothing, cb))
   where
-    buildBlock :: NonceCache s ctx'
+    buildBlock :: SCAN.NonceCache s ctx'
                -> Addr 'BlockK
                -> Int
                -> C.StmtSeq (CrucibleExt arch) blocks ret ctx'
@@ -195,7 +173,7 @@ toMCCrucibleBlock ng blockIndex faddr fh b = do
         C.ConsStmt _loc stmt ss' -> do
           (nc', mBinder, ops) <- crucibleStmtOperands nc ng stmt
           (mMinAddr, rest) <- buildBlock nc' baddr (iidx + 1) ss'
-          let sz = cacheSize nc
+          let sz = SCAN.cacheSize nc
           let cstmt = CrucibleStmt sz stmt mBinder ops
           let iaddr = CrucibleAddress (InstructionAddr baddr iidx)
           case stmt of
@@ -644,39 +622,30 @@ cruciblePrettyOpcode o =
         C.IsConcrete {} -> "is-concrete"
         C.ReferenceEq {} -> "reference-eq"
 
-data NonceCache s ctx where
-  NonceCache :: forall s ctx (k :: C.CrucibleType -> Type) . (k ~ PN.Nonce s) => Ctx.Assignment k ctx -> NonceCache s ctx
-
-cacheSize :: NonceCache s ctx -> Ctx.Size ctx
-cacheSize (NonceCache a) = Ctx.size a
-
-toRegisterOperand :: NonceCache s ctx
+toRegisterOperand :: SCAN.NonceCache s ctx
                   -> C.Reg ctx tp
                   -> Operand (Crucible arch) s
-toRegisterOperand (NonceCache cache) r =
+toRegisterOperand (SCAN.NonceCache cache) r =
   CrucibleOperand (cache Ctx.! C.regIndex r) (Reg r)
 
-allocateRegister :: NonceCache s ctx
+allocateRegister :: SCAN.NonceCache s ctx
                  -> PN.NonceGenerator IO s
                  -> Maybe (C.Reg (ctx Ctx.::> tp) tp -> CrucibleOperand arch s)
-                 -> IO (NonceCache s (ctx Ctx.::> tp), Operand (Crucible arch) s)
-allocateRegister (NonceCache cache) ng mTyCon = do
+                 -> IO (SCAN.NonceCache s (ctx Ctx.::> tp), Operand (Crucible arch) s)
+allocateRegister (SCAN.NonceCache cache) ng mTyCon = do
   n <- PN.freshNonce ng
   let creg = C.Reg (Ctx.nextIndex (Ctx.size cache))
   case mTyCon of
     Nothing -> do
       let reg = CrucibleOperand n (Reg creg)
-      return (NonceCache (Ctx.extend cache n), reg)
-    Just con -> return (NonceCache (Ctx.extend cache n), CrucibleOperand n (con creg))
-
-initialCache :: PN.NonceGenerator IO s -> C.CtxRepr ctx -> IO (NonceCache s ctx)
-initialCache ng cr = NonceCache <$> FC.traverseFC (\_ -> PN.freshNonce ng) cr
+      return (SCAN.NonceCache (Ctx.extend cache n), reg)
+    Just con -> return (SCAN.NonceCache (Ctx.extend cache n), CrucibleOperand n (con creg))
 
 -- | Extract operands from a terminal statement
 --
 -- Terminal statements cannot bind new values, so this function does not need to
 -- update the cache or return binders.
-crucibleTermStmtOperands :: NonceCache s ctx
+crucibleTermStmtOperands :: SCAN.NonceCache s ctx
                          -> PN.NonceGenerator IO s
                          -> C.TermStmt blocks ret ctx
                          -> IO (OL.OperandList (Operand (Crucible arch) s))
@@ -716,10 +685,10 @@ crucibleTermStmtOperands cache ng stmt =
     C.ErrorStmt r -> return (OL.fromList [toRegisterOperand cache r])
 
 crucibleStmtOperands :: (CrucibleExtension arch)
-                     => NonceCache s ctx
+                     => SCAN.NonceCache s ctx
                      -> PN.NonceGenerator IO s
                      -> C.Stmt (CrucibleExt arch) ctx ctx'
-                     -> IO (NonceCache s ctx', Maybe (Operand (Crucible arch) s), OL.OperandList (Operand (Crucible arch) s))
+                     -> IO (SCAN.NonceCache s ctx', Maybe (Operand (Crucible arch) s), OL.OperandList (Operand (Crucible arch) s))
 crucibleStmtOperands cache ng stmt =
   case stmt of
     C.Print r ->
@@ -791,7 +760,7 @@ crucibleStmtOperands cache ng stmt =
 
 -- | Note that this cannot add cache entries
 crucibleAppOperands :: (CrucibleExtension arch)
-                    => NonceCache s ctx
+                    => SCAN.NonceCache s ctx
                     -> PN.NonceGenerator IO s
                     -> C.App (CrucibleExt arch) (C.Reg ctx) tp
                     -> IO (OL.OperandList (Operand (Crucible arch) s))

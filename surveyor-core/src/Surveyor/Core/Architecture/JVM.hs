@@ -29,8 +29,9 @@ import qualified Data.Text as T
 import           Data.Word ( Word8, Word16 )
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as CCC
-import qualified Lang.Crucible.JVM as CJ
+import qualified Lang.Crucible.CFG.Extension as CCE
 import qualified Lang.Crucible.FunctionHandle as CFH
+import qualified Lang.Crucible.JVM as CJ
 import qualified Lang.Crucible.Simulator as CS
 import qualified Language.JVM.CFG as J
 import qualified Language.JVM.Common as J
@@ -38,6 +39,8 @@ import qualified Language.JVM.Parser as J
 import           Text.Printf ( printf )
 
 import           Surveyor.Core.Architecture.Class
+import qualified Surveyor.Core.Architecture.Crucible as AC
+import qualified Surveyor.Core.Architecture.NonceCache as SCAN
 import qualified Surveyor.Core.OperandList as OL
 
 data JVM
@@ -197,6 +200,39 @@ instance Architecture JVM s where
   crucibleCFG = jvmCrucibleCFG
   freshSymbolicEntry _ _ _ = Nothing
   symbolicInitializers = jvmSymbolicInitializers
+  fromCrucibleBlock = Nothing
+
+data CrucibleJVMOperand s = CrucibleJVMOperand
+
+instance CrucibleExtension JVM where
+  type CrucibleExtensionOperand JVM = CrucibleJVMOperand
+  extensionOperandSelectable _ _ = False
+  extensionStmtOperands = jvmExtensionStmtOperands
+  extensionExprOperands = jvmExtensionExprOperands
+  prettyExtensionStmt _ = prettyJVMStmt
+  prettyExtensionApp _ = prettyJVMApp
+  prettyExtensionOperand _ = prettyJVMExtensionOperand
+
+prettyJVMExtensionOperand :: CrucibleJVMOperand s -> T.Text
+prettyJVMExtensionOperand _ = error "Unimplemented"
+
+prettyJVMApp :: CCE.ExprExtension CJ.JVM (CCC.Reg ctx) tp -> T.Text
+prettyJVMApp = error "Unimplemented"
+
+prettyJVMStmt :: CCE.StmtExtension CJ.JVM (CCC.Reg ctx) tp -> T.Text
+prettyJVMStmt = error "Unimplemented"
+
+jvmExtensionStmtOperands :: SCAN.NonceCache s ctx
+                         -> NG.NonceGenerator IO s
+                         -> CCE.StmtExtension CJ.JVM (CCC.Reg ctx) tp
+                         -> IO [Operand (AC.Crucible JVM) s]
+jvmExtensionStmtOperands = error "Unimplemented"
+
+jvmExtensionExprOperands :: SCAN.NonceCache s ctx
+                         -> NG.NonceGenerator IO s
+                         -> CCE.ExprExtension CJ.JVM (CCC.Reg ctx) tp
+                         -> IO [Operand (AC.Crucible JVM) s]
+jvmExtensionExprOperands = error "Unimplemented"
 
 jvmCrucibleCFG :: AnalysisResult JVM s
                -> FunctionHandle JVM s

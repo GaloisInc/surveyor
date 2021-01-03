@@ -24,7 +24,7 @@ import qualified Brick as B
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.List as B
 import           Control.DeepSeq ( NFData, rnf )
-import           Control.Lens ( (^.), (^?), (&), (.~) )
+import           Control.Lens ( (^.), (&), (.~) )
 import qualified Data.ByteString as BS
 import qualified Data.List as L
 import           Data.Parameterized.Classes
@@ -67,20 +67,16 @@ blockViewer names repr = BlockViewer names repr
 
 renderBlockViewer :: forall arch s ir
                    . (C.Architecture arch s)
-                  => C.AnalysisResult arch s
-                  -> C.ContextStack arch s
+                  => C.BlockState arch s ir
                   -> BlockViewer arch s ir
                   -> B.Widget Names
-renderBlockViewer _ares cs (BlockViewer names repr)
-  | Just ctx <- cs ^? C.currentContext
-  , Just blkState <- ctx ^. C.blockStateFor repr =
-      let blk = blkState ^. C.blockStateBlock
-          header = B.txt (PPT.renderStrict (PP.layoutCompact ("Basic Block" PP.<+> PP.pretty (C.prettyAddress (C.blockAddress blk)) PP.<+> ")")))
-          bl = mkBlockListState names blkState
-          body = B.renderList (renderListItem (blkState ^. C.blockStateSelection)) False bl
-      in B.borderWithLabel (B.hBox (map pad (irIndicators ++ [header]))) body
-  | otherwise = B.borderWithLabel (B.txt "No block") (B.hBox (map pad irIndicators))
+renderBlockViewer blkState (BlockViewer names repr) =
+  B.borderWithLabel (B.hBox (map pad (irIndicators ++ [header]))) body
   where
+    blk = blkState ^. C.blockStateBlock
+    header = B.txt (PPT.renderStrict (PP.layoutCompact ("Basic Block" PP.<+> PP.pretty (C.prettyAddress (C.blockAddress blk)) PP.<+> ")")))
+    bl = mkBlockListState names blkState
+    body = B.renderList (renderListItem (blkState ^. C.blockStateSelection)) False bl
     pad = B.padLeftRight 1
     irIndicators = map toIRLabel (C.SomeIRRepr C.BaseRepr : C.alternativeIRs (Proxy @(arch, s)))
     toIRLabel (C.SomeIRRepr r)

@@ -21,7 +21,10 @@ import qualified Surveyor.Core.Mode as SCM
 import qualified Surveyor.Core.State as SCS
 import qualified Surveyor.Core.SymbolicExecution as SymEx
 
-handleContextEvent :: (SCA.Architecture arch s, MonadIO m)
+handleContextEvent :: ( SCA.Architecture arch s
+                      , SCA.CrucibleExtension arch
+                      , MonadIO m
+                      )
                   => SCS.S e u arch s
                   -> SCE.ContextEvent s (SCS.S e u)
                   -> m (SCS.State e u s)

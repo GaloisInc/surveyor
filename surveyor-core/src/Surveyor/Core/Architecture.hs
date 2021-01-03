@@ -19,6 +19,7 @@ module Surveyor.Core.Architecture (
   SomeIRRepr(..),
   Architecture(..),
   SymbolicArchitecture(..),
+  SCAC.CrucibleExtension(..),
   CruciblePersonality,
   AnalysisResult,
   Block(..),
@@ -46,3 +47,4 @@ import qualified Surveyor.Core.Architecture.LLVM as LL
 import qualified Surveyor.Core.Architecture.MC as MC
 import qualified Surveyor.Core.Architecture.Macaw as M
 import           Surveyor.Core.Architecture.Void ()
+import qualified Surveyor.Core.Architecture.Crucible as SCAC

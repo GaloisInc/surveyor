@@ -66,12 +66,14 @@ data StateExplorer arch s e where
 -- our own focus widget to determine if we should send events to the value
 -- selector widget or the value viewer widget.
 stateExplorer :: forall e arch s
-               . C.SymbolicExecutionState arch s C.Suspend
-              -> StateExplorer arch s e
-stateExplorer (C.Suspended symNonce suspSt) =
-  StateExplorer symNonce csViewer
+               . (C.Architecture arch s)
+              => PN.NonceGenerator IO s
+              -> C.SymbolicExecutionState arch s C.Suspend
+              -> IO (StateExplorer arch s e)
+stateExplorer ng (C.Suspended symNonce suspSt) = do
+  csViewer <- WCSV.callStackViewer (Proxy @arch) ng (C.suspendedReason suspSt) (C.suspendedRegVals suspSt) frames
+  return (StateExplorer symNonce csViewer)
   where
-    csViewer = WCSV.callStackViewer (Proxy @arch) (C.suspendedReason suspSt) (C.suspendedRegVals suspSt) frames
     frames = suspSt ^. L.to C.suspendedSimState . LCSET.stateTree . L.to LCSET.activeFrames
 
 -- | Render a view of the final state from symbolic execution
@@ -79,7 +81,10 @@ stateExplorer (C.Suspended symNonce suspSt) =
 -- Eventually, this should provide some mechanisms for deeply inspecting the
 -- state (including arch-specific inspection of memory).
 renderSymbolicExecutionStateExplorer :: forall arch s e
-                                      . C.SymbolicExecutionState arch s C.Suspend
+                                      . ( C.Architecture arch s
+                                        , C.CrucibleExtension arch
+                                        )
+                                     => C.SymbolicExecutionState arch s C.Suspend
                                      -> StateExplorer arch s e
                                      -> C.ValueNameMap s
                                      -> B.Widget Names

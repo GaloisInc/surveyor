@@ -42,7 +42,10 @@ import qualified Surveyor.Core.SymbolicExecution.State as SES
 import qualified Surveyor.Core.TranslationCache as SCTC
 import qualified Surveyor.Core.ValueNames as SCV
 
-handleSymbolicExecutionEvent :: (SCA.Architecture arch s, MonadIO m)
+handleSymbolicExecutionEvent :: ( SCA.Architecture arch s
+                                , SCA.CrucibleExtension arch
+                                , MonadIO m
+                                )
                              => SCS.S e u arch s
                              -> SCE.SymbolicExecutionEvent s (SCS.S e u)
                              -> m (SCS.State e u s)
@@ -186,6 +189,7 @@ makeSuspendedState :: ( MonadIO m
                       , sym ~ WEB.ExprBuilder s st fs
                       , CB.IsSymInterface sym
                       , SCA.Architecture arch s
+                      , SCA.CrucibleExtension arch
                       , ext ~ SCA.CrucibleExt arch
                       )
                    => SCS.S e u arch s
