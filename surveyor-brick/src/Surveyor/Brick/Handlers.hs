@@ -124,7 +124,9 @@ handleVtyEvent s0@(C.State s) evt
     C.SomeUIMode _m -> B.continue s0
 
 
-handleCustomEvent :: (C.Architecture arch s)
+handleCustomEvent :: ( C.Architecture arch s
+                     , C.CrucibleExtension arch
+                     )
                   => C.S SBE.BrickUIExtension SBE.BrickUIState arch s
                   -> C.Events s (C.S SBE.BrickUIExtension SBE.BrickUIState)
                   -> B.EventM Names (B.Next (C.State SBE.BrickUIExtension SBE.BrickUIState s))

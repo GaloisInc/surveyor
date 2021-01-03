@@ -19,6 +19,7 @@ module Surveyor.Core.Architecture.Class (
   SomeIRRepr(..),
   Architecture(..),
   SymbolicArchitecture(..),
+  CrucibleExtension(..),
   CruciblePersonality,
   SomeResult(..),
   ResultIndex(..),
@@ -59,14 +60,35 @@ import qualified Lang.Crucible.FunctionHandle as CFH
 import qualified Lang.Crucible.Simulator as CS
 import qualified Lang.Crucible.Types as CT
 
-import           Surveyor.Core.IRRepr ( IRRepr )
+import           Surveyor.Core.IRRepr ( IRRepr, Crucible )
 import qualified Surveyor.Core.OperandList as OL
+import qualified Surveyor.Core.Architecture.NonceCache as SCAN
 
 data SomeResult s arch where
-  SomeResult :: (ArchConstraints arch s, Architecture arch s) => AnalysisResult arch s -> SomeResult s arch
+  SomeResult :: (ArchConstraints arch s, Architecture arch s, CrucibleExtension arch) => AnalysisResult arch s -> SomeResult s arch
 
 instance NFData (SomeResult s arch) where
   rnf (SomeResult ar) = ar `deepseq` ()
+
+-- | The type of the crucible extension for this architecture
+--
+-- For machine code architectures, it will be the MacawExt.  It will be
+-- different for JVM and LLVM
+class CrucibleExtension arch where
+  type family CrucibleExtensionOperand arch :: Type -> Type
+  prettyExtensionStmt :: proxy arch -> CCE.StmtExtension (CrucibleExt arch) (CCC.Reg ctx) tp -> T.Text
+  prettyExtensionApp :: proxy arch -> CCE.ExprExtension (CrucibleExt arch) (CCC.Reg ctx) tp -> T.Text
+  prettyExtensionOperand :: proxy arch -> CrucibleExtensionOperand arch s -> T.Text
+  extensionExprOperands :: SCAN.NonceCache s ctx
+                        -> NG.NonceGenerator IO s
+                        -> CCE.ExprExtension (CrucibleExt arch) (CCC.Reg ctx) tp
+                        -> IO [Operand (Crucible arch) s]
+  extensionStmtOperands :: SCAN.NonceCache s ctx
+                        -> NG.NonceGenerator IO s
+                        -> CCE.StmtExtension (CrucibleExt arch) (CCC.Reg ctx) tp
+                        -> IO [Operand (Crucible arch) s]
+  extensionOperandSelectable :: proxy arch -> CrucibleExtensionOperand arch s -> Bool
+
 
 -- | The 'ResultIndex' is a type that we use to pre-compute as much as we can
 -- when we produce an analysis result (i.e., on another thread) so that we can
@@ -181,6 +203,10 @@ class (IR arch s, CCE.IsSyntaxExtension (CrucibleExt arch)) => Architecture (arc
                              , CS.ExtensionImpl (CruciblePersonality arch sym) sym (CrucibleExt arch)
                              , CruciblePersonality arch sym
                              )
+  fromCrucibleBlock :: Maybe (NG.NonceGenerator IO s
+                    -> CCC.CFG (CrucibleExt arch) blocks init ret
+                    -> CCC.Block (CrucibleExt arch) blocks ret ctx
+                    -> IO (Block (Crucible arch) s))
 
 data BlockMapping arch ir s =
   BlockMapping { blockMapping :: M.Map (Address arch s) (Block arch s, Block ir s)

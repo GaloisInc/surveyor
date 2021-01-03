@@ -16,7 +16,9 @@ import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 
-handleExtensionEvent :: (C.Architecture arch s)
+handleExtensionEvent :: ( C.Architecture arch s
+                        , C.CrucibleExtension arch
+                        )
                      => C.S SBE.BrickUIExtension SBE.BrickUIState arch s
                      -> SBE.BrickUIEvent s st
                      -> B.EventM n (B.Next (C.State SBE.BrickUIExtension SBE.BrickUIState s))

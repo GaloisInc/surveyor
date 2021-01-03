@@ -237,4 +237,4 @@ logMessage s msg = do
 -- the architecture so that the architecture can change during run-time (i.e.,
 -- when a new binary is loaded).
 data State e u s where
-  State :: (A.Architecture arch s) => !(S e u arch s) -> State e u s
+  State :: (A.Architecture arch s, A.CrucibleExtension arch) => !(S e u arch s) -> State e u s

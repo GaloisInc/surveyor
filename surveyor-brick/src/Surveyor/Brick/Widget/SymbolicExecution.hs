@@ -10,6 +10,9 @@ module Surveyor.Brick.Widget.SymbolicExecution (
 
 import qualified Brick as B
 import qualified Brick.Forms as B
+import           Control.Lens ((^.))
+import           Control.Monad.IO.Class ( liftIO )
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 
 import           Surveyor.Brick.Names ( Names(..) )
@@ -40,19 +43,24 @@ data SymbolicExecutionManager e arch s where
   -- underlying symbolic execution state has changed).
   Suspended :: SEE.StateExplorer arch s e -> SymbolicExecutionManager e arch s
 
-symbolicExecutionManager :: Some (C.SymbolicExecutionState arch s)
-                         -> SymbolicExecutionManager e arch s
-symbolicExecutionManager (Some state) =
+symbolicExecutionManager :: (C.Architecture arch s)
+                         => PN.NonceGenerator IO s
+                         -> Some (C.SymbolicExecutionState arch s)
+                         -> IO (SymbolicExecutionManager e arch s)
+symbolicExecutionManager ng (Some state) =
   case state of
-    C.Configuring {} -> Configuring (SEC.form (C.symbolicExecutionConfig state))
-    C.Initializing {} -> Initializing
-    C.Executing {} -> Executing
-    C.Inspecting {} -> Inspecting
-    C.Suspended {} -> Suspended (SEE.stateExplorer state)
+    C.Configuring {} -> return (Configuring (SEC.form (C.symbolicExecutionConfig state)))
+    C.Initializing {} -> return Initializing
+    C.Executing {} -> return Executing
+    C.Inspecting {} -> return Inspecting
+    C.Suspended {} -> Suspended <$> SEE.stateExplorer ng state
 
 -- | For each possible symbolic execution state, render the cached state (if
 -- any), or construct a fresh UI state for the backend symbolic execution state.
-renderSymbolicExecutionManager :: SymbolicExecutionManager e arch s
+renderSymbolicExecutionManager :: ( C.Architecture arch s
+                                  , C.CrucibleExtension arch
+                                  )
+                               => SymbolicExecutionManager e arch s
                                -> C.SymbolicExecutionState arch s k
                                -> C.ValueNameMap s
                                -> B.Widget Names
@@ -67,9 +75,14 @@ renderSymbolicExecutionManager sem st valNames =
     (C.Inspecting {}, Inspecting) -> SEI.renderSymbolicExecutionInspector st
     (C.Inspecting {}, _) -> SEI.renderSymbolicExecutionInspector st
     (C.Suspended {}, Suspended xp) -> SEE.renderSymbolicExecutionStateExplorer st xp valNames
-    (C.Suspended {}, _) -> SEE.renderSymbolicExecutionStateExplorer st (SEE.stateExplorer st) valNames
+    (C.Suspended {}, _) ->
+      -- FIXME: Is this possible? It probably is, but an update should be coming
+      -- that would update the UI imminently.  We can't generate a fresh
+      -- StateExplorer here, because that requires IO.
+      B.emptyWidget
 
-handleSymbolicExecutionManagerEvent :: C.S evt u arch s
+handleSymbolicExecutionManagerEvent :: (C.Architecture arch s)
+                                    => C.S evt u arch s
                                     -> B.BrickEvent Names e
                                     -> SymbolicExecutionManager e arch s
                                     -> C.SymbolicExecutionState arch s k
@@ -109,6 +122,6 @@ handleSymbolicExecutionManagerEvent s0 evt sem st =
       f' <- SEE.handleSymbolicExecutionStateExplorerEvent s0 evt st f
       return (Suspended f')
     (C.Suspended {}, _) -> do
-      let f = SEE.stateExplorer st
+      f <- liftIO $ SEE.stateExplorer (s0 ^. C.lNonceGenerator) st
       f' <- SEE.handleSymbolicExecutionStateExplorerEvent s0 evt st f
       return (Suspended f')

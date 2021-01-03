@@ -18,7 +18,11 @@ import qualified Surveyor.Core.State as SCS
 import qualified Surveyor.Core.SymbolicExecution as SymEx
 import qualified Surveyor.Core.SymbolicExecution.ExecutionFeature as SCEF
 
-handleDebuggingEvent :: (SCA.Architecture arch s, MonadIO m, HasCallStack)
+handleDebuggingEvent :: ( SCA.Architecture arch s
+                        , SCA.CrucibleExtension arch
+                        , MonadIO m
+                        , HasCallStack
+                        )
                      => SCS.S e u arch s
                      -> SCE.DebuggingEvent s (SCS.S e u)
                      -> m (SCS.State e u s)

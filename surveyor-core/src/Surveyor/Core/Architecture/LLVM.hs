@@ -17,6 +17,7 @@ module Surveyor.Core.Architecture.LLVM (
   LLVM,
   llvmAnalysisResultFromModule,
   LLVMPersonality(..),
+  toLLVMCrucibleBlock,
   mkLLVMResult
   ) where
 
@@ -68,12 +69,14 @@ import qualified Text.LLVM.PP as LL
 import qualified Text.PrettyPrint.HughesPJ as TPP
 import           Text.Printf ( printf )
 import qualified What4.Expr.Builder as WEB
+import qualified What4.FunctionName as WFN
 import qualified What4.Interface as WI
 import qualified What4.ProgramLoc as WPL
 import qualified What4.Symbol as WS
 
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Crucible as AC
+import qualified Surveyor.Core.Architecture.NonceCache as SCAN
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr), Crucible )
 import qualified Surveyor.Core.OperandList as OL
 import qualified Surveyor.Core.Panic as SCP
@@ -382,6 +385,7 @@ instance Architecture LLVM s where
   crucibleCFG = llvmCrucibleCFG
   freshSymbolicEntry _ = llvmFreshSymbolicEntry
   symbolicInitializers = llvmSymbolicInitializers
+  fromCrucibleBlock = Just toLLVMCrucibleBlock
 
 llvmCrucibleCFG :: AnalysisResult LLVM s
                 -> FunctionHandle LLVM s
@@ -489,7 +493,7 @@ prettyLLVMApp a =
     LE.LLVM_SideConditions {} -> "llvm.side-conditions"
 
 
-llvmExtensionExprOperands :: AC.NonceCache s ctx
+llvmExtensionExprOperands :: SCAN.NonceCache s ctx
                           -> NG.NonceGenerator IO s
                           -> CCE.ExprExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp
                           -> IO [Operand (AC.Crucible LLVM) s]
@@ -529,7 +533,7 @@ llvmExtensionExprOperands cache ng e =
              , AC.toRegisterOperand cache r
              ]
 
-llvmExtensionStmtOperands :: AC.NonceCache s ctx
+llvmExtensionStmtOperands :: SCAN.NonceCache s ctx
                           -> NG.NonceGenerator IO s
                           -> CCE.StmtExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp
                           -> IO [Operand (AC.Crucible LLVM) s]
@@ -666,12 +670,58 @@ crucibleForLLVMBlocks ng funcIndex fh (Some mt) =
                   | Just Refl <- testEquality wrep (C.knownNat @64) -> do
                       let bm0 :: BlockMapping LLVM (Crucible LLVM) s
                           bm0 = BlockMapping mempty mempty mempty
-                      (rblks, bm) <- FC.foldlMFC' (toLLVMCrucibleBlock ng blockIndex fa fh cfg) ([], bm0) (C.cfgBlockMap cfg)
+                      (rblks, bm) <- FC.foldlMFC' (buildLLVMCrucibleBlock ng blockIndex fa fh cfg) ([], bm0) (C.cfgBlockMap cfg)
                       return (Just (reverse rblks, bm))
                 arep -> X.throwIO (UnsupportedLLVMArchitecture arep)
     LLVMAddress a -> X.throwIO (InvalidFunctionAddress a)
 
-toLLVMCrucibleBlock :: forall s blocks init ret ctx (arch :: LE.LLVMArch)
+buildCrucibleBlock :: forall s arch blocks ret ctx'
+                    . (arch ~ LE.X86 64)
+                   => NG.NonceGenerator IO s
+                   -> SCAN.NonceCache s ctx'
+                   -> AC.Addr 'AC.BlockK
+                   -> Int
+                   -> C.StmtSeq (LE.LLVM arch) blocks ret ctx'
+                   -> IO [(AC.Address (Crucible LLVM) s, Instruction (Crucible LLVM) s)]
+buildCrucibleBlock ng nc baddr iidx ss =
+  case ss of
+    C.ConsStmt _loc stmt ss' -> do
+      (nc', mBinder, ops) <- AC.crucibleStmtOperands nc ng stmt
+      rest <- buildCrucibleBlock ng nc' baddr (iidx + 1) ss'
+      let sz = SCAN.cacheSize nc
+      let iaddr = AC.CrucibleAddress (AC.InstructionAddr baddr iidx)
+      let cstmt = AC.CrucibleStmt sz stmt mBinder ops
+      return ((iaddr, cstmt) : rest )
+    C.TermStmt _loc term -> do
+      ops <- AC.crucibleTermStmtOperands nc ng term
+      let iaddr = AC.CrucibleAddress (AC.InstructionAddr baddr iidx)
+      let cstmt = AC.CrucibleTermStmt term ops
+      return [(iaddr, cstmt)]
+
+-- | Convert a single Crucible block (initially generated from LLVM code) into a
+-- Surveyor block
+toLLVMCrucibleBlock :: (arch ~ LE.X86 64)
+               => NG.NonceGenerator IO s
+               -> C.CFG (LE.LLVM arch) blocks init ret
+               -> C.Block (LE.LLVM arch) blocks ret ctx
+               -> IO (Block (Crucible LLVM) s)
+toLLVMCrucibleBlock ng cfg crucBlock = do
+  let hdl = CFH.handleID (C.cfgHandle cfg)
+  let hdlNum = NG.indexValue hdl
+  cache <- SCAN.initialCache ng (C.blockInputs crucBlock)
+
+  let baddr = AC.BlockAddr (AC.FunctionAddr hdlNum) (Ctx.indexVal (C.blockIDIndex (C.blockID crucBlock)))
+  stmts <- buildCrucibleBlock ng cache baddr 0 (crucBlock ^. C.blockStmts)
+
+  let faddr = FunctionHandle { fhName = WFN.functionName (CFH.handleName (C.cfgHandle cfg))
+                             , fhAddress = AC.CrucibleAddress (AC.FunctionAddr hdlNum)
+                             }
+  return Block { blockAddress = AC.CrucibleAddress baddr
+               , blockInstructions = stmts
+               , blockFunction = faddr
+               }
+
+buildLLVMCrucibleBlock :: forall s blocks init ret ctx (arch :: LE.LLVMArch)
                      . (arch ~ LE.X86 64)
                     => NG.NonceGenerator IO s
                     -> BlockIndex
@@ -681,24 +731,8 @@ toLLVMCrucibleBlock :: forall s blocks init ret ctx (arch :: LE.LLVMArch)
                     -> ([Block (Crucible LLVM) s], BlockMapping LLVM (Crucible LLVM) s)
                     -> C.Block (LE.LLVM arch) blocks ret ctx
                     -> IO ([Block (Crucible LLVM) s], BlockMapping LLVM (Crucible LLVM) s)
-toLLVMCrucibleBlock ng blockIndex (FunctionAddr sym) fh cfg (blks, bm) crucBlock = do
-  let hdl = CFH.handleID (C.cfgHandle cfg)
-  let hdlNum = NG.indexValue hdl
-
-  c0 <- AC.initialCache ng (C.blockInputs crucBlock)
-  -- We use the nonce ID of the CFG for the function address; it is stable
-  -- and probably as good as any other address we could give.  Maybe it
-  -- would be better to generalize the type of function addresses for
-  -- Crucible and have it be a string for LLVM/Crucible?
-  let baddr = AC.BlockAddr (AC.FunctionAddr hdlNum) (Ctx.indexVal (C.blockIDIndex (C.blockID crucBlock)))
-  stmts <- buildBlock c0 baddr 0 (crucBlock ^. C.blockStmts)
-  let crucAddr = FunctionHandle { fhName = fhName fh
-                                , fhAddress = AC.CrucibleAddress (AC.FunctionAddr hdlNum)
-                                }
-  let crucBlock' = Block { blockAddress = AC.CrucibleAddress baddr
-                         , blockInstructions = stmts
-                         , blockFunction = crucAddr
-                         }
+buildLLVMCrucibleBlock ng blockIndex (FunctionAddr sym) fh cfg (blks, bm) crucBlock = do
+  crucBlock' <- toLLVMCrucibleBlock ng cfg crucBlock
 
   case M.lookup (WPL.plSourceLoc (C.blockLoc crucBlock)) (biPosToBlock blockIndex) of
     Nothing -> return (crucBlock':blks, bm)
@@ -709,27 +743,6 @@ toLLVMCrucibleBlock ng blockIndex (FunctionAddr sym) fh cfg (blks, bm) crucBlock
                              , irToBaseAddrs = M.insert (blockAddress crucBlock') (S.singleton (blockAddress llvmBlock')) (irToBaseAddrs bm)
                              }
       return (crucBlock':blks, bm')
-  where
-    buildBlock :: forall ctx'
-                . AC.NonceCache s ctx'
-               -> AC.Addr 'AC.BlockK
-               -> Int
-               -> C.StmtSeq (LE.LLVM arch) blocks ret ctx'
-               -> IO [(AC.Address (Crucible LLVM) s, Instruction (Crucible LLVM) s)]
-    buildBlock nc baddr iidx ss =
-      case ss of
-        C.ConsStmt _loc stmt ss' -> do
-          (nc', mBinder, ops) <- AC.crucibleStmtOperands nc ng stmt
-          rest <- buildBlock nc' baddr (iidx + 1) ss'
-          let sz = AC.cacheSize nc
-          let iaddr = AC.CrucibleAddress (AC.InstructionAddr baddr iidx)
-          let cstmt = AC.CrucibleStmt sz stmt mBinder ops
-          return ((iaddr, cstmt) : rest )
-        C.TermStmt _loc term -> do
-          ops <- AC.crucibleTermStmtOperands nc ng term
-          let iaddr = AC.CrucibleAddress (AC.InstructionAddr baddr iidx)
-          let cstmt = AC.CrucibleTermStmt term ops
-          return [(iaddr, cstmt)]
 
 instance Eq (Address LLVM s) where
   LLVMAddress a1 == LLVMAddress a2 = isJust (testEquality a1 a2)

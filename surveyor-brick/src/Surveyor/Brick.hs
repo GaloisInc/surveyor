@@ -169,7 +169,9 @@ appDraw (C.State s) =
            C.SomeUIMode mode ->
              drawUIMode binFileName archState s mode
 
-drawUIMode :: (C.Architecture arch s)
+drawUIMode :: ( C.Architecture arch s
+              , C.CrucibleExtension arch
+              )
            => FilePath
            -> C.ArchState BH.BrickUIState arch s
            -> C.S BH.BrickUIExtension BH.BrickUIState arch s
@@ -241,7 +243,9 @@ surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   s0 <- emptyState mExePath mloader ng chan
   surveyorWith customEventChan s0
 
-surveyorWith :: (C.Architecture arch s)
+surveyorWith :: ( C.Architecture arch s
+                , C.CrucibleExtension arch
+                )
              => B.BChan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState))
              -> C.S BH.BrickUIExtension BH.BrickUIState arch s
              -> IO ()

@@ -35,7 +35,9 @@ import qualified Surveyor.Brick.Widget.FunctionViewer as FV
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
 import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
 
-handleLoadEvent :: (C.Architecture arch s)
+handleLoadEvent :: ( C.Architecture arch s
+                   , C.CrucibleExtension arch
+                   )
                 => C.S SBE.BrickUIExtension SBE.BrickUIState arch s
                 -> C.LoadEvent s (C.S SBE.BrickUIExtension SBE.BrickUIState)
                 -> B.EventM Names (B.Next (C.State SBE.BrickUIExtension SBE.BrickUIState s))
@@ -99,7 +101,9 @@ handleLoadEvent s0 evt =
       B.continue $! C.State s1
 
 stateFromAnalysisResult :: forall arch0 arch s
-                         . (C.Architecture arch s)
+                         . ( C.Architecture arch s
+                           , C.CrucibleExtension arch
+                           )
                         => C.S SBE.BrickUIExtension SBE.BrickUIState arch0 s
                         -> C.AnalysisResult arch s
                         -> Seq.Seq T.Text
@@ -137,6 +141,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
         msg <- C.timestamp (C.msgWith { C.logText = [t], C.logSource = C.Loader })
         return (C.appendLog msg ls)
   nextLogStore <- F.foldlM appendTextLog (C.sLogStore s0) newDiags
+  sem <- SEM.symbolicExecutionManager (C.sNonceGenerator s0) (Some (C.Configuring ses))
   return C.S { C.sLogStore = nextLogStore
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
              , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState (C.sEventChannel s0)
@@ -180,7 +185,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
                                                        , SBE.sFunctionViewer = MapF.fromList funcViewers
                                                        , SBE.sFunctionSelector = FS.functionSelector (const (return ())) focusedListAttr []
                                                        , SBE.sSymbolicExecutionState =
-                                                         Map.singleton (ses ^. C.sessionID) (SEM.symbolicExecutionManager (Some (C.Configuring ses)))
+                                                         Map.singleton (ses ^. C.sessionID) sem
                                                        }
                         return C.ArchState { C.sAnalysisResult = ares
                                            , C.sUIState = uiState

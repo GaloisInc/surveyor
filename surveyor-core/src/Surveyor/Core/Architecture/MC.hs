@@ -71,6 +71,7 @@ import qualified What4.Symbol as WS
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Crucible as AC
 import qualified Surveyor.Core.Architecture.Macaw as AM
+import qualified Surveyor.Core.Architecture.NonceCache as SCAN
 import           Surveyor.Core.BinaryAnalysisResult
 import           Surveyor.Core.IRRepr ( IRRepr(MacawRepr, BaseRepr, CrucibleRepr) )
 import qualified Surveyor.Core.OperandList as OL
@@ -176,7 +177,7 @@ asText :: PP.Doc ann -> T.Text
 asText = PPT.renderStrict . PP.layoutCompact
 
 macawExtensionExprOperands :: (AC.CrucibleExtensionOperand arch ~ MacawOperand arch)
-                           => AC.NonceCache s ctx
+                           => SCAN.NonceCache s ctx
                            -> NG.NonceGenerator IO s
                            -> MS.MacawExprExtension arch (C.Reg ctx) tp
                            -> IO [Operand (AC.Crucible arch) s]
@@ -210,7 +211,7 @@ macawExtensionExprOperands cache ng ext =
 macawExtensionStmtOperands :: ( AC.CrucibleExtensionOperand arch ~ MacawOperand arch
                               , MM.MemWidth (MM.ArchAddrWidth arch)
                               )
-                           => AC.NonceCache s ctx
+                           => SCAN.NonceCache s ctx
                            -> NG.NonceGenerator IO s
                            -> MS.MacawStmtExtension arch (C.Reg ctx) tp
                            -> IO [Operand (AC.Crucible arch) s]
@@ -663,6 +664,7 @@ instance Architecture PPC.PPC32 s where
   crucibleCFG (AnalysisResult (PPC32AnalysisResult bar) _) = mcCrucibleCFG ppcaddr32ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
   symbolicInitializers = mcSymbolicInitializers
+  fromCrucibleBlock = Nothing
 
 ppcaddr32ToConcrete :: Address PPC.PPC32 s -> R.ConcreteAddress PPC.PPC32
 ppcaddr32ToConcrete (PPC32Address ma32) =
@@ -796,6 +798,7 @@ instance Architecture PPC.PPC64 s where
   crucibleCFG (AnalysisResult (PPC64AnalysisResult bar) _) = mcCrucibleCFG ppcaddr64ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
   symbolicInitializers = mcSymbolicInitializers
+  fromCrucibleBlock = Nothing
 
 
 instance Eq (Address PPC.PPC64 s) where
@@ -921,6 +924,7 @@ instance Architecture X86.X86_64 s where
   crucibleCFG (AnalysisResult (X86AnalysisResult bar) _) = mcCrucibleCFG x86addr64ToConcrete bar
   freshSymbolicEntry _ = mcFreshSymbolicEntry
   symbolicInitializers = mcSymbolicInitializers
+  fromCrucibleBlock = Nothing
 
 -- FIXME: This needs to be completed once the memory model rewrite for
 -- macaw-symbolic is merged to master macaw.

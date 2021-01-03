@@ -12,7 +12,10 @@ import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.State as SCS
 
-handleLoggingEvent :: (SCA.Architecture arch s, MonadIO m)
+handleLoggingEvent :: ( SCA.Architecture arch s
+                      , SCA.CrucibleExtension arch
+                      , MonadIO m
+                      )
                    => SCS.S e u arch s
                    -> SCE.LoggingEvent s (SCS.S e u)
                    -> m (SCS.State e u s)
