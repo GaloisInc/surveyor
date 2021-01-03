@@ -96,6 +96,25 @@ module Surveyor.Core (
   AR.ValueNonceType,
   AR.showRepr,
   AR.parseArgument,
+  -- * Symbolic Execution Debug Support
+  -- ** Execution Feature
+  SCEF.DebuggerConfig(..),
+  SCEF.debuggerConfigStateVar,
+  SCEF.newDebuggerConfig,
+  SCEF.debuggerFeature,
+  SCEF.CrucibleExecState(..),
+  SCEF.ReturnExecState(..),
+  SCEF.DebuggerFeatureState(..),
+  -- ** Override Support
+  SCSO.CrucibleSimState(..),
+  SCSO.ReturnSimState(..),
+  SCSO.OverrideConfig(..),
+  SCSO.newOverrideConfig,
+  -- ** Monitors
+  SCSD.debugMonitor,
+  SCSD.overrideMonitor,
+  SCSD.terminateDebugMonitor,
+  SCSD.terminateOverrideMonitor,
   -- * Context
   CCX.Context(..),
   CCX.InstructionSelection(..),
@@ -112,6 +131,7 @@ module Surveyor.Core (
   SymEx.sessionID,
   SymEx.SomeFloatModeRepr(..),
   SymEx.defaultSymbolicExecutionConfig,
+  SymEx.defaultSymbolicExecutionConfigWith,
   SymEx.SymbolicState(..),
   SymEx.symbolicSessionID,
   SymEx.SessionState,
@@ -120,9 +140,10 @@ module Surveyor.Core (
   SymEx.singleSessionState,
   SymEx.updateSessionState,
   SymEx.updateSessionMetrics,
+  SymEx.cleanupActiveSessions,
   SymEx.SymbolicExecutionState(..),
-  SymEx.SimulationData(..),
   SymEx.SuspendedState(..),
+  SCSS.SuspendedReason(..),
   SymEx.suspendedState,
   SymEx.Config,
   SymEx.SetupArgs,
@@ -139,12 +160,9 @@ module Surveyor.Core (
   SymEx.configSolverL,
   SymEx.configFloatReprL,
   SymEx.solverInteractionFileL,
-  SymEx.breakpointP,
-  SymEx.modelViewP,
   -- ** Breakpoints
   SB.Breakpoint(..),
   SB.BreakpointType(..),
-  SB.classifyBreakpoint,
   -- ** Modifiers
   CCX.resetBlockSelection,
   CCX.selectNextInstruction,
@@ -237,5 +255,9 @@ import qualified Surveyor.Core.Mode as M
 import qualified Surveyor.Core.OperandList as OL
 import           Surveyor.Core.State
 import qualified Surveyor.Core.SymbolicExecution as SymEx
+import qualified Surveyor.Core.SymbolicExecution.DebugMonitor as SCSD
+import qualified Surveyor.Core.SymbolicExecution.ExecutionFeature as SCEF
+import qualified Surveyor.Core.SymbolicExecution.Override as SCSO
+import qualified Surveyor.Core.SymbolicExecution.State as SCSS
 import qualified Surveyor.Core.TranslationCache as TC
 import qualified Surveyor.Core.ValueNames as SCV

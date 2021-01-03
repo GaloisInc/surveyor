@@ -34,6 +34,8 @@ handleSymbolicExecutionEvent s0 evt =
     C.NameValue {} -> B.continue (C.State s0)
     C.InitializeValueNamePrompt {} -> B.continue (C.State s0)
     C.SetCurrentSymbolicExecutionValue {} -> B.continue (C.State s0)
+    C.DebugMonitorEvent {} -> B.continue (C.State s0)
+    C.OverrideMonitorEvent {} -> B.continue (C.State s0)
     C.UpdateSymbolicExecutionState archNonce newState
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. C.lNonce) -> do
           -- Whenever the symbolic execution state changes, we need to rebuild

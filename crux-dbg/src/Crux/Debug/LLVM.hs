@@ -12,22 +12,26 @@ module Crux.Debug.LLVM (
   debugLLVM
   ) where
 
+import qualified Brick.BChan as BB
+import qualified Control.Concurrent.Async as A
+import qualified Control.Concurrent.Chan as CCC
+import qualified Control.Concurrent.MVar as MV
 import           Control.Lens ( (^.), (&), (%~) )
-import           Control.Monad ( void )
 import qualified Control.Monad.Catch as CMC
-import qualified Control.Monad.State as CMS
 import           Control.Monad.IO.Class ( liftIO )
+import qualified Control.Monad.State as CMS
 import qualified Data.BitVector.Sized as BV
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
+import qualified Data.Foldable as F
 import qualified Data.LLVM.BitCode as DLB
 import qualified Data.Map.Strict as Map
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.NatRepr as NR
+import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
-import           Data.Proxy ( Proxy(..) )
 import           Data.String ( fromString )
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -37,40 +41,43 @@ import qualified System.Exit as SE
 import qualified System.IO as IO
 import qualified Text.LLVM as TL
 import qualified What4.Expr.Builder as WEB
-import qualified What4.ProgramLoc as WPL
-import qualified What4.Solver as WS
-import           What4.SatResult(SatResult(..))
-import           What4.Solver.Adapter ( solver_adapter_check_sat )
 import qualified What4.Interface as WI
+import qualified What4.ProgramLoc as WPL
+import           What4.SatResult(SatResult(..))
+import qualified What4.Solver as WS
+import           What4.Solver.Adapter ( solver_adapter_check_sat )
 
 import qualified Crux as C
-import qualified Crux.Types as C
-import qualified Crux.LLVM.Overrides as CLO
 import qualified Crux.Config.Solver as CCS
 import qualified Crux.Debug.Config as CDC
+import qualified Crux.LLVM.Overrides as CLO
 import qualified Crux.Log as CL
 import qualified Crux.Model as CM
+import qualified Crux.Types as C
+import qualified Crux.Types as CT
 import qualified Lang.Crucible.Backend as LCB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.FunctionHandle as CFH
 import qualified Lang.Crucible.LLVM as LCL
-import qualified Lang.Crucible.LLVM.QQ as LCLQ
 import qualified Lang.Crucible.LLVM.Extension as CLE
 import qualified Lang.Crucible.LLVM.Globals as CLG
 import qualified Lang.Crucible.LLVM.Intrinsics as CLI
 import qualified Lang.Crucible.LLVM.MemModel as CLM
+import qualified Lang.Crucible.LLVM.QQ as LCLQ
 import qualified Lang.Crucible.LLVM.Translation as CLT
 import qualified Lang.Crucible.Simulator as LCS
+import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Lang.Crucible.Simulator.GlobalState as LCSG
 import qualified Lang.Crucible.Simulator.Profiling as LCSP
-import qualified Lang.Crucible.Types as LCT
 import           Lang.Crucible.Simulator.RegMap (regValue)
+import qualified Lang.Crucible.Types as LCT
 
 import qualified Surveyor.Brick as SB
 import qualified Surveyor.Core as SC
+import qualified Crux.Debug.Interrupt as CBI
 
-breakpointOverrides :: ( LCB.IsSymInterface sym
+debugOverrides :: ( LCB.IsSymInterface sym
                        , CLM.HasLLVMAnn sym
                        , CLM.HasPtrWidth wptr
                        , wptr ~ CLE.ArchWidth arch
@@ -80,9 +87,9 @@ breakpointOverrides :: ( LCB.IsSymInterface sym
                        , ext ~ CLI.LLVM arch
                        )
                     => C.CruxOptions
-                    -> SB.DebuggerConfig t ext arch'
+                    -> SC.OverrideConfig t (SC.LLVMPersonality sym) sym arch' ext
                     -> [CLI.OverrideTemplate (SC.LLVMPersonality sym) sym arch rtp l a]
-breakpointOverrides cruxOpts sconf =
+debugOverrides cruxOpts sconf =
   [ CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_breakpoint(i8*, ...) |]
       (do_breakpoint sconf)
 
@@ -129,13 +136,26 @@ setupSimCtx outHdl halloc sym memGlobal memOpts llvmCtx =
                      (SC.LLVMPersonality memGlobal CM.emptyModel)
      & LCS.profilingMetrics %~ Map.union (llvmMetrics llvmCtx)
 
-debugLLVM :: (?outputConfig :: CL.OutputConfig) => C.CruxOptions -> CDC.DebugOptions -> FilePath -> IO SE.ExitCode
+debugLLVM :: (?outputConfig :: CL.OutputConfig)
+          => C.CruxOptions
+          -> CDC.DebugOptions
+          -> FilePath
+          -> IO SE.ExitCode
 debugLLVM cruxOpts dbgOpts bcFilePath = do
-  res <- C.runSimulator cruxOpts (simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath)
+  debuggerHandleVar <- MV.newEmptyMVar
+  res <- C.runSimulator cruxOpts (simulateLLVMWithDebug debuggerHandleVar cruxOpts dbgOpts bcFilePath)
+  putStrLn "Taking cleanup action"
+  cleanupAction <- MV.takeMVar debuggerHandleVar
+  putStrLn "Running cleanup action"
+  cleanupAction
   C.postprocessSimResult cruxOpts res
 
-simulateLLVMWithDebug :: C.CruxOptions -> CDC.DebugOptions -> FilePath -> C.SimulatorCallback
-simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _maybeOnline -> do
+simulateLLVMWithDebug :: MV.MVar (IO ())
+                      -> C.CruxOptions
+                      -> CDC.DebugOptions
+                      -> FilePath
+                      -> C.SimulatorCallback
+simulateLLVMWithDebug debuggerHandleVar cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _maybeOnline -> do
   llvmModule <- parseLLVM bcFilePath
   halloc <- CFH.newHandleAllocator
 
@@ -154,17 +174,71 @@ simulateLLVMWithDebug cruxOpts dbgOpts bcFilePath = C.SimulatorCallback $ \sym _
     case CLT.llvmArch llvmCtx of
       CLE.X86Repr rep
         | Just PC.Refl <- PC.testEquality rep (NR.knownNat @64) -> do
-          let llvmCon ng nonce hdlAlloc =
-                case SC.llvmAnalysisResultFromModule ng nonce hdlAlloc llvmModule (Some translation) of
+          let ng = WEB.exprCounter sym
+          archNonce <- PN.freshNonce ng
+          -- We make this into a thunk so that it can be done lazily in the
+          -- surveyor initialization (which is in a separate thread)
+          let llvmCon =
+                case SC.llvmAnalysisResultFromModule ng archNonce halloc llvmModule (Some translation) of
                   SC.SomeResult ares -> return ares
-          let debuggerConfig = SB.DebuggerConfig (Proxy @SC.LLVM) (Proxy @(SC.CrucibleExt SC.LLVM)) llvmCon
+          customEventChan <- BB.newBChan 100
+          let surveyorChan = SC.mkChan (BB.readBChan customEventChan) (BB.writeBChan customEventChan)
+          -- Create a fresh symbolic execution session ID to use for all solver
+          -- communication relating to this task
+          sessionID <- SC.newSessionID ng
+          overrideConfig <- SC.newOverrideConfig archNonce sessionID
+          debuggerConfig <- SC.newDebuggerConfig archNonce sessionID
+
+          -- This MVar is used to hold the (lazily-initialized) handle to the UI thread
+          --
+          -- We want to lazily instantiate the UI, as we don't want it to appear
+          -- if it is never needed.
+          surveyorMVar <- MV.newEmptyMVar
+          -- This IO action starts the surveyor UI
+          let initializeDebuggerUI = do
+                surveyorThread <- A.async $ do
+                  s0 <- SB.emptyArchState (Just bcFilePath) ng archNonce llvmCon surveyorChan
+                  SB.surveyorWith customEventChan s0
+                MV.putMVar surveyorMVar surveyorThread
+
+          initializeUIOnce <- MV.newMVar initializeDebuggerUI
+
+          -- We start the monitor threads here so that we can have a reference
+          -- to the debugger UI initialization variable.  The first thread that
+          -- needs the UI will initialize it (emptying the MVar)
+          overrideMonitorTask <- A.async (SC.overrideMonitor initializeUIOnce surveyorChan debuggerConfig overrideConfig)
+          debugMonitorTask <- A.async (SC.debugMonitor initializeUIOnce surveyorChan debuggerConfig)
+          -- Set up an interrupt handler to allow users to interrupt crux-dbg
+          -- with SIGUSR2 (and bring up the UI)
+          CBI.installInterruptHandler (SC.debuggerConfigStateVar debuggerConfig)
+
+          -- This is the action to run when the symbolic execution ends - tear
+          -- down the helper threads and signal the debugger to exit the GUI.
+          -- Then wait for all of the threads to complete cleanly.
+          let cleanupAction = do
+                putStrLn "Terminating monitors"
+                SC.terminateDebugMonitor debuggerConfig
+                SC.terminateOverrideMonitor overrideConfig
+                putStrLn "Sending Surveyor a shutdown"
+                SC.writeChan surveyorChan SC.Exit
+                putStrLn "Waiting for termination"
+                A.wait debugMonitorTask
+                A.wait overrideMonitorTask
+
+                -- If the UI was initialized, wait for the UI thread to complete
+                maybeUIThread <- MV.tryTakeMVar surveyorMVar
+                F.traverse_ A.wait maybeUIThread
+                return ()
+
+          MV.putMVar debuggerHandleVar cleanupAction
+
           let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $
                 LCS.runOverrideSim LCT.UnitRepr $ do
-                  registerFunctions cruxOpts debuggerConfig llvmModule translation
+                  registerFunctions cruxOpts overrideConfig llvmModule translation
                   checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
           -- FIXME: We can use this callback to collect live explanations in terms of solver state
           let handleExplanation = \_ _ -> return mempty
-          let executionFeatures = []
+          let executionFeatures = [SC.debuggerFeature debuggerConfig ng]
           return (C.RunnableStateWithExtensions initSt executionFeatures, handleExplanation)
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
 
@@ -176,12 +250,12 @@ do_breakpoint :: ( wptr ~ CLE.ArchWidth arch
                  , 1 <= wptr
                  , 16 <= wptr
                  )
-              => SB.DebuggerConfig t ext arch'
+              => SC.OverrideConfig t (SC.LLVMPersonality sym) sym arch' ext
               -> LCS.GlobalVar CLM.Mem
               -> sym
               -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> CLT.LLVMPointerType wptr Ctx.::> LCT.VectorType LCT.AnyType)
               -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
-do_breakpoint sconf memVar sym (Ctx.Empty Ctx.:> breakpointNamePtr Ctx.:> breakpointValues) = do
+do_breakpoint conf memVar sym (Ctx.Empty Ctx.:> breakpointNamePtr Ctx.:> breakpointValues) = do
   let ?ptrWidth = CLM.ptrWidth (LCS.regValue breakpointNamePtr)
   let ?recordLLVMAnnotation = \_ _ -> return ()
   let ng = WEB.exprCounter sym
@@ -195,7 +269,33 @@ do_breakpoint sconf memVar sym (Ctx.Empty Ctx.:> breakpointNamePtr Ctx.:> breakp
                          , SC.breakpointName = Just bpName
                          , SC.breakpointArguments = LCS.regValue breakpointValues
                          }
-  void $ liftIO $ SB.surveyorState sconf ng simState (SC.SimBreakpoint bp)
+  enterDebugger conf ng simState (SC.SuspendedBreakpoint bp)
+
+-- | Inform the waiting debugger (via the message channel) that the symbolic
+-- execution engine has stopped in an override.
+--
+-- This function waits for a response before resuming execution.  The response
+-- could in theory modify the simulator state.
+enterDebugger :: ( ext ~ CLI.LLVM arch
+                 )
+              => SC.OverrideConfig s p sym arch' ext
+              -> PN.NonceGenerator IO s
+              -> LCSET.SimState p sym ext rtp (LCSC.OverrideLang ret) ('Just args)
+              -> SC.SuspendedReason p sym ext rtp
+              -> LCS.OverrideSim p sym (CLI.LLVM arch) rtp args ret ()
+enterDebugger (SC.OverrideConfig _archNonce _sessionID toDebugger fromDebugger) ng simState breakReason = do
+  rtpNonce <- liftIO $ PN.freshNonce ng
+  argsNonce <- liftIO $ PN.freshNonce ng
+  liftIO $ CCC.writeChan toDebugger (Just (SC.CrucibleSimState rtpNonce argsNonce simState breakReason))
+  response <- liftIO $ CCC.readChan fromDebugger
+  case response of
+    SC.UnmodifiedSimState -> return ()
+    SC.ModifiedSimState rtpNonce' argsNonce' simState'
+      | Just PC.Refl <- PC.testEquality rtpNonce rtpNonce'
+      , Just PC.Refl <- PC.testEquality argsNonce argsNonce' -> do
+          CMS.put simState'
+          return ()
+      | otherwise -> error "Override channel out of sync"
 
 -- TODO: export in crux
 lookupString :: (LCB.IsSymInterface sym, CLM.HasLLVMAnn sym, CLO.ArchOk arch)
@@ -237,15 +337,14 @@ do_debug_assert :: ( CLO.ArchOk arch
                   , SC.Architecture arch' t
                   , SC.SymbolicArchitecture arch' t
                   , ext ~ CLI.LLVM arch
-                  , C.HasModel personality
                   )
                 => CCS.SolverOffline
-                -> SB.DebuggerConfig t ext arch'
+                -> SC.OverrideConfig t (SC.LLVMPersonality sym) sym arch' ext
                 -> LCS.GlobalVar CLM.Mem
                 -> sym
                 -> Ctx.Assignment (LCS.RegEntry sym) (Ctx.EmptyCtx Ctx.::> LCT.BVType 8 Ctx.::> CLT.LLVMPointerType (CLE.ArchWidth arch) Ctx.::> LCT.BVType 32)
-                -> C.OverM personality sym (CLI.LLVM arch) (LCS.RegValue sym LCT.UnitType)
-do_debug_assert offSolver sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) = do
+                -> C.OverM SC.LLVMPersonality sym (CLI.LLVM arch) (LCS.RegValue sym LCT.UnitType)
+do_debug_assert offSolver conf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> line) = do
   cond <- liftIO $ WI.bvIsNonzero sym (regValue p)
   file <- lookupString mvar pFile
   l <- case WI.asBV (regValue line) of
@@ -255,22 +354,28 @@ do_debug_assert offSolver sconf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:>
   loc <- liftIO $ WI.getCurrentProgramLoc sym
   let loc' = loc{ WPL.plSourceLoc = pos }
   let msg = LCS.GenericSimError "crucible_debug_assert"
-  ret <- liftIO $ LCB.addDurableAssertion sym (LCB.LabeledPred cond (LCS.SimError loc' msg))
+  liftIO $ LCB.addDurableAssertion sym (LCB.LabeledPred cond (LCS.SimError loc' msg))
   simState <- CMS.get
-  liftIO . withSolverAdapter offSolver $ \adapter -> do
+  let ng = WEB.exprCounter sym
+  wantDebug <- withSolverAdapter offSolver $ \adapter -> do
     let logData = WS.defaultLogData
-    negCond <- WI.notPred sym cond
-    pathCond <- LCB.getPathCondition sym
-    solver_adapter_check_sat adapter sym logData [pathCond, negCond] $ \satRes ->
+    negCond <- liftIO $ WI.notPred sym cond
+    pathCond <- liftIO $ LCB.getPathCondition sym
+    liftIO $ solver_adapter_check_sat adapter sym logData [pathCond, negCond] $ \satRes ->
       case satRes of
         Sat (ev, _) -> do
-          let ng = WEB.exprCounter sym
           let simCtx = simState ^. LCSET.stateContext
           let model = simCtx ^. LCSET.cruciblePersonality . C.personalityModel
           modelVals <- CM.evalModel ev model
           let mv = C.ModelView modelVals
-          void $ SB.surveyorState sconf ng simState (SC.SimModelView mv)
-        _ -> return ret
+          return (WantDebug mv)
+        _ -> return NoDebug
+  case wantDebug of
+    NoDebug -> return ()
+    WantDebug simData -> do
+      enterDebugger conf ng simState (SC.SuspendedAssertionFailure simData)
+
+data WantDebug sym = WantDebug CT.ModelView | NoDebug
 
 checkEntryPoint :: ( CLO.ArchOk arch
                   , CL.Logs
@@ -289,19 +394,20 @@ checkEntryPoint nm mp =
           return ()
         _ -> CMC.throwM EntryPointHasArguments
 
-registerFunctions :: ( CLO.ArchOk arch
-                    , LCB.IsSymInterface sym
-                    , CLM.HasLLVMAnn sym
-                    , sym ~ WEB.ExprBuilder t st fs
-                    , SC.Architecture arch' t
-                    , SC.SymbolicArchitecture arch' t
-                    , ext ~ CLI.LLVM arch
-                    )
+registerFunctions :: ( CLO.ArchOk llvmArch
+                     , LCB.IsSymInterface sym
+                     , CLM.HasLLVMAnn sym
+                     , sym ~ WEB.ExprBuilder t st fs
+                     , SC.Architecture arch t
+                     , SC.SymbolicArchitecture arch t
+                     , ext ~ CLI.LLVM llvmArch
+                     , arch ~ SC.LLVM
+                     )
                   => C.CruxOptions
-                  -> SB.DebuggerConfig t ext arch'
+                  -> SC.OverrideConfig t (SC.LLVMPersonality sym) sym arch ext
                   -> TL.Module
-                  -> CLT.ModuleTranslation arch
-                  -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM arch) r args ret ()
+                  -> CLT.ModuleTranslation llvmArch
+                  -> LCS.OverrideSim (SC.LLVMPersonality sym) sym (CLI.LLVM llvmArch) r args ret ()
 registerFunctions cruxOpts sconf llvm_module mtrans =
   do let llvm_ctx = mtrans ^. CLT.transContext
      let ?lc = llvm_ctx ^. CLT.llvmTypeCtx
@@ -310,7 +416,7 @@ registerFunctions cruxOpts sconf llvm_module mtrans =
      let overrides = concat [ CLO.cruxLLVMOverrides
                             , CLO.svCompOverrides
                             , CLO.cbmcOverrides
-                            , breakpointOverrides cruxOpts sconf
+                            , debugOverrides cruxOpts sconf
                             ]
      CLI.register_llvm_overrides llvm_module [] overrides llvm_ctx
 
@@ -336,3 +442,4 @@ llvmMetrics llvmCtxt =
       case LCSG.lookupGlobal (CLT.llvmMemVar llvmCtxt) globals of
         Just mem -> return $ toInteger (f mem)
         Nothing -> CMC.throwM MemoryMissingFromGlobalVars
+

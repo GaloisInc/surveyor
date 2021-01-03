@@ -22,9 +22,12 @@ import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
+import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as LCCC
 import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 import qualified What4.Expr.Builder as WEB
 
 import           Surveyor.Brick.Names ( Names(..) )
@@ -68,8 +71,7 @@ stateExplorer :: forall e arch s
 stateExplorer (C.Suspended symNonce suspSt) =
   StateExplorer symNonce csViewer
   where
-    bpName = suspSt ^. L.to C.suspendedBreakpoint . L._Just . L.to C.breakpointName
-    csViewer = WCSV.callStackViewer (Proxy @arch) bpName (C.suspendedRegVals suspSt) frames
+    csViewer = WCSV.callStackViewer (Proxy @arch) (C.suspendedReason suspSt) (C.suspendedRegVals suspSt) frames
     frames = suspSt ^. L.to C.suspendedSimState . LCSET.stateTree . L.to LCSET.activeFrames
 
 -- | Render a view of the final state from symbolic execution
@@ -84,15 +86,44 @@ renderSymbolicExecutionStateExplorer :: forall arch s e
 renderSymbolicExecutionStateExplorer (C.Suspended _symNonce1 suspSt) (StateExplorer _symNonce2 csv) valNames =
   case C.suspendedCallFrame suspSt of
     cf@LCSC.CallFrame { LCSC._frameCFG = fcfg } ->
-      B.vBox $ [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
-               , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
-               , B.txt "Breakpoint name:" B.<+> B.txt (fromMaybe "<Unnamed Breakpoint>" (C.breakpointName =<< mbp))
-               , WCSV.renderCallStackViewer True valNames csv
-               , B.txt "Model:" B.<+> (fromMaybe (B.txt "<Unavailable>") (WMV.renderModelViewer <$> mmv))
-               ]
-  where
-    mbp = C.suspendedBreakpoint suspSt
-    mmv = C.suspendedModelView suspSt
+      case C.suspendedReason suspSt of
+        C.SuspendedBreakpoint bp ->
+          B.vBox $ [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
+                   , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
+                   , B.txt "Breakpoint name:" B.<+> B.txt (fromMaybe "<Unnamed Breakpoint>" (C.breakpointName bp))
+                   , WCSV.renderCallStackViewer True valNames csv
+                   ]
+        C.SuspendedAssertionFailure mv ->
+          B.vBox $ [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
+                   , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
+                   , WCSV.renderCallStackViewer True valNames csv
+                   , B.txt "Model:" B.<+> WMV.renderModelViewer mv
+                   ]
+        C.SuspendedExecutionStep execState ->
+          B.vBox $ [ B.txt "Current Function:" B.<+> B.txt (T.pack (show (LCCC.cfgHandle fcfg)))
+                   , B.txt "Current Block:" B.<+> B.txt (T.pack (show (cf ^. LCSC.frameBlockID)))
+                   , B.txt "Symbolic State:" B.<+> prettyWidget (ppExecState execState)
+                   , WCSV.renderCallStackViewer True valNames csv
+                   ]
+
+ppExecState :: LCSET.ExecState p sym ext rtp -> PP.Doc ann
+ppExecState execState =
+  case execState of
+    LCSET.ResultState {} -> "ResultState (returning from function)"
+    LCSET.AbortState rsn _ -> "AbortState " <> PP.parens (CB.ppAbortExecReason rsn)
+    LCSET.UnwindCallState {} -> "UnwindCallState"
+    LCSET.CallState {} -> "CallState"
+    LCSET.TailCallState {} -> "TailCallState"
+    LCSET.ReturnState {} -> "ReturnState"
+    LCSET.RunningState {} -> "RunningState"
+    LCSET.SymbolicBranchState {} -> "SymbolicBranchState"
+    LCSET.ControlTransferState {} -> "ControlTransferState"
+    LCSET.OverrideState {} -> "OverrideState"
+    LCSET.BranchMergeState {} -> "BranchMergeState"
+    LCSET.InitialState {} -> "InitialState"
+
+prettyWidget :: PP.Doc ann -> B.Widget n
+prettyWidget doc = B.txt (PPT.renderStrict (PP.layoutCompact doc))
 
 -- | Handle events for the 'StateExplorer'
 --

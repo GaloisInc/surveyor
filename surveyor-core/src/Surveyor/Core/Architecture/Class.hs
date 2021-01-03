@@ -63,7 +63,7 @@ import           Surveyor.Core.IRRepr ( IRRepr )
 import qualified Surveyor.Core.OperandList as OL
 
 data SomeResult s arch where
-  SomeResult :: (Architecture arch s) => AnalysisResult arch s -> SomeResult s arch
+  SomeResult :: (ArchConstraints arch s, Architecture arch s) => AnalysisResult arch s -> SomeResult s arch
 
 instance NFData (SomeResult s arch) where
   rnf (SomeResult ar) = ar `deepseq` ()

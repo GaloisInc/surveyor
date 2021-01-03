@@ -19,6 +19,9 @@ module Surveyor.Core.Commands (
   selectPreviousOperandC,
   resetInstructionSelectionC,
   contextBackC,
+  stepExecutionC,
+  continueExecutionC,
+  interruptExecutionC,
   contextForwardC,
   initializeSymbolicExecutionC,
   beginSymbolicExecutionSetupC,
@@ -72,6 +75,8 @@ allCommands =
   , C.SomeCommand contextBackC
   , C.SomeCommand contextForwardC
   , C.SomeCommand stepExecutionC
+  , C.SomeCommand continueExecutionC
+  , C.SomeCommand interruptExecutionC
   , C.SomeCommand initializeSymbolicExecutionC
   , C.SomeCommand beginSymbolicExecutionSetupC
   , C.SomeCommand startSymbolicExecutionC
@@ -205,15 +210,35 @@ contextForwardC =
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.ContextForward
 
-stepExecutionC :: forall s st . Command s st '[]
+stepExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 stepExecutionC =
   C.Command "step-execution" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Step execution from the current breakpoint"
+    doc = "Step execution from the current breakpoint (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
-    callback = \customEventChan _ PL.Nil ->
-      SCE.emitEvent customEventChan SCE.StepExecution
+    callback = \customEventChan someState PL.Nil ->
+      withCurrentSymbolicExecutionSession someState $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.StepExecution sessionID)
 
+interruptExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+interruptExecutionC =
+  C.Command "interrupt-execution" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Interrupt the current symbolic execution session (operates on the current symbolic execution session)"
+    callback :: Callback s st '[]
+    callback = \customEventChan someState PL.Nil ->
+      withCurrentSymbolicExecutionSession someState $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.InterruptExecution sessionID)
+
+continueExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+continueExecutionC =
+  C.Command "continue-execution" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Continue execution from the stopped location (operates on the current symbolic execution session)"
+    callback :: Callback s st '[]
+    callback = \customEventChan someState PL.Nil ->
+      withCurrentSymbolicExecutionSession someState $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.ContinueExecution sessionID)
 
 setLogFileC :: forall s st . Command s st '[AR.FilePathType]
 setLogFileC =
@@ -351,3 +376,12 @@ hasContext (AR.SomeState ss)
   | Just archState <- ss ^. CS.lArchState =
       isJust (archState ^? CS.contextL . CCX.currentContext)
   | otherwise = False
+
+withCurrentSymbolicExecutionSession :: (Monad m)
+                                    => AR.SomeState (CS.S e u) s
+                                    -> (SymEx.SessionID s -> m ())
+                                    -> m ()
+withCurrentSymbolicExecutionSession (AR.SomeState s) k =
+  case s ^? CS.lArchState . _Just . CS.contextL . CCX.currentContext . CCX.symExecSessionIDL of
+    Nothing -> return ()
+    Just sessionID -> k sessionID

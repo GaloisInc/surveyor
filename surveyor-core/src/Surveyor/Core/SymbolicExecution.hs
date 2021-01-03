@@ -17,6 +17,7 @@ module Surveyor.Core.SymbolicExecution (
   SymbolicExecutionConfig(..),
   SomeFloatModeRepr(..),
   defaultSymbolicExecutionConfig,
+  defaultSymbolicExecutionConfigWith,
   Solver(..),
   configSolverL,
   configFloatReprL,
@@ -31,6 +32,7 @@ module Surveyor.Core.SymbolicExecution (
   lookupSessionState,
   updateSessionState,
   updateSessionMetrics,
+  cleanupActiveSessions,
   -- * The state of the symbolic execution automaton
   SymExK,
   Config,
@@ -52,16 +54,11 @@ module Surveyor.Core.SymbolicExecution (
   configuringSymbolicExecution,
   initializingSymbolicExecution,
   -- * Cleanup
-  cleanupSymbolicExecutionState,
-  -- * Simulation data
-  SimulationData(..),
-  breakpointP,
-  modelViewP,
-  setupProfiling
+  cleanupSymbolicExecutionState
   ) where
 
 import           Control.DeepSeq ( NFData(..), deepseq )
-import           Control.Lens ( (^.), (^?) )
+import           Control.Lens ( (^.) )
 import qualified Control.Lens as L
 import           Control.Monad ( unless )
 import qualified Control.Monad.Catch as CMC
@@ -69,7 +66,6 @@ import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.Functor.Identity as I
 import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as Map
-import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
@@ -90,6 +86,7 @@ import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified Lang.Crucible.Simulator.RegValue as LCSR
 import qualified Lang.Crucible.Types as CT
 import qualified Lang.Crucible.Types as LCT
+import qualified Surveyor.Core.SymbolicExecution.ExecutionFeature as SCEF
 import qualified System.Process as SP
 import qualified What4.Concrete as WCC
 import qualified What4.Config as WC
@@ -113,17 +110,24 @@ import qualified Surveyor.Core.Panic as SCP
 
 import           Surveyor.Core.SymbolicExecution.Config
 import           Surveyor.Core.SymbolicExecution.State
-import           Surveyor.Core.SymbolicExecution.Simulation
-
--- Setup of the symbolic execution engine (parameters and globals)
-
 
 data SymbolicExecutionException =
     UnexpectedFrame T.Text T.Text
-  | NoParentFrame T.Text T.Text
+  | NoParentFrame T.Text
   deriving (Show)
 
 instance CMC.Exception SymbolicExecutionException
+
+-- | Extract the arguments captured by the breakpoint (if the reason for
+-- suspending execution was a breakpoint)
+--
+-- If the reason for suspending was not a breakpoint, simply return Nothing
+breakpointArguments :: SuspendedReason p sym ext rtp -> Maybe (DV.Vector (LCSR.AnyValue sym))
+breakpointArguments rsn =
+  case rsn of
+    SuspendedBreakpoint bp -> Just (SCB.breakpointArguments bp)
+    SuspendedAssertionFailure {} -> Nothing
+    SuspendedExecutionStep {} -> Nothing
 
 suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                 . ( CB.IsSymInterface sym
@@ -136,36 +140,60 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                => PN.NonceGenerator IO s
                -> SymbolicState arch s sym init reg
                -> CSET.SimState p sym ext rtp f a
-               -> SimulationData sym
+               -> SuspendedReason p sym ext rtp
+               -- ^ The reason that the symbolic execution was suspended
+               -> IO ()
+               -- ^ An action to run in order to resume execution with an unmodified state
+               -> IOR.IORef SCEF.DebuggerFeatureState
+               -- ^ The configuration flag for the debugging execution feature
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState ng surveyorSymState crucSimState simData =
+suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf =
   case topFrame ^. CSET.gpValue of
-    LCSC.RF {} -> CMC.throwM (UnexpectedFrame "Return" bpName)
-    LCSC.OF {} ->
+    LCSC.RF {} ->
+      -- FIXME: Need to do some better signaling that this is a return frame
+      -- (there isn't much to interact with)
       withParentFrame (CSET.activeFrames (crucSimState ^. CSET.stateTree)) $ \cf -> do
         symNonce <- liftIO $ PN.freshNonce ng
         let st = SuspendedState { suspendedSymState = surveyorSymState
                                 , suspendedSimState = crucSimState
                                 , suspendedCallFrame = cf
-                                , suspendedBreakpoint = mbp
                                 , suspendedRegVals = Ctx.empty
                                 , suspendedRegSelection = Nothing
                                 , suspendedCurrentValue = Nothing
-                                , suspendedModelView = mmv
+                                , suspendedResumeUnmodified = resumeAction
+                                , suspendedDebugFeatureConfig = debugConf
+                                , suspendedReason = reason
+                                }
+        return (Suspended symNonce st)
+    LCSC.OF {} ->
+      -- The top-level frame is an override frame (i.e., we are in a breakpoint/assert override)
+      withParentFrame (CSET.activeFrames (crucSimState ^. CSET.stateTree)) $ \cf -> do
+        symNonce <- liftIO $ PN.freshNonce ng
+        let st = SuspendedState { suspendedSymState = surveyorSymState
+                                , suspendedSimState = crucSimState
+                                , suspendedCallFrame = cf
+                                , suspendedRegVals = Ctx.empty
+                                , suspendedRegSelection = Nothing
+                                , suspendedCurrentValue = Nothing
+                                , suspendedResumeUnmodified = resumeAction
+                                , suspendedDebugFeatureConfig = debugConf
+                                , suspendedReason = reason
                                 }
         return (Suspended symNonce st)
     LCSC.MF cf ->
-      case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (fmap SCB.breakpointArguments mbp) of
+      -- The top-level frame is inside of a function somewhere (but not imminently returning)
+      case maybe (Some Ctx.Empty) (valuesFromVector (Proxy @sym)) (breakpointArguments reason) of
         Some Ctx.Empty -> do
           symNonce <- liftIO $ PN.freshNonce ng
           let st = SuspendedState { suspendedSymState = surveyorSymState
                                   , suspendedSimState = crucSimState
                                   , suspendedCallFrame = cf
-                                  , suspendedBreakpoint = mbp
                                   , suspendedRegVals = Ctx.empty
                                   , suspendedRegSelection = Nothing
                                   , suspendedCurrentValue = Nothing
-                                  , suspendedModelView = mmv
+                                  , suspendedResumeUnmodified = resumeAction
+                                  , suspendedDebugFeatureConfig = debugConf
+                                  , suspendedReason = reason
                                   }
           return (Suspended symNonce st)
         Some valAssignment@(_ Ctx.:> _) -> do
@@ -174,20 +202,16 @@ suspendedState ng surveyorSymState crucSimState simData =
           let st = SuspendedState { suspendedSymState = surveyorSymState
                                   , suspendedSimState = crucSimState
                                   , suspendedCallFrame = cf
-                                  , suspendedBreakpoint = mbp
                                   , suspendedRegVals = valAssignment
                                   , suspendedRegSelection = Just (Some anIndex)
                                   , suspendedCurrentValue = Nothing
-                                  , suspendedModelView = mmv
+                                  , suspendedResumeUnmodified = resumeAction
+                                  , suspendedDebugFeatureConfig = debugConf
+                                  , suspendedReason = reason
                                   }
           return (Suspended symNonce st)
 
   where
-    mbp = simData ^? breakpointP
-    mmv = simData ^? modelViewP
-
-    bpName :: T.Text
-    bpName = fromMaybe "<Unnamed Breakpoint>" (SCB.breakpointName =<< mbp)
     topFrame = crucSimState ^. CSET.stateTree . CSET.actFrame
 
     withParentFrame :: [CSET.SomeFrame (LCSC.SimFrame sym ext)]
@@ -195,7 +219,7 @@ suspendedState ng surveyorSymState crucSimState simData =
                     -> m t
     withParentFrame fs k =
       case fs of
-        [] -> CMC.throwM (NoParentFrame "Override" bpName)
+        [] -> CMC.throwM (NoParentFrame "Override")
         CSET.SomeFrame (LCSC.MF cf) : _ -> k cf
         _ : _fs -> withParentFrame _fs k
 
@@ -248,6 +272,32 @@ emptySessionState = SessionState { unSessionState = Map.empty }
 updateSessionState :: SymbolicExecutionState arch s k -> SessionState arch s -> SessionState arch s
 updateSessionState session (SessionState m) =
   SessionState (Map.insert (symbolicSessionID session) (Some session) m)
+
+-- | Traverse the suspended symbolic execution states and set them all to continue
+--
+-- We need to do this when shutting down surveyor, otherwise the sessions will
+-- be deadlocked on the execution feature.  It could be handled externally
+-- (e.g., in crux-dbg), but it is still important to do it in the standalone
+-- surveyor-brick.
+--
+-- Note that this does not terminate the symbolic execution engine instances, as
+-- the invoking tool (e.g., crux-dbg) might want to continue.
+cleanupActiveSessions :: forall arch s . SessionState arch s -> IO ()
+cleanupActiveSessions (SessionState sessions) = mapM_ cleanupActiveSession sessions
+  where
+    cleanupActiveSession :: Some (SymbolicExecutionState arch s) -> IO ()
+    cleanupActiveSession (Some symExState) =
+      case symExState of
+        Suspended _ suspSt -> do
+          -- Disable monitoring mode for this instance and then restart
+          -- execution
+          IOR.writeIORef (suspendedDebugFeatureConfig suspSt) SCEF.Inactive
+          suspendedResumeUnmodified suspSt
+        Configuring {} -> return ()
+        Initializing {} -> return ()
+        Executing {} -> return ()
+        Inspecting {} -> return ()
+
 
 -- | Updates the given session ID with additional metrics IFF that 'SessionID'
 -- corresponds to a session in the 'Executing' state.
@@ -319,7 +369,6 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig _sid solv
                               , symbolicRegs = regs
                               , symbolicGlobals = globals
                               , withSymConstraints = \a -> a
-                              , modelView = Nothing
                               }
     return (Initializing state)
 

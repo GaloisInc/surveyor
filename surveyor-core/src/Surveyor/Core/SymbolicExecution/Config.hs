@@ -15,6 +15,7 @@ module Surveyor.Core.SymbolicExecution.Config (
   -- * Top-level
   SymbolicExecutionConfig(..),
   defaultSymbolicExecutionConfig,
+  defaultSymbolicExecutionConfigWith,
   -- * Solver configuration
   SomeFloatModeRepr(..),
   Solver(..),
@@ -74,6 +75,10 @@ defaultSymbolicExecutionConfig :: PN.NonceGenerator IO s -> IO (SymbolicExecutio
 defaultSymbolicExecutionConfig ng = do
   sid <- newSessionID ng
   return (SymbolicExecutionConfig sid Yices WEB.FloatRealRepr "")
+
+defaultSymbolicExecutionConfigWith :: SessionID s -> SymbolicExecutionConfig s
+defaultSymbolicExecutionConfigWith sid =
+  SymbolicExecutionConfig sid Yices WEB.FloatRealRepr ""
 
 configSolverL :: L.Lens' (SymbolicExecutionConfig s) Solver
 configSolverL f (SymbolicExecutionConfig sid solver fm fp) =
