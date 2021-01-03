@@ -22,6 +22,7 @@ module Surveyor.Brick.Widget.CallStackViewer (
 
 import qualified Brick as B
 import qualified Brick.Focus as BF
+import qualified Brick.Widgets.Border as BB
 import qualified Brick.Widgets.List as BL
 import           Control.Lens ( (^.), (&), (.~), (%~) )
 import qualified Control.Lens as L
@@ -172,13 +173,15 @@ renderCallStackViewer :: forall arch s sym e st fs
                       -> CallStackViewer arch s sym e
                       -> B.Widget SBN.Names
 renderCallStackViewer hasFocus valNames cs =
-  B.hBox [ B.vBox [ B.txt "Call Stack"
-                  , BL.renderList (renderCallStackFrame (Proxy @arch)) (hasFocus && stackSelected) (cs ^. frameList)
-                  ]
-         , renderValueSelector (hasFocus && valSelSelected) (cs ^. frameList . L.to BL.listSelectedElement)
-         , renderSelectedValue (hasFocus && viewerSelected) valNames (cs ^. frameList . L.to BL.listSelectedElement)
+  B.hBox [ BB.borderWithLabel (B.txt "Call Stack") stackEntries
+         , BB.borderWithLabel (B.txt "Values In Scope") $
+              renderValueSelector (hasFocus && valSelSelected) (cs ^. frameList . L.to BL.listSelectedElement)
+         , BB.borderWithLabel (B.txt "Selected Value") $
+              renderSelectedValue (hasFocus && viewerSelected) valNames (cs ^. frameList . L.to BL.listSelectedElement)
          ]
   where
+    stackEntries = BL.renderList (renderCallStackFrame (Proxy @arch)) (hasFocus && stackSelected) (cs ^. frameList)
+
     curSel = cs ^. focusRing . L.to BF.focusGetCurrent
     stackSelected = Just SBN.CallStackViewer == curSel
     valSelSelected = Just SBN.BreakpointValueSelectorForm == curSel
