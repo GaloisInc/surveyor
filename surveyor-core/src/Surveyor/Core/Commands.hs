@@ -27,6 +27,7 @@ module Surveyor.Core.Commands (
   beginSymbolicExecutionSetupC,
   startSymbolicExecutionC,
   setLogFileC,
+  saveCurrentValueSVGC,
   disableFileLoggingC,
   nameValueC,
   nameCurrentValueC,
@@ -83,6 +84,7 @@ allCommands =
   , C.SomeCommand setLogFileC
   , C.SomeCommand disableFileLoggingC
   , C.SomeCommand nameValueC
+  , C.SomeCommand saveCurrentValueSVGC
   , C.SomeCommand nameCurrentValueC
   ]
 
@@ -362,6 +364,23 @@ startSymbolicExecutionC =
       | Just (Some (SymEx.Initializing {})) <- curSymExState ss = True
       | otherwise = False
 
+saveCurrentValueSVGC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.FilePathType]
+saveCurrentValueSVGC =
+  C.Command "save-current-value-svg" doc names rep callback (const True)
+  where
+    doc = "Render the current symbolic value as an SVG to the given filename"
+    names = C.Const "file-name" PL.:< PL.Nil
+    rep = AR.FilePathTypeRepr PL.:< PL.Nil
+    callback :: Callback s st '[AR.FilePathType]
+    callback = \customEventChan someState@(AR.SomeState ss) (AR.FilePathArgument filePath PL.:< PL.Nil) -> do
+      withCurrentSymbolicExecutionSession someState $ \sessionID -> do
+        withSymbolicSession ss sessionID $ \sessionState -> do
+          case sessionState of
+            SymEx.Suspended _ suspSt
+              | Just (Some regEntry) <- SymEx.suspendedCurrentValue suspSt -> do
+                  SCE.emitEvent customEventChan (SCE.VisualizeSymbolicTerm regEntry (Just filePath))
+            _ -> return ()
+
 curSymExState :: CS.S e u arch s
               -> Maybe (Some (SymEx.SymbolicExecutionState arch s))
 curSymExState st
@@ -376,6 +395,19 @@ hasContext (AR.SomeState ss)
   | Just archState <- ss ^. CS.lArchState =
       isJust (archState ^? CS.contextL . CCX.currentContext)
   | otherwise = False
+
+withSymbolicSession :: (Monad m)
+                    => CS.S e u arch s
+                    -> SymEx.SessionID s
+                    -> (forall k . SymEx.SymbolicExecutionState arch s k -> m ())
+                    -> m ()
+withSymbolicSession s sessionID k =
+  case s ^? CS.lArchState . _Just . CS.symExStateL of
+    Nothing -> return ()
+    Just symExSessions ->
+      case SymEx.lookupSessionState symExSessions sessionID of
+        Nothing -> return ()
+        Just (Some symExSt) -> k symExSt
 
 withCurrentSymbolicExecutionSession :: (Monad m)
                                     => AR.SomeState (CS.S e u) s

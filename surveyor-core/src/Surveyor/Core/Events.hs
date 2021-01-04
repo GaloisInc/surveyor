@@ -90,6 +90,11 @@ data InfoEvent s st where
   -- | Display a description of the keybindings active in the current context in
   -- a manner suitable for the UI
   DescribeKeys :: InfoEvent s st
+  -- | Convert the given symbolic value using graphviz dot format
+  --
+  -- If a 'FilePath' is provided, save it to that file; otherwise, visualize it
+  -- with the default platform dot viewer
+  VisualizeSymbolicTerm :: (sym ~ WEB.ExprBuilder s state fs) => LMCR.RegEntry sym tp -> Maybe FilePath -> InfoEvent s st
 
 -- | Events related to controlling the symbolic execution engine/state
 data SymbolicExecutionEvent s st where
