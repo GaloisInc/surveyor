@@ -4,16 +4,18 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module Surveyor.Core.GraphViz (
   regEntryToGraphViz
   ) where
 
 import qualified Control.Monad.State.Strict as MS
+import qualified Data.BitVector.Sized as DBS
 import qualified Data.Foldable as F
 import qualified Data.GraphViz as DG
 import qualified Data.Map.Strict as Map
-import           Data.Maybe ( isJust )
+import           Data.Maybe ( fromMaybe, isJust )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
@@ -25,8 +27,10 @@ import qualified Lang.Crucible.Types as LCT
 import qualified Prettyprinter as PP
 import qualified Prettyprinter.Render.Text as PPT
 import qualified What4.Expr.Builder as WEB
+import qualified What4.Expr.WeightedSum as WSum
 import qualified What4.Interface as WI
 import qualified What4.ProgramLoc as WPL
+import qualified What4.SemiRing as SR
 import qualified What4.Symbol as WS
 import qualified What4.Utils.Complex as WUC
 import qualified What4.Utils.StringLiteral as WUS
@@ -149,6 +153,8 @@ traverseFormulaStructure predEntry entry =
     LCT.AsBaseType _btp ->
       case LMCR.regValue entry of
         WEB.BoolExpr b _loc -> inline (PP.pretty b)
+        WEB.SemiRingLiteral srep coeff _loc ->
+          inline =<< renderCoefficient srep coeff
         WEB.StringExpr sl _loc ->
           case sl of
             WUS.UnicodeLiteral t -> inline (PP.dquotes (PP.pretty t))
@@ -221,6 +227,36 @@ traverseFormulaStructure predEntry entry =
             Just r -> return r
             Nothing ->
               case WEB.appExprApp ae of
+                WEB.SemiRingSum ws -> do
+                  let (addOp :: String, mulOp :: String) = case WSum.sumRepr ws of
+                        SR.SemiRingRealRepr -> ("realSum", "realMul")
+                        SR.SemiRingIntegerRepr -> ("intSum", "intMul")
+                        SR.SemiRingNatRepr -> ("natSum", "natMul")
+                        SR.SemiRingBVRepr SR.BVArithRepr _w -> ("bvSum", "bvMul")
+                        SR.SemiRingBVRepr SR.BVBitsRepr _w -> ("bvXor", "bvAnd")
+                  let renderAdd e1 e2 = return (PP.tupled [PP.pretty addOp, e1, e2])
+                  let scalarMult coef val = do
+                        val' <- traverseFormulaStructure n (regEntry val)
+                        coefd <- renderCoefficient (WSum.sumRepr ws) coef
+                        return (PP.tupled [PP.pretty mulOp, coefd, ppRender val'])
+                  let constEval = renderCoefficient (WSum.sumRepr ws)
+                  sumTerm <- WSum.evalM renderAdd scalarMult constEval ws
+                  bind nonce regVal sumTerm
+                WEB.SemiRingProd rp -> do
+                  let (op :: String) = case WSum.prodRepr rp of
+                        SR.SemiRingRealRepr -> "realProd"
+                        SR.SemiRingIntegerRepr -> "intProd"
+                        SR.SemiRingNatRepr -> "natProd"
+                        SR.SemiRingBVRepr SR.BVArithRepr _w -> "bvProd"
+                        SR.SemiRingBVRepr SR.BVBitsRepr _w -> "bvAnd"
+                  let mul acc e = return (e <> acc)
+                  let tm val = do
+                        d <- traverseFormulaStructure n (regEntry val)
+                        return [ppRender d]
+                  mProdTerms <- WSum.prodEvalM mul tm rp
+                  let prodTerms = fromMaybe [] mProdTerms
+                  bind nonce regVal (PP.tupled (PP.pretty op : prodTerms))
+
                 WEB.BaseEq _tp e1 e2 -> bindBin nonce regVal n (PP.pretty "eq") e1 e2
                 WEB.BaseIte _tp _npred p e2 e3 -> bindTernary nonce regVal n (PP.pretty "ite") p e2 e3
                 WEB.NotPred e -> bindUnary nonce regVal n (PP.pretty "notPred") e
@@ -231,6 +267,10 @@ traverseFormulaStructure predEntry entry =
 
                 WEB.IntDiv e1 e2 -> bindBin nonce regVal n (PP.pretty "intDiv") e1 e2
                 WEB.IntMod e1 e2 -> bindBin nonce regVal n (PP.pretty "intMod") e1 e2
+                WEB.IntAbs e -> bindUnary nonce regVal n (PP.pretty "intAbs") e
+                WEB.IntDivisible e k -> do
+                  e' <- traverseFormulaStructure n (regEntry e)
+                  bind nonce regVal (PP.pretty "intDivisible" <> PP.tupled [ppRender e', PP.pretty k])
 
                 WEB.RealDiv e1 e2 -> bindBin nonce regVal n (PP.pretty "realDiv") e1 e2
                 WEB.RealSqrt e -> bindUnary nonce regVal n (PP.pretty "realSqrt") e
@@ -241,6 +281,7 @@ traverseFormulaStructure predEntry entry =
                 WEB.RealCosh e -> bindUnary nonce regVal n (PP.pretty "realCosh") e
                 WEB.RealExp e -> bindUnary nonce regVal n (PP.pretty "realExp") e
                 WEB.RealLog e -> bindUnary nonce regVal n (PP.pretty "realLog") e
+                WEB.Pi -> inline (PP.pretty "pi")
 
                 WEB.BVTestBit bitNum e -> do
                   e' <- traverseFormulaStructure n (regEntry e)
@@ -330,6 +371,18 @@ traverseFormulaStructure predEntry entry =
                                     , ppArglist (reverse ops)
                                     ]
                   bind nonce regVal doc
+                _ -> inline (PP.pretty "<UnhandledTerm>")
+
+renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m (PP.Doc ann)
+renderCoefficient srep coeff =
+  case srep of
+    SR.SemiRingNatRepr -> return (PP.viaShow coeff)
+    SR.SemiRingIntegerRepr -> return (PP.viaShow coeff)
+    SR.SemiRingRealRepr -> return (PP.viaShow coeff)
+    SR.SemiRingBVRepr bvFlv nr ->
+      case bvFlv of
+        SR.BVArithRepr -> return (PP.viaShow coeff)
+        SR.BVBitsRepr -> return (PP.pretty (DBS.ppHex nr coeff))
 
 bindUnary :: PN.Nonce s tp
           -> WEB.Expr s tp
@@ -468,6 +521,8 @@ formatRegEntryNode (_node, nodeLabel) =
   case nodeLabel of
     NormalNodeLabel doc Nothing -> [docLabel doc]
     RootNodeLabel doc Nothing -> [docLabel doc]
+    NormalNodeLabel doc (Just pos) -> [docLabel (doc <> PP.pretty "\\n" <> PP.viaShow pos)]
+    RootNodeLabel doc (Just pos) -> [docLabel (doc <> PP.pretty "\\n" <> PP.viaShow pos)]
 
 docLabel :: PP.Doc ann -> DG.Attribute
 docLabel = DG.textLabel . PPT.renderLazy . PP.layoutCompact
