@@ -218,8 +218,8 @@ stepExecutionC =
   where
     doc = "Step execution from the current breakpoint (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
-    callback = \customEventChan someState PL.Nil ->
-      withCurrentSymbolicExecutionSession someState $ \sessionID ->
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      withCurrentSymbolicExecutionSession s $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.StepExecution sessionID)
 
 interruptExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
@@ -228,8 +228,8 @@ interruptExecutionC =
   where
     doc = "Interrupt the current symbolic execution session (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
-    callback = \customEventChan someState PL.Nil ->
-      withCurrentSymbolicExecutionSession someState $ \sessionID ->
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      withCurrentSymbolicExecutionSession s $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.InterruptExecution sessionID)
 
 continueExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
@@ -238,8 +238,8 @@ continueExecutionC =
   where
     doc = "Continue execution from the stopped location (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
-    callback = \customEventChan someState PL.Nil ->
-      withCurrentSymbolicExecutionSession someState $ \sessionID ->
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      withCurrentSymbolicExecutionSession s $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.ContinueExecution sessionID)
 
 setLogFileC :: forall s st . Command s st '[AR.FilePathType]
@@ -372,8 +372,8 @@ saveCurrentValueSVGC =
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
-    callback = \customEventChan someState@(AR.SomeState ss) (AR.FilePathArgument filePath PL.:< PL.Nil) -> do
-      withCurrentSymbolicExecutionSession someState $ \sessionID -> do
+    callback = \customEventChan (AR.SomeState ss) (AR.FilePathArgument filePath PL.:< PL.Nil) -> do
+      withCurrentSymbolicExecutionSession ss $ \sessionID -> do
         withSymbolicSession ss sessionID $ \sessionState -> do
           case sessionState of
             SymEx.Suspended _ suspSt
@@ -410,10 +410,10 @@ withSymbolicSession s sessionID k =
         Just (Some symExSt) -> k symExSt
 
 withCurrentSymbolicExecutionSession :: (Monad m)
-                                    => AR.SomeState (CS.S e u) s
+                                    => CS.S e u arch s
                                     -> (SymEx.SessionID s -> m ())
                                     -> m ()
-withCurrentSymbolicExecutionSession (AR.SomeState s) k =
+withCurrentSymbolicExecutionSession s k =
   case s ^? CS.lArchState . _Just . CS.contextL . CCX.currentContext . CCX.symExecSessionIDL of
     Nothing -> return ()
     Just sessionID -> k sessionID
