@@ -200,6 +200,9 @@ simulateLLVMWithDebug debuggerHandleVar cruxOpts dbgOpts bcFilePath = C.Simulato
                   s0 <- SB.emptyArchState (Just bcFilePath) ng archNonce llvmCon surveyorChan
                   SB.surveyorWith customEventChan s0
                 MV.putMVar surveyorMVar surveyorThread
+                -- Ensure that exceptions thrown in surveyor are propagate to
+                -- the main crux thread (so that they aren't lost)
+                A.link surveyorThread
 
           initializeUIOnce <- MV.newMVar initializeDebuggerUI
 
@@ -208,6 +211,9 @@ simulateLLVMWithDebug debuggerHandleVar cruxOpts dbgOpts bcFilePath = C.Simulato
           -- needs the UI will initialize it (emptying the MVar)
           overrideMonitorTask <- A.async (SC.overrideMonitor initializeUIOnce surveyorChan debuggerConfig overrideConfig)
           debugMonitorTask <- A.async (SC.debugMonitor initializeUIOnce surveyorChan debuggerConfig)
+          A.link overrideMonitorTask
+          A.link debugMonitorTask
+
           -- Set up an interrupt handler to allow users to interrupt crux-dbg
           -- with SIGUSR2 (and bring up the UI)
           CBI.installInterruptHandler (SC.debuggerConfigStateVar debuggerConfig)
