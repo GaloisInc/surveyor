@@ -34,9 +34,8 @@ module Surveyor.Core.Commands (
   allCommands
   ) where
 
-import           Control.Lens ( (^.), (^?), _Just )
+import           Control.Lens ( (^.), (^?) )
 import qualified Data.Functor.Const as C
-import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
 import           Fmt ( (+||), (||+) )
@@ -96,7 +95,6 @@ exitC =
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.Exit
 
-
 describeCommandC :: forall s st . Command s st '[AR.CommandType]
 describeCommandC =
   C.Command "describe-command" doc names rep callback (const True)
@@ -117,9 +115,9 @@ describeKeysC =
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.DescribeKeys
 
-nameValueC :: forall s st . Command s st '[AR.ValueNonceType, AR.StringType]
+nameValueC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.ValueNonceType, AR.StringType]
 nameValueC =
-  C.Command "name-value" doc argNames argTypes callback hasCurrentValue
+  C.Command "name-value" doc argNames argTypes callback CS.hasCurrentValue
   where
     doc = "Name a sub-term in a formula"
     argNames = C.Const "nonce" PL.:< C.Const "name" PL.:< PL.Nil
@@ -127,25 +125,15 @@ nameValueC =
     callback :: Callback s st '[AR.ValueNonceType, AR.StringType]
     callback = \customEventChan _ (AR.ValueNonceArgument nonce PL.:< AR.StringArgument name PL.:< PL.Nil) ->
       SCE.emitEvent customEventChan (SCE.NameValue nonce name)
-    -- FIXME: Maybe this is always available?  Or perhaps never available for
-    -- interactive use because the user can never provide a nonce via prompt
-    hasCurrentValue = const True
 
 nameCurrentValueC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.StringType]
 nameCurrentValueC =
-  C.Command "name-current-value" doc argNames argTypes callback hasCurrentValue
+  C.Command "name-current-value" doc argNames argTypes callback CS.hasCurrentValue
   where
     doc = "Name a sub-term in the current value (determined by context)"
     callback :: Callback s st '[AR.StringType]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) (AR.StringArgument name PL.:< PL.Nil) ->
       SCE.emitEvent customEventChan (SCE.InitializeValueNamePrompt archNonce name)
-    hasCurrentValue :: AR.SomeState (CS.S e u) s -> Bool
-    hasCurrentValue (AR.SomeState st)
-      | Just sessionID <- st ^? CS.lArchState . _Just . CS.contextL . CCX.currentContext . CCX.symExecSessionIDL
-      , Just symExSt <- st ^? CS.lArchState . _Just . CS.symExStateL
-      , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID =
-          isJust (SymEx.suspendedCurrentValue suspSt)
-      | otherwise = False
     argNames = C.Const "Name" PL.:< PL.Nil
     argTypes = AR.StringTypeRepr PL.:< PL.Nil
 
@@ -194,18 +182,18 @@ resetInstructionSelectionC =
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       SCE.emitEvent customEventChan (SCE.ResetInstructionSelection archNonce)
 
-contextBackC :: forall s st . Command s st '[]
+contextBackC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 contextBackC =
-  C.Command "context-back" doc PL.Nil PL.Nil callback (const True)
+  C.Command "context-back" doc PL.Nil PL.Nil callback CS.hasContext
   where
     doc = "Go backward (down) in the context stack"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.ContextBack
 
-contextForwardC :: forall s st . Command s st '[]
+contextForwardC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 contextForwardC =
-  C.Command "context-forward" doc PL.Nil PL.Nil callback (const True)
+  C.Command "context-forward" doc PL.Nil PL.Nil callback CS.hasContext
   where
     doc = "Go forward (up) in the context stack"
     callback :: Callback s st '[]
@@ -214,12 +202,12 @@ contextForwardC =
 
 stepExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 stepExecutionC =
-  C.Command "step-execution" doc PL.Nil PL.Nil callback (const True)
+  C.Command "step-execution" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
     doc = "Step execution from the current breakpoint (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
-      withCurrentSymbolicExecutionSession s $ \sessionID ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.StepExecution sessionID)
 
 interruptExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
@@ -229,17 +217,17 @@ interruptExecutionC =
     doc = "Interrupt the current symbolic execution session (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
-      withCurrentSymbolicExecutionSession s $ \sessionID ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.InterruptExecution sessionID)
 
 continueExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 continueExecutionC =
-  C.Command "continue-execution" doc PL.Nil PL.Nil callback (const True)
+  C.Command "continue-execution" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
     doc = "Continue execution from the stopped location (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
-      withCurrentSymbolicExecutionSession s $ \sessionID ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.ContinueExecution sessionID)
 
 setLogFileC :: forall s st . Command s st '[AR.FilePathType]
@@ -308,7 +296,7 @@ loadJARC =
 
 initializeSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 initializeSymbolicExecutionC =
-  C.Command "initialize-symbolic-execution" doc PL.Nil PL.Nil callback hasContext
+  C.Command "initialize-symbolic-execution" doc PL.Nil PL.Nil callback CS.hasContext
   where
     doc = "Initialize symbolic execution for the currently-selected function"
     callback :: Callback s st '[]
@@ -317,7 +305,7 @@ initializeSymbolicExecutionC =
 
 beginSymbolicExecutionSetupC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 beginSymbolicExecutionSetupC =
-  C.Command "begin-symbolic-execution-setup" doc PL.Nil PL.Nil callback hasContext
+  C.Command "begin-symbolic-execution-setup" doc PL.Nil PL.Nil callback CS.hasContext
   where
     doc = "Allocate an initial symbolic execution state and prepare it for user customization"
     callback :: Callback s st '[]
@@ -360,21 +348,24 @@ startSymbolicExecutionC =
                                            , SCL.logLevel = SCL.Error
                                            , SCL.logSource = SCL.CommandCallback "StartSymbolicExecution"
                                            })
-    isInitializingSymEx (AR.SomeState ss)
-      | Just (Some (SymEx.Initializing {})) <- curSymExState ss = True
-      | otherwise = False
+    isInitializingSymEx (AR.SomeState ss) =
+      CS.withCurrentSymbolicExecutionSession ss False $ \sessionID ->
+        CS.withSymbolicSession ss sessionID False $ \seState ->
+          case seState of
+            SymEx.Initializing {} -> True
+            _ -> False
 
 saveCurrentValueSVGC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.FilePathType]
 saveCurrentValueSVGC =
-  C.Command "save-current-value-svg" doc names rep callback (const True)
+  C.Command "save-current-value-svg" doc names rep callback CS.hasCurrentValue
   where
     doc = "Render the current symbolic value as an SVG to the given filename"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
     callback = \customEventChan (AR.SomeState ss) (AR.FilePathArgument filePath PL.:< PL.Nil) -> do
-      withCurrentSymbolicExecutionSession ss $ \sessionID -> do
-        withSymbolicSession ss sessionID $ \sessionState -> do
+      CS.withCurrentSymbolicExecutionSession ss (return ()) $ \sessionID -> do
+        CS.withSymbolicSession ss sessionID (return ()) $ \sessionState -> do
           case sessionState of
             SymEx.Suspended _ suspSt
               | Just (Some regEntry) <- SymEx.suspendedCurrentValue suspSt -> do
@@ -390,30 +381,31 @@ curSymExState st
       SymEx.lookupSessionState (archState ^. CS.symExStateL) sid
   | otherwise = Nothing
 
-hasContext :: AR.SomeState (CS.S e u) s -> Bool
-hasContext (AR.SomeState ss)
-  | Just archState <- ss ^. CS.lArchState =
-      isJust (archState ^? CS.contextL . CCX.currentContext)
-  | otherwise = False
+-- hasContext :: AR.SomeState (CS.S e u) s -> Bool
+-- hasContext (AR.SomeState ss)
+--   | Just archState <- ss ^. CS.lArchState =
+--       isJust (archState ^? CS.contextL . CCX.currentContext)
+--   | otherwise = False
 
-withSymbolicSession :: (Monad m)
-                    => CS.S e u arch s
-                    -> SymEx.SessionID s
-                    -> (forall k . SymEx.SymbolicExecutionState arch s k -> m ())
-                    -> m ()
-withSymbolicSession s sessionID k =
-  case s ^? CS.lArchState . _Just . CS.symExStateL of
-    Nothing -> return ()
-    Just symExSessions ->
-      case SymEx.lookupSessionState symExSessions sessionID of
-        Nothing -> return ()
-        Just (Some symExSt) -> k symExSt
+-- withSymbolicSession :: (Monad m)
+--                     => CS.S e u arch s
+--                     -> SymEx.SessionID s
+--                     -> (forall k . SymEx.SymbolicExecutionState arch s k -> m ())
+--                     -> m ()
+-- withSymbolicSession s sessionID k =
+--   case s ^? CS.lArchState . _Just . CS.symExStateL of
+--     Nothing -> return ()
+--     Just symExSessions ->
+--       case SymEx.lookupSessionState symExSessions sessionID of
+--         Nothing -> return ()
+--         Just (Some symExSt) -> k symExSt
 
-withCurrentSymbolicExecutionSession :: (Monad m)
-                                    => CS.S e u arch s
-                                    -> (SymEx.SessionID s -> m ())
-                                    -> m ()
-withCurrentSymbolicExecutionSession s k =
-  case s ^? CS.lArchState . _Just . CS.contextL . CCX.currentContext . CCX.symExecSessionIDL of
-    Nothing -> return ()
-    Just sessionID -> k sessionID
+-- withCurrentSymbolicExecutionSession :: (Monad m)
+--                                     => CS.S e u arch s
+--                                     -> a
+--                                     -> (SymEx.SessionID s -> a)
+--                                     -> a
+-- withCurrentSymbolicExecutionSession s def k =
+--   case s ^? CS.lArchState . _Just . CS.contextL . CCX.currentContext . CCX.symExecSessionIDL of
+--     Nothing -> def
+--     Just sessionID -> k sessionID

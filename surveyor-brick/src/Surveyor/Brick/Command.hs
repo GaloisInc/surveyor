@@ -25,14 +25,10 @@ module Surveyor.Brick.Command (
   mkExtension
   ) where
 
-import           Control.Lens ( (^?), _Just )
 import qualified Data.Functor.Const as C
 import           Data.Kind ( Type )
-import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as PN
-import           Data.Parameterized.Some ( Some(..) )
-import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
 
 import qualified Surveyor.Brick.Extension as SBE
@@ -75,20 +71,12 @@ extraCommands = [ C.SomeCommand showMacawBlockC
 
 promptValueNameC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
 promptValueNameC =
-  C.Command "name-selected-value" doc PL.Nil PL.Nil callback hasCurrentValue
+  C.Command "name-selected-value" doc PL.Nil PL.Nil callback C.hasCurrentValue
   where
     doc = "Prompt the user for the name to assign to the currently-selected value"
     callback :: Callback s st '[]
     callback = \customEventChan (C.getNonce -> C.SomeNonce archNonce) PL.Nil ->
       C.emitEvent customEventChan (SBE.PromptValueName archNonce)
-    hasCurrentValue :: C.SomeState (C.S e u) s -> Bool
-    hasCurrentValue (C.SomeState st)
-      | Just sessionID <- st ^? C.lArchState . _Just . C.contextL . C.currentContext . C.symExecSessionIDL
-      , Just symExSt <- st ^? C.lArchState . _Just . C.symExStateL
-      , Just (Some (C.Suspended _symNonce suspSt)) <- C.lookupSessionState symExSt sessionID =
-          isJust (C.suspendedCurrentValue suspSt)
-      | otherwise = False
-
 
 listFunctionsC :: forall s st . (C.HasNonce st, st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
 listFunctionsC =
@@ -112,7 +100,7 @@ findBlockC =
 
 showMacawBlockC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showMacawBlockC =
-  C.Command "show-macaw-block" doc PL.Nil PL.Nil callback hasMacawRepr
+  C.Command "show-macaw-block" doc PL.Nil PL.Nil callback C.hasMacawRepr
   where
     doc = "Show the macaw IR of the currently-selected block"
     callback :: Callback s st '[]
@@ -127,7 +115,7 @@ showMacawBlockC =
 
 showCrucibleBlockC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showCrucibleBlockC =
-  C.Command "show-crucible-block" doc PL.Nil PL.Nil callback hasCrucibleRepr
+  C.Command "show-crucible-block" doc PL.Nil PL.Nil callback C.hasCrucibleRepr
   where
     doc = "Show the crucible IR of the currently-selected block"
     callback :: Callback s st '[]
@@ -150,7 +138,7 @@ showBaseBlockC =
 
 showMacawFunctionC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showMacawFunctionC =
-  C.Command "show-macaw-function" doc PL.Nil PL.Nil callback hasMacawRepr
+  C.Command "show-macaw-function" doc PL.Nil PL.Nil callback C.hasMacawRepr
   where
     doc = "Show the macaw CFG for the currently-selected function"
     callback :: Callback s st '[]
@@ -159,7 +147,7 @@ showMacawFunctionC =
 
 showCrucibleFunctionC :: forall s st e u . (C.HasNonce st, st ~ C.S e u) => Command s st '[]
 showCrucibleFunctionC =
-  C.Command "show-crucible-function" doc PL.Nil PL.Nil callback hasCrucibleRepr
+  C.Command "show-crucible-function" doc PL.Nil PL.Nil callback C.hasCrucibleRepr
   where
     doc = "Show the crucible CFG for the currently-selected function"
     callback :: Callback s st '[]
@@ -218,28 +206,3 @@ minibufferC =
     doc = "Open the minibuffer"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> C.emitEvent customEventChan SBE.OpenMinibuffer
-
-
-hasMacawRepr :: C.SomeState (C.S e u) s -> Bool
-hasMacawRepr sst =
-  case sst of
-    C.SomeState (_ :: C.S e u arch s) ->
-      any isMacawRepr (C.alternativeIRs (Proxy @(arch, s)))
-  where
-    isMacawRepr (C.SomeIRRepr r) =
-      case r of
-        C.MacawRepr -> True
-        _ -> False
-
-hasCrucibleRepr :: C.SomeState (C.S e u) s -> Bool
-hasCrucibleRepr sst =
-  case sst of
-    C.SomeState (_ :: C.S e u arch s) ->
-      any isCrucibleRepr (C.alternativeIRs (Proxy @(arch, s)))
-  where
-    isCrucibleRepr (C.SomeIRRepr r) =
-      case r of
-        C.CrucibleRepr -> True
-        _ -> False
-
--- FIXME: Should these be in core?
