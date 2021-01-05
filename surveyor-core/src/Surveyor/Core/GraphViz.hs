@@ -528,4 +528,7 @@ docLabel :: PP.Doc ann -> DG.Attribute
 docLabel = DG.textLabel . PPT.renderLazy . PP.layoutCompact
 
 formatRegEntryEdge :: (FormulaNode s sym, FormulaNode s sym, FormulaEdgeLabel) -> DG.Attributes
-formatRegEntryEdge = undefined
+formatRegEntryEdge (_, _, el) =
+  case el of
+    DependencyEdge -> []
+    ConditionalEdge _ -> []

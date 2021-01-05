@@ -11,6 +11,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import           Fmt ( (+|), (|+), (||+) )
 import qualified Fmt as Fmt
+import           System.FilePath ( (<.>) )
 import           Text.Printf ( printf )
 
 import qualified Surveyor.Core.Architecture as SCA
@@ -68,7 +69,13 @@ handleInfoEvent s0 evt =
           case mPath of
             Nothing -> liftIO $ DG.runGraphvizCanvas cmd dot DG.Gtk
             Just path -> do
+              let msg = SCL.msgWith { SCL.logLevel = SCL.Info
+                                    , SCL.logSource = SCL.EventHandler "VisualizeSymbolicTerm"
+                                    , SCL.logText = [T.pack ("Saving to SVG " ++ path)]
+                                    }
+              liftIO $ SCS.logMessage s0 msg
               _ <- liftIO $ DG.runGraphvizCommand cmd dot DG.Svg path
+              _ <- liftIO $ DG.runGraphvizCommand cmd dot (DG.XDot Nothing) (path <.> "dot")
               return ()
         False -> do
           let msg = SCL.msgWith { SCL.logLevel = SCL.Warn
