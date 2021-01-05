@@ -6,16 +6,19 @@ module Surveyor.Core.Handlers.Info (
 
 import           Control.Lens ( (&), (^.), (.~), (%~) )
 import           Control.Monad.IO.Class ( MonadIO, liftIO )
+import qualified Data.GraphViz as DG
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
 import           Fmt ( (+|), (|+), (||+) )
 import qualified Fmt as Fmt
+import           System.FilePath ( (<.>) )
 import           Text.Printf ( printf )
 
 import qualified Surveyor.Core.Architecture as SCA
 import qualified Surveyor.Core.Command as SCC
 import qualified Surveyor.Core.EchoArea as SCEA
 import qualified Surveyor.Core.Events as SCE
+import qualified Surveyor.Core.GraphViz as SCG
 import qualified Surveyor.Core.Keymap as SCK
 import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.Mode as SCM
@@ -56,6 +59,31 @@ handleInfoEvent s0 evt =
                                                 })
       let s1 = s0 & SCS.lUIMode .~ SCM.SomeUIMode SCM.Diags
       return $! SCS.State s1
+
+    SCE.VisualizeSymbolicTerm regEntry mPath -> do
+      gvTest <- liftIO $ DG.isGraphvizInstalled
+      case gvTest of
+        True -> do
+          let dot = SCG.regEntryToGraphViz regEntry
+          let cmd = DG.Dot
+          case mPath of
+            Nothing -> liftIO $ DG.runGraphvizCanvas cmd dot DG.Gtk
+            Just path -> do
+              let msg = SCL.msgWith { SCL.logLevel = SCL.Info
+                                    , SCL.logSource = SCL.EventHandler "VisualizeSymbolicTerm"
+                                    , SCL.logText = [T.pack ("Saving to SVG " ++ path)]
+                                    }
+              liftIO $ SCS.logMessage s0 msg
+              _ <- liftIO $ DG.runGraphvizCommand cmd dot DG.Svg path
+              _ <- liftIO $ DG.runGraphvizCommand cmd dot (DG.XDot Nothing) (path <.> "dot")
+              return ()
+        False -> do
+          let msg = SCL.msgWith { SCL.logLevel = SCL.Warn
+                                , SCL.logSource = SCL.EventHandler "VisualizeSymbolicTerm"
+                                , SCL.logText = [T.pack "Graphviz is not installed"]
+                                }
+          liftIO $ SCS.logMessage s0 msg
+      return $! SCS.State s0
 
 -- | Get the current mode (looking through the minibuffer if necessary)
 withBaseMode :: SCM.SomeUIMode s -> (SCM.UIMode s SCM.NormalK -> a) -> a
