@@ -26,6 +26,7 @@ handleExtensionEvent s0 evt =
   case evt of
     SBE.ShowSummary -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Summary)
     SBE.ShowDiagnostics -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.Diags)
+    SBE.ShowSymbolicExecution -> B.continue $! C.State (s0 & C.lUIMode .~ C.SomeUIMode C.SymbolicExecutionManager)
     SBE.OpenMinibuffer ->
       case C.sUIMode s0 of
         C.SomeMiniBuffer _ -> B.continue (C.State s0)

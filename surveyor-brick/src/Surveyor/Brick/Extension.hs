@@ -99,6 +99,7 @@ data BrickUIEvent s (st :: Type -> Type -> Type) where
   ShowSummary :: BrickUIEvent s st
   ShowDiagnostics :: BrickUIEvent s st
   OpenMinibuffer :: BrickUIEvent s st
+  ShowSymbolicExecution :: BrickUIEvent s st
 
   ListBlocks :: PN.Nonce s arch -> [C.Block arch s] -> BrickUIEvent s st
   ListFunctions :: PN.Nonce s arch -> [C.FunctionHandle arch s] -> BrickUIEvent s st

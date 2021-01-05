@@ -16,6 +16,7 @@ module Surveyor.Brick.Command (
   showInstructionSemanticsC,
   showSummaryC,
   showDiagnosticsC,
+  showSymbolicExecutionC,
   minibufferC,
   extraCommands,
   findBlockC,
@@ -69,6 +70,7 @@ extraCommands = [ C.SomeCommand showMacawBlockC
                 , C.SomeCommand findBlockC
                 , C.SomeCommand listFunctionsC
                 , C.SomeCommand promptValueNameC
+                , C.SomeCommand showSymbolicExecutionC
                 ]
 
 promptValueNameC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
@@ -185,7 +187,7 @@ showInstructionSemanticsC =
 
 showSummaryC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
 showSummaryC =
-  C.Command "summary" doc PL.Nil PL.Nil callback (const True)
+  C.Command "show-summary" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show a summary of the information discovered about the binary"
     callback :: Callback s st '[]
@@ -193,11 +195,19 @@ showSummaryC =
 
 showDiagnosticsC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
 showDiagnosticsC =
-  C.Command "log" doc PL.Nil PL.Nil callback (const True)
+  C.Command "show-log" doc PL.Nil PL.Nil callback (const True)
   where
     doc = "Show a log of the diagnostics produced by the analysis and UI"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> C.emitEvent customEventChan SBE.ShowDiagnostics
+
+showSymbolicExecutionC :: forall s st . (st ~ C.S SBE.BrickUIExtension SBE.BrickUIState) => Command s st '[]
+showSymbolicExecutionC =
+  C.Command "show-symbolic-execution" doc PL.Nil PL.Nil callback (const True)
+  where
+    doc = "Show the UI for managing symbolic execution states"
+    callback :: Callback s st '[]
+    callback = \customEventChan _ PL.Nil -> C.emitEvent customEventChan SBE.ShowSymbolicExecution
 
 -- | This isn't part of 'allCommands' because we can never productively launch
 -- it from the minibuffer
