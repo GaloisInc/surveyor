@@ -91,6 +91,7 @@ handleSymbolicExecutionEvent s0 evt =
           -- update the UI mode (via a separate state update)
           liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState archNonce inspectState)
           liftIO $ SCS.sEmitEvent s0 (SCE.AsyncStateUpdate archNonce (NF.nf ()) updateUIMode)
+        liftIO $ A.link task
 
         -- Update the symbolic execution state (via an event), while updating
         -- the UI mode more directly.
