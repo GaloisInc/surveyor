@@ -18,7 +18,9 @@ extra-source-files:  CHANGELOG.md
 library
   exposed-modules:     Crux.Debug.Config
                        Crux.Debug.LLVM
+                       Crux.Debug.LLVM.Overrides
                        Crux.Debug.Interrupt
+                       Crux.Debug.Solver
   build-depends:       base >=4.10 && <5,
                        async,
                        brick,
