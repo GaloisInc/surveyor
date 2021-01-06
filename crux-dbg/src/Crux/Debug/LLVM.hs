@@ -250,11 +250,18 @@ registerFunctions cruxOpts sconf llvm_module mtrans =
   do let llvm_ctx = mtrans ^. CLT.transContext
      let ?lc = llvm_ctx ^. CLT.llvmTypeCtx
 
-     -- register the callable override functions
-     let overrides = concat [ CLO.cruxLLVMOverrides
+     -- Register the callable override functions
+     --
+     -- NOTE: The debug overrides have to be registered first so that the
+     -- debugging variant of crucible_assert takes precedence over the original
+     -- crux version
+     --
+     -- FIXME: We should make the assertions to check configurable somehow
+     -- (ideally without recompilation)
+     let overrides = concat [ CDLO.debugOverrides cruxOpts sconf
+                            , CLO.cruxLLVMOverrides
                             , CLO.svCompOverrides
                             , CLO.cbmcOverrides
-                            , CDLO.debugOverrides cruxOpts sconf
                             ]
      CLI.register_llvm_overrides llvm_module [] overrides llvm_ctx
 

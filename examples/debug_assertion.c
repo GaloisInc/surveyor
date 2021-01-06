@@ -2,7 +2,7 @@
 
 void callee(int x, int y) {
   int z = x + y;
-  crucible_assert(z > 1, __FILE__, __LINE__);
+  crucible_debug_assert(z > 1, __FILE__, __LINE__);
 
 }
 

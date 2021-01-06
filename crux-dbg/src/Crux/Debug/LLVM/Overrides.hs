@@ -191,4 +191,7 @@ debugOverrides cruxOpts sconf =
 
   , CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_debug_assert( i8, i8*, i32 ) |]
       (do_debug_assert (CDS.parseSolverOffline cruxOpts) sconf)
+
+  , CLI.basic_llvm_override $ [LCLQ.llvmOvr| void @crucible_assert( i8, i8*, i32 ) |]
+      (do_debug_assert (CDS.parseSolverOffline cruxOpts) sconf)
   ]
