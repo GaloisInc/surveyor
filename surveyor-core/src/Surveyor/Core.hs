@@ -160,6 +160,8 @@ module Surveyor.Core (
   SymEx.configuringSymbolicExecution,
   SymEx.initializingSymbolicExecution,
   SymEx.startSymbolicExecution,
+  SymEx.emptyMetrics,
+  SymEx.setupProfiling,
   SymEx.cleanupSymbolicExecutionState,
   SymEx.configSolverL,
   SymEx.configFloatReprL,

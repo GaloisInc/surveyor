@@ -4,6 +4,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 module Surveyor.Core.State (
@@ -16,6 +17,15 @@ module Surveyor.Core.State (
   ArchDict(..),
   -- * Logging
   logMessage,
+  -- * State Predicates
+  hasMacawRepr,
+  hasCrucibleRepr,
+  hasCurrentValue,
+  hasContext,
+  hasSuspendedSymbolicExecutionSession,
+  hasExecutingSymbolicExecutionSession,
+  withCurrentSymbolicExecutionSession,
+  withSymbolicSession,
   -- * Lenses
   lStateLogger,
   lFileLogger,
@@ -47,10 +57,14 @@ module Surveyor.Core.State (
 import           GHC.Generics ( Generic )
 
 import qualified Control.Concurrent.Async as CA
+import           Control.Lens ( (^.), (^?), _Just )
 import qualified Control.Lens as L
 import           Data.Kind ( Type )
+import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as NG
+import           Data.Parameterized.Some ( Some(..) )
+import           Data.Proxy ( Proxy(..) )
 
 import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Arguments as AR
@@ -238,3 +252,78 @@ logMessage s msg = do
 -- when a new binary is loaded).
 data State e u s where
   State :: (A.Architecture arch s, A.CrucibleExtension arch) => !(S e u arch s) -> State e u s
+
+hasMacawRepr :: AR.SomeState (S e u) s -> Bool
+hasMacawRepr sst =
+  case sst of
+    AR.SomeState (_ :: S e u arch s) ->
+      any isMacawRepr (A.alternativeIRs (Proxy @(arch, s)))
+  where
+    isMacawRepr (A.SomeIRRepr r) =
+      case r of
+        IR.MacawRepr -> True
+        _ -> False
+
+hasCrucibleRepr :: AR.SomeState (S e u) s -> Bool
+hasCrucibleRepr sst =
+  case sst of
+    AR.SomeState (_ :: S e u arch s) ->
+      any isCrucibleRepr (A.alternativeIRs (Proxy @(arch, s)))
+  where
+    isCrucibleRepr (A.SomeIRRepr r) =
+      case r of
+        IR.CrucibleRepr -> True
+        _ -> False
+
+hasContext :: AR.SomeState (S e u) s -> Bool
+hasContext (AR.SomeState ss)
+  | Just archState <- ss ^. lArchState =
+      isJust (archState ^? contextL . CC.currentContext)
+  | otherwise = False
+
+hasCurrentValue :: AR.SomeState (S e u) s -> Bool
+hasCurrentValue (AR.SomeState st) =
+  withCurrentSymbolicExecutionSession st False $ \sessionID ->
+    withSymbolicSession st sessionID False $ \seState ->
+      case seState of
+        SE.Suspended _nonce suspSt
+          | Just _ <- SE.suspendedCurrentValue suspSt -> True
+        _ -> False
+
+withCurrentSymbolicExecutionSession :: S e u arch s
+                                    -> a
+                                    -> (SE.SessionID s -> a)
+                                    -> a
+withCurrentSymbolicExecutionSession s def k =
+  case s ^? lArchState . _Just . contextL . CC.currentContext . CC.symExecSessionIDL of
+    Nothing -> def
+    Just sessionID -> k sessionID
+
+withSymbolicSession :: S e u arch s
+                    -> SE.SessionID s
+                    -> a
+                    -> (forall k . SE.SymbolicExecutionState arch s k -> a)
+                    -> a
+withSymbolicSession s sessionID def k =
+  case s ^? lArchState . _Just . symExStateL of
+    Nothing -> def
+    Just symExSessions ->
+      case SE.lookupSessionState symExSessions sessionID of
+        Nothing -> def
+        Just (Some symExSt) -> k symExSt
+
+hasSuspendedSymbolicExecutionSession :: AR.SomeState (S e u) s -> Bool
+hasSuspendedSymbolicExecutionSession (AR.SomeState st) =
+  withCurrentSymbolicExecutionSession st False $ \sessionID ->
+    withSymbolicSession st sessionID False $ \seState ->
+      case seState of
+        SE.Suspended {} -> True
+        _ -> False
+
+hasExecutingSymbolicExecutionSession :: AR.SomeState (S e u) s -> Bool
+hasExecutingSymbolicExecutionSession (AR.SomeState st) =
+  withCurrentSymbolicExecutionSession st False $ \sessionID ->
+    withSymbolicSession st sessionID False $ \seState ->
+      case seState of
+        SE.Executing {} -> True
+        _ -> False

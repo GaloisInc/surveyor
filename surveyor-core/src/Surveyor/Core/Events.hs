@@ -111,7 +111,7 @@ data SymbolicExecutionEvent s st where
                               -> SE.SymbolicExecutionConfig s
                               -> CCC.SomeCFG (A.CrucibleExt arch) init reg
                               -> SymbolicExecutionEvent s st
-  StartSymbolicExecution :: (CB.IsSymInterface sym)
+  StartSymbolicExecution :: (CB.IsSymInterface sym, sym ~ WEB.ExprBuilder s state fs)
                          => PN.Nonce s arch
                          -> A.AnalysisResult arch s
                          -> SES.SymbolicState arch s sym init reg

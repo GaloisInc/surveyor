@@ -10,6 +10,7 @@ module Surveyor.Core.SymbolicExecution.State (
   SuspendedState(..),
   SuspendedReason(..),
   ExecutionProgress(..),
+  emptyMetrics,
   SymExK,
   Config,
   SetupArgs,
@@ -35,6 +36,7 @@ import qualified Lang.Crucible.Simulator.RegMap as LMCR
 import qualified Surveyor.Core.Breakpoint as SCB
 import qualified System.IO as IO
 import qualified What4.Expr as WEB
+import qualified What4.Interface as WI
 
 import qualified Surveyor.Core.Architecture as CA
 import           Surveyor.Core.SymbolicExecution.Config
@@ -69,7 +71,7 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   -- incrementally modified via the UI/messages).  The type of the CFG fixes the
   -- shape of the initial registers.  It also contains initial values for global
   -- variables and other memory objects.
-  Initializing :: (CB.IsSymInterface sym)
+  Initializing :: (CB.IsSymInterface sym, sym ~ WEB.ExprBuilder s state fs)
                => SymbolicState arch s sym init reg
                -> SymbolicExecutionState arch s SetupArgs
   -- | Holds the state of the symbolic execution engine while it is executing.
@@ -139,7 +141,17 @@ data ExecutionProgress s =
   ExecutionProgress { executionMetrics :: CSP.Metrics I.Identity
                     , executionOutputHandle :: IO.Handle
                     , executionConfig :: SymbolicExecutionConfig s
+                    , executionInterrupt :: IOR.IORef SCEF.DebuggerFeatureState
                     }
+
+emptyMetrics :: CSP.Metrics I.Identity
+emptyMetrics =
+  CSP.Metrics { CSP.metricSplits = I.Identity 0
+              , CSP.metricMerges = I.Identity 0
+              , CSP.metricAborts = I.Identity 0
+              , CSP.metricSolverStats = I.Identity WI.zeroStatistics
+              , CSP.metricExtraMetrics = I.Identity mempty
+              }
 
 instance NFData (ExecutionProgress s) where
   rnf ep =

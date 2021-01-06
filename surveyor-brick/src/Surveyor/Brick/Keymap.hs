@@ -48,9 +48,10 @@ addModeKeys modeKeymap (mode, keys) =
 -- | Mode-specific keys that do not have any dependency on the architecture
 modeKeys :: [(C.SomeUIMode s, [(C.Key, C.SomeCommand (C.SurveyorCommand s (C.S SBE.BrickUIExtension SBE.BrickUIState)))])]
 modeKeys = [ (C.SomeUIMode C.SymbolicExecutionManager,
-                  [ (C.Key (V.KChar 'c') [], C.SomeCommand C.beginSymbolicExecutionSetupC)
-                  , (C.Key (V.KChar 's') [], C.SomeCommand C.startSymbolicExecutionC)
-                  , (C.Key (V.KChar 'n') [], C.SomeCommand SBC.promptValueNameC)
+                  [ (C.Key (V.KChar 'n') [], C.SomeCommand SBC.promptValueNameC)
+                  , (C.Key (V.KChar 's') [], C.SomeCommand C.stepExecutionC)
+                  , (C.Key (V.KChar 'c') [], C.SomeCommand C.continueExecutionC)
+                  , (C.Key (V.KChar 'i') [], C.SomeCommand C.interruptExecutionC)
                   ])
            ]
 
