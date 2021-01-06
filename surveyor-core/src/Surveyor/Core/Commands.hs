@@ -212,7 +212,7 @@ stepExecutionC =
 
 interruptExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 interruptExecutionC =
-  C.Command "interrupt-execution" doc PL.Nil PL.Nil callback (const True)
+  C.Command "interrupt-execution" doc PL.Nil PL.Nil callback CS.hasExecutingSymbolicExecutionSession
   where
     doc = "Interrupt the current symbolic execution session (operates on the current symbolic execution session)"
     callback :: Callback s st '[]

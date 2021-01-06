@@ -81,7 +81,8 @@ handleSymbolicExecutionEvent s0 evt =
     SCE.StartSymbolicExecution archNonce ares symState
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce) -> do
         let eventChan = s0 ^. SCS.lEventChannel
-        (newState, executionLoop) <- liftIO $ SymEx.startSymbolicExecution eventChan ares symState
+        let ng = s0 ^. SCS.lNonceGenerator
+        (newState, executionLoop) <- liftIO $ SymEx.startSymbolicExecution ng archNonce eventChan ares symState
         task <- liftIO $ A.async $ do
           inspectState <- executionLoop
           let updateUIMode () st =

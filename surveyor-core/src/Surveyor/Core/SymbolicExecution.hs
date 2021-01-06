@@ -46,8 +46,9 @@ module Surveyor.Core.SymbolicExecution (
   symbolicExecutionConfig,
   initialSymbolicExecutionState,
   startSymbolicExecution,
-  ExecutionProgress,
-  executionMetrics,
+  setupProfiling,
+  emptyMetrics,
+  ExecutionProgress(..),
   -- * Exposed State
   SymbolicState(..),
   -- * State Constructors
@@ -381,14 +382,19 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig _sid solv
 -- The IO callback is necessary so that this code does not need to know the
 -- concrete state type (and therefore avoid import cycles).  The caller should
 -- provide a callback that just does an async state update.
-startSymbolicExecution :: (CA.Architecture arch s, CB.IsSymInterface sym)
-                       => SCC.Chan (SCE.Events s st)
+startSymbolicExecution :: ( CA.Architecture arch s
+                          , CB.IsSymInterface sym
+                          , sym ~ WEB.ExprBuilder s state fs
+                          )
+                       => PN.NonceGenerator IO s
+                       -> PN.Nonce s arch
+                       -> SCC.Chan (SCE.Events s st)
                        -> CA.AnalysisResult arch s
                        -> SymbolicState arch s sym init reg
                        -> IO ( SymbolicExecutionState arch s Execute
                              , IO (SymbolicExecutionState arch s Inspect)
                              )
-startSymbolicExecution eventChan ares st =
+startSymbolicExecution ng archNonce eventChan ares st =
   case someCFG st of
     CCC.SomeCFG cfg -> withSymConstraints st $ do
       let sym = symbolicBackend st
@@ -407,9 +413,12 @@ startSymbolicExecution eventChan ares st =
       -- We use an IORef here so that we can collect metrics when we switch to
       -- 'Inspecting' mode, since we won't have access to the location where the
       -- real metrics are stored when symbolic execution ends.
-      mref <- IOR.newIORef (error "Empty initial value for symbolic execution metrics")
-      (initialMetrics, profilingFeature) <- setupProfiling mref eventChan (symbolicConfig st L.^. sessionID)
+      mref <- IOR.newIORef emptyMetrics
+      let sid = symbolicConfig st L.^. sessionID
+      (initialMetrics, profilingFeature) <- setupProfiling mref eventChan sid
+      debuggerConfig <- SCEF.newDebuggerConfig archNonce sid
       let executionFeatures = [ CSE.genericToExecutionFeature profilingFeature
+                              , SCEF.debuggerFeature debuggerConfig ng
                               ]
 
       let startExec = do
@@ -419,6 +428,7 @@ startSymbolicExecution eventChan ares st =
       let progress = ExecutionProgress { executionMetrics = initialMetrics
                                        , executionOutputHandle = readH
                                        , executionConfig = symbolicConfig st
+                                       , executionInterrupt = SCEF.debuggerConfigStateVar debuggerConfig
                                        }
       return (Executing progress, startExec)
 

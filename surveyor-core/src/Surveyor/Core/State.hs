@@ -23,6 +23,7 @@ module Surveyor.Core.State (
   hasCurrentValue,
   hasContext,
   hasSuspendedSymbolicExecutionSession,
+  hasExecutingSymbolicExecutionSession,
   withCurrentSymbolicExecutionSession,
   withSymbolicSession,
   -- * Lenses
@@ -317,4 +318,12 @@ hasSuspendedSymbolicExecutionSession (AR.SomeState st) =
     withSymbolicSession st sessionID False $ \seState ->
       case seState of
         SE.Suspended {} -> True
+        _ -> False
+
+hasExecutingSymbolicExecutionSession :: AR.SomeState (S e u) s -> Bool
+hasExecutingSymbolicExecutionSession (AR.SomeState st) =
+  withCurrentSymbolicExecutionSession st False $ \sessionID ->
+    withSymbolicSession st sessionID False $ \seState ->
+      case seState of
+        SE.Executing {} -> True
         _ -> False

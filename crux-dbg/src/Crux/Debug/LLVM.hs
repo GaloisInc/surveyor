@@ -24,6 +24,7 @@ import qualified Data.BitVector.Sized as BV
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Foldable as F
+import qualified Data.IORef as IOR
 import qualified Data.LLVM.BitCode as DLB
 import qualified Data.Map.Strict as Map
 import           Data.Maybe ( fromMaybe )
@@ -238,13 +239,19 @@ simulateLLVMWithDebug debuggerHandleVar cruxOpts dbgOpts bcFilePath = C.Simulato
 
           MV.putMVar debuggerHandleVar cleanupAction
 
+          -- We are reusing this code - we don't actually need the contents of this ref
+          metricsRef <- IOR.newIORef SC.emptyMetrics
+          (_initialMetrics, profilingFeature) <- SC.setupProfiling metricsRef surveyorChan sessionID
+
           let initSt = LCS.InitialState simCtx globSt LCS.defaultAbortHandler LCT.UnitRepr $
                 LCS.runOverrideSim LCT.UnitRepr $ do
                   registerFunctions cruxOpts overrideConfig llvmModule translation
                   checkEntryPoint (fromMaybe "main" (CDC.entryPoint dbgOpts)) (CLT.cfgMap translation)
           -- FIXME: We can use this callback to collect live explanations in terms of solver state
           let handleExplanation = \_ _ -> return mempty
-          let executionFeatures = [SC.debuggerFeature debuggerConfig ng]
+          let executionFeatures = [ SC.debuggerFeature debuggerConfig ng
+                                  , LCS.genericToExecutionFeature profilingFeature
+                                  ]
           return (C.RunnableStateWithExtensions initSt executionFeatures, handleExplanation)
         | otherwise -> CMC.throwM (UnsupportedX86BitWidth rep)
 
