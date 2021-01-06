@@ -89,6 +89,8 @@ lookupString mvar ptr =
      bytes <- liftIO (CLM.loadString sym mem (regValue ptr) Nothing)
      return (BS8.unpack (BS.pack bytes))
 
+-- | Halt execution when the symbolic simulator executes this override, dropping
+-- into the debugger
 do_breakpoint :: ( wptr ~ CLE.ArchWidth arch
                  , ext ~ CLI.LLVM arch
                  , sym ~ WEB.ExprBuilder t st fs
@@ -120,6 +122,11 @@ do_breakpoint conf memVar sym (Ctx.Empty Ctx.:> breakpointNamePtr Ctx.:> breakpo
 
 data WantDebug sym = WantDebug CT.ModelView | NoDebug
 
+-- | Like the standard assertion primitive from crux, except that it checks the
+-- validity of each assertion when it is encountered.  If the assertion is not
+-- valid in this context, the override drops execution into the debugger.
+--
+-- The goal is to localize errors for easier diagnosis.
 do_debug_assert :: ( CLO.ArchOk arch
                   , LCB.IsSymInterface sym
                   , CLM.HasLLVMAnn sym
@@ -165,6 +172,7 @@ do_debug_assert offSolver conf mvar sym (Ctx.Empty Ctx.:> p Ctx.:> pFile Ctx.:> 
     WantDebug simData -> do
       enterDebugger conf ng simState (SC.SuspendedAssertionFailure simData)
 
+-- | This is the collection of debugger-specific overrides
 debugOverrides :: ( LCB.IsSymInterface sym
                        , CLM.HasLLVMAnn sym
                        , CLM.HasPtrWidth wptr
