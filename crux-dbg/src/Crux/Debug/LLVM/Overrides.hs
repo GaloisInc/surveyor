@@ -59,9 +59,7 @@ import qualified Surveyor.Core as SC
 --
 -- This function waits for a response before resuming execution.  The response
 -- could in theory modify the simulator state.
-enterDebugger :: ( ext ~ CLI.LLVM arch
-                 )
-              => SC.OverrideConfig s p sym arch' ext
+enterDebugger :: SC.OverrideConfig s p sym arch' ext
               -> PN.NonceGenerator IO s
               -> LCSET.SimState p sym ext rtp (LCSC.OverrideLang ret) ('Just args)
               -> SC.SuspendedReason p sym ext rtp
