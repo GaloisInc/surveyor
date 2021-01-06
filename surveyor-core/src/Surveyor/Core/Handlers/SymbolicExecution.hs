@@ -187,6 +187,12 @@ handleSymbolicExecutionEvent s0 evt =
           makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction debugConf
       | otherwise -> return (SCS.State s0)
 
+-- | Analyze the current state of the symbolic execution engine and create a
+-- suspended state (in the surveyor symbolic execution manager sense), sending
+-- the messages required to sync the core engine to this state (and update the
+-- UI, as appropriate).
+--
+-- Note that if execution has completed, this will do nothing
 makeSuspendedState :: ( MonadIO m
                       , sym ~ WEB.ExprBuilder s st fs
                       , CB.IsSymInterface sym
@@ -213,7 +219,11 @@ makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction
   let tc = archState ^. SCS.irCacheL
   let ares = archState ^. SCS.lAnalysisResult
 
-  withParentFrameCFG (simState ^. LCSET.stateTree . L.to LCSET.activeFrames) $ \parentFrameCFG -> do
+  let ifNoCFG = do
+        liftIO $ IOR.atomicWriteIORef debugConf SCEF.Inactive
+        liftIO resumeAction
+        return (SCS.State s0)
+  withParentFrameCFG (simState ^. LCSET.stateTree . L.to LCSET.activeFrames) ifNoCFG $ \parentFrameCFG -> do
     contextStack <- liftIO $ contextStackFromState ng tc ares sessionID parentFrameCFG
 
     let symState = SES.SymbolicState { SES.symbolicConfig = symConf
@@ -282,12 +292,18 @@ contextStackFromState ng tc ares sesID cfg = do
       mcfg <- SCA.crucibleCFG ares fh
       return ((fh,) <$> mcfg)
 
-
+-- | Run the continuation with the nearest (symbolic) stack frame from the current context
+--
+-- Note that this skips override frames, which do not have associated CFGs.
+--
+-- The function takes a default value to return if there is no CFG left on the
+-- stack (i.e., execution has completed).
 withParentFrameCFG :: [LCSET.SomeFrame (LCSC.SimFrame sym ext)]
+                   -> t
                    -> (forall blocks init ret . LCCC.CFG ext blocks init ret -> t)
                    -> t
-withParentFrameCFG fs k =
+withParentFrameCFG fs def k =
   case fs of
-    [] -> error "No parent frame"
+    [] -> def
     LCSET.SomeFrame (LCSC.MF LCSC.CallFrame { LCSC._frameCFG = pfcfg }) : _ -> k pfcfg
-    _ : _fs -> withParentFrameCFG _fs k
+    _ : _fs -> withParentFrameCFG _fs def k
