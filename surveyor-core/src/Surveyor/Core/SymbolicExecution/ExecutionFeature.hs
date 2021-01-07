@@ -1,4 +1,6 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE RankNTypes #-}
 module Surveyor.Core.SymbolicExecution.ExecutionFeature (
   DebuggerConfig(..),
   debuggerConfigStateVar,
@@ -37,8 +39,13 @@ data ReturnExecState s p sym ext where
   ModifiedExecState :: PN.Nonce s rtp -> LCSET.ExecState p sym ext rtp -> ReturnExecState s p sym ext
 
 data DebuggerFeatureState where
+  -- | Set the debugger feature to send all events to the debugger
   Monitoring :: DebuggerFeatureState
+  -- | Set the debugger feature to be inactive and just allow the symbolic execution to proceed normally
   Inactive :: DebuggerFeatureState
+  -- | Allow symbolic execution to proceed normally until the predicate returns
+  -- True, at which point the feature switches into 'Monitoring' mode
+  InactiveUntil :: (forall p sym ext rtp . LCSET.ExecState p sym ext rtp -> IO Bool) -> DebuggerFeatureState
 
 data DebuggerConfig s p sym arch ext where
   DebuggerConfig :: ( ext ~ SCA.CrucibleExt arch
@@ -79,10 +86,18 @@ debugger :: (sym ~ WEB.ExprBuilder s st fs)
          -> PN.NonceGenerator IO s
          -> LCSET.ExecState p sym ext rtp
          -> IO (LCS.ExecutionFeatureResult p sym ext rtp)
-debugger (DebuggerConfig _ _ toDebugger fromDebugger stateRef) ng estate = do
+debugger conf@(DebuggerConfig _ _ toDebugger fromDebugger stateRef) ng estate = do
   s <- DI.readIORef stateRef
   case s of
     Inactive -> return LCS.ExecutionFeatureNoChange
+    InactiveUntil p -> do
+      shouldMonitor <- p estate
+      if | shouldMonitor -> do
+             -- Once the predicate becomes true, switch to 'Monitoring' mode and
+             -- handle it with a recursive call
+             DI.writeIORef stateRef Monitoring
+             debugger conf ng estate
+         | otherwise -> return LCS.ExecutionFeatureNoChange
     Monitoring -> do
       rtp <- PN.freshNonce ng
       CCC.writeChan toDebugger (Just (CrucibleExecState rtp estate))

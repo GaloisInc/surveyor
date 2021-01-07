@@ -52,6 +52,18 @@ handleDebuggingEvent s0 evt =
           return $! SCS.State s0
       | otherwise -> return $! SCS.State s0
 
+    SCE.StepOutExecution sessionID
+      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
+      , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
+          let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
+          stackDepthRef <- liftIO $ IOR.newIORef 0
+          liftIO $ IOR.atomicWriteIORef execFeatureStateRef (SCEF.InactiveUntil (stepOutP stackDepthRef))
+          liftIO $ SymEx.suspendedResumeUnmodified suspSt
+          switchToExecutingState s0 symEx
+
+          return $! SCS.State s0
+      | otherwise -> return $! SCS.State s0
+
     SCE.ContinueExecution sessionID
       | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
       , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
@@ -80,6 +92,28 @@ handleDebuggingEvent s0 evt =
 
           return $! SCS.State s0
       | otherwise -> return $! SCS.State s0
+
+-- | Return True once execution returns from the current function
+--
+-- Operationally, increment the stack depth on every call, decrement it on every
+-- return.  If we see a return when the depth is 0, we can return.
+stepOutP :: IOR.IORef Int -> LCSET.ExecState p sym ext rtp -> IO Bool
+stepOutP callDepthRef st =
+  case st of
+    LCSET.CallState {} -> do
+      IOR.atomicModifyIORef' callDepthRef (\d -> (d + 1, ()))
+      return False
+    LCSET.TailCallState {} -> do
+      IOR.atomicModifyIORef' callDepthRef (\d -> (d + 1, ()))
+      return False
+    LCSET.ReturnState {} -> do
+      depth <- IOR.readIORef callDepthRef
+      case depth of
+        0 -> return True
+        _ -> do
+          IOR.atomicModifyIORef' callDepthRef (\d -> (d - 1, ()))
+          return False
+    _ -> return False
 
 -- | Construct an 'SymEx.Executing' state (from the suspended state) and switch
 -- to it by sending an event

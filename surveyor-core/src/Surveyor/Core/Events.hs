@@ -187,6 +187,8 @@ data ContextEvent s st where
 data DebuggingEvent s st where
   -- | Step the given symbolic execution session by one step
   StepExecution :: CSS.SessionID s -> DebuggingEvent s st
+  -- | Continue execution until the next return, stepping out of the current function context
+  StepOutExecution :: CSS.SessionID s -> DebuggingEvent s st
   -- | Continue the given symbolic execution session
   ContinueExecution :: CSS.SessionID s ->  DebuggingEvent s st
   -- | Interrupt the given symbolic execution, stopping it at the next

@@ -20,6 +20,7 @@ module Surveyor.Core.Commands (
   resetInstructionSelectionC,
   contextBackC,
   stepExecutionC,
+  stepOutExecutionC,
   continueExecutionC,
   interruptExecutionC,
   contextForwardC,
@@ -74,6 +75,7 @@ allCommands =
   , C.SomeCommand resetInstructionSelectionC
   , C.SomeCommand contextBackC
   , C.SomeCommand contextForwardC
+  , C.SomeCommand stepOutExecutionC
   , C.SomeCommand stepExecutionC
   , C.SomeCommand continueExecutionC
   , C.SomeCommand interruptExecutionC
@@ -209,6 +211,16 @@ stepExecutionC =
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.StepExecution sessionID)
+
+stepOutExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+stepOutExecutionC =
+  C.Command "step-out-execution" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
+  where
+    doc = "Step out of the current function, pausing at the return state"
+    callback :: Callback s st '[]
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.StepOutExecution sessionID)
 
 interruptExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 interruptExecutionC =
