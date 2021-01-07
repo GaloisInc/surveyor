@@ -15,12 +15,14 @@ import qualified Control.Concurrent.Chan as CCC
 import qualified Data.IORef as DI
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Nonce as PN
+import           GHC.Stack ( HasCallStack )
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.Simulator.EvalStmt as LCS
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified What4.Expr as WEB
 
 import qualified Surveyor.Core.Architecture as SCA
+import qualified Surveyor.Core.Panic as SCP
 import qualified Surveyor.Core.SymbolicExecution.Session as SCSSe
 
 -- | This is a container for the symbolic execution states being transferred
@@ -81,7 +83,7 @@ debuggerFeature :: (sym ~ WEB.ExprBuilder s st fs)
                 -> LCS.ExecutionFeature p sym ext rtp
 debuggerFeature conf ng = LCS.ExecutionFeature (debugger conf ng)
 
-debugger :: (sym ~ WEB.ExprBuilder s st fs)
+debugger :: (sym ~ WEB.ExprBuilder s st fs, HasCallStack)
          => DebuggerConfig s p sym arch ext
          -> PN.NonceGenerator IO s
          -> LCSET.ExecState p sym ext rtp
@@ -107,4 +109,4 @@ debugger conf@(DebuggerConfig _ _ toDebugger fromDebugger stateRef) ng estate = 
         ModifiedExecState rtp' newState
           | Just PC.Refl <- PC.testEquality rtp' rtp -> do
               return (LCS.ExecutionFeatureModifiedState newState)
-          | otherwise -> error "Execution feature channels out of sync"
+          | otherwise -> SCP.panic "DebuggerExecutionFeature" ["Execution feature channels out of sync"]
