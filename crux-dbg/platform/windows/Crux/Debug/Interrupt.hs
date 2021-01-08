@@ -10,5 +10,5 @@ import qualified Surveyor.Core as SC
 --
 -- NOTE: This implementation is a no-op.  It could be implemented using
 -- GHC.ConsoleHandler on Windows.
-installInterruptHandler :: IOR.IORef SC.DebuggerFeatureState -> IO ()
+installInterruptHandler :: SC.DebuggerStateRef p sym ext -> IO ()
 installInterruptHandler _ = return ()

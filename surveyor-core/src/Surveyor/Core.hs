@@ -105,6 +105,8 @@ module Surveyor.Core (
   SCEF.debuggerConfigStateVar,
   SCEF.newDebuggerConfig,
   SCEF.debuggerFeature,
+  SCEF.DebuggerStateRef,
+  SCEF.setDebuggerState,
   SCEF.CrucibleExecState(..),
   SCEF.ReturnExecState(..),
   SCEF.DebuggerFeatureState(..),

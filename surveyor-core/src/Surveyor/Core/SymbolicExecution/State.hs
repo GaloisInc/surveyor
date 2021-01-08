@@ -10,6 +10,7 @@ module Surveyor.Core.SymbolicExecution.State (
   SuspendedState(..),
   SuspendedReason(..),
   ExecutionProgress(..),
+  RecordedStateLog(..),
   emptyMetrics,
   SymExK,
   Config,
@@ -22,10 +23,10 @@ module Surveyor.Core.SymbolicExecution.State (
 import           Control.DeepSeq ( NFData(..), deepseq )
 import qualified Crux.Types as CT
 import qualified Data.Functor.Identity as I
-import qualified Data.IORef as IOR
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Sequence   as Seq
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.Simulator as CS
@@ -77,7 +78,7 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   -- | Holds the state of the symbolic execution engine while it is executing.
   -- This includes incremental metrics and output, as well as the means to
   -- interrupt execution
-  Executing :: ExecutionProgress s -> SymbolicExecutionState arch s Execute
+  Executing :: (ext ~ CA.CrucibleExt arch) => ExecutionProgress s p sym ext -> SymbolicExecutionState arch s Execute
   -- | The state after symbolic execution has completed.  This has enough
   -- information to start examining and querying the solver about the result
   Inspecting :: (CB.IsSymInterface sym)
@@ -113,6 +114,11 @@ data SuspendedReason p sym ext rtp where
   -- to single stepping)
   SuspendedExecutionStep :: CSET.ExecState p sym ext rtp -> SuspendedReason p sym ext rtp
 
+
+-- | The recorded states, as well as the current index into the log (if we are stepping back through time)
+data RecordedStateLog p sym ext where
+  RecordedStateLog :: Int -> Seq.Seq (Some (CSET.ExecState p sym ext)) -> RecordedStateLog p sym ext
+
 -- | The actual data for a suspended symbolic execution state
 --
 -- It is a separate data type because the record names are useful and would be
@@ -128,20 +134,24 @@ data SuspendedState sym init reg p ext args blocks ret rtp f a ctx arch s =
                  , suspendedResumeUnmodified :: IO ()
                  -- ^ Resume symbolic execution with an unmodified symbolic
                  -- execution state
-                 , suspendedDebugFeatureConfig :: IOR.IORef SCEF.DebuggerFeatureState
+                 , suspendedDebugFeatureConfig :: SCEF.DebuggerStateRef p sym ext
                  -- ^ The reference to the debug feature state; this allows the
                  -- debugger to toggle the debug feature execution mode before
                  -- it resumes execution, enabling either single stepping (or
                  -- controlled stepping) or general continuation.
                  , suspendedReason :: SuspendedReason p sym ext rtp
                  -- ^ The reason execution has been suspended
+                 , suspendedHistory :: Maybe (RecordedStateLog p sym ext)
+                 -- ^ The log of history that could be stepped back through,
+                 -- along with the pointer to the state currently being examined.
                  }
 
-data ExecutionProgress s =
+data ExecutionProgress s p sym ext =
   ExecutionProgress { executionMetrics :: CSP.Metrics I.Identity
                     , executionOutputHandle :: IO.Handle
                     , executionConfig :: SymbolicExecutionConfig s
-                    , executionInterrupt :: IOR.IORef SCEF.DebuggerFeatureState
+                    , executionInterrupt :: SCEF.DebuggerStateRef p sym ext
+                    , executionResume :: IO ()
                     }
 
 emptyMetrics :: CSP.Metrics I.Identity
@@ -153,7 +163,7 @@ emptyMetrics =
               , CSP.metricExtraMetrics = I.Identity mempty
               }
 
-instance NFData (ExecutionProgress s) where
+instance NFData (ExecutionProgress s p sym ext) where
   rnf ep =
     executionConfig ep `deepseq` ()
 

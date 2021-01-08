@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Surveyor.Core.Handlers.Debugging ( handleDebuggingEvent ) where
@@ -9,6 +8,7 @@ import qualified Control.Lens as L
 import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.IORef as IOR
 import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import           GHC.Stack ( HasCallStack )
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
@@ -43,7 +43,7 @@ handleDebuggingEvent s0 evt =
           --
           -- We then resume execution to restart the process
           let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
-          liftIO $ IOR.atomicWriteIORef execFeatureStateRef SCEF.Monitoring
+          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Monitoring)
 
           liftIO $ SymEx.suspendedResumeUnmodified suspSt
 
@@ -57,7 +57,7 @@ handleDebuggingEvent s0 evt =
       , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
           let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
           stackDepthRef <- liftIO $ IOR.newIORef 0
-          liftIO $ IOR.atomicWriteIORef execFeatureStateRef (SCEF.InactiveUntil (stepOutP stackDepthRef))
+          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState (SCEF.InactiveUntil (stepOutP stackDepthRef)))
           liftIO $ SymEx.suspendedResumeUnmodified suspSt
           switchToExecutingState s0 symEx
 
@@ -73,7 +73,7 @@ handleDebuggingEvent s0 evt =
           liftIO $ SCS.logMessage s0 msg
 
           let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
-          liftIO $ IOR.atomicWriteIORef execFeatureStateRef SCEF.Inactive
+          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Inactive)
           liftIO $ SymEx.suspendedResumeUnmodified suspSt
 
           switchToExecutingState s0 symEx
@@ -88,10 +88,65 @@ handleDebuggingEvent s0 evt =
           -- send an event at its next opportunity.  That event will trigger a
           -- state change to the suspended execution viewer.
           let execFeatureStateRef = SymEx.executionInterrupt progress
-          liftIO $ IOR.atomicWriteIORef execFeatureStateRef SCEF.Monitoring
+          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Monitoring)
 
           return $! SCS.State s0
       | otherwise -> return $! SCS.State s0
+
+    SCE.EnableRecording sessionID
+      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
+      , Just (Some (SymEx.Suspended _ suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
+          traceRef <- liftIO $ IOR.newIORef mempty
+          _actualRef <- liftIO $ SCEF.modifyDebuggerState (SymEx.suspendedDebugFeatureConfig suspSt) (enableRecording traceRef)
+          return $! SCS.State s0
+      | otherwise -> return $! SCS.State s0
+
+    SCE.DisableRecording sessionID
+      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
+      , Just (Some (SymEx.Suspended symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
+          let stateRef = SymEx.suspendedDebugFeatureConfig suspSt
+          liftIO $ SCEF.modifyDebuggerState stateRef disableRecording
+          -- If there are any states that have been recorded, save them into the
+          -- state for review
+          liftIO $ SCEF.withRecordedStates stateRef $ \mstates -> do
+            case mstates of
+              Nothing -> return ()
+              Just recordedStates -> do
+                let suspSt1 = suspSt { SymEx.suspendedHistory = Just (SymEx.RecordedStateLog 0 recordedStates) }
+                liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState (s0 ^. SCS.lNonce) (SymEx.Suspended symNonce suspSt1))
+          return $! SCS.State s0
+      | otherwise -> return $! SCS.State s0
+
+enableRecording :: IOR.IORef (Seq.Seq (Some (LCSET.ExecState p sym ext)))
+                -> Some (SCEF.DebuggerFeatureState p sym ext)
+                -> (Some (SCEF.DebuggerFeatureState p sym ext), IOR.IORef (Seq.Seq (Some (LCSET.ExecState p sym ext))))
+enableRecording newRef (Some r) =
+  case r of
+    SCEF.Recording currentRef _nestedState -> (Some r, currentRef)
+    SCEF.Monitoring -> (Some (SCEF.Recording newRef r), newRef)
+    SCEF.Inactive -> (Some (SCEF.Recording newRef r), newRef)
+    SCEF.InactiveUntil {} -> (Some (SCEF.Recording newRef r), newRef)
+
+disableRecording :: Some (SCEF.DebuggerFeatureState p sym ext)
+                 -> (Some (SCEF.DebuggerFeatureState p sym ext), ())
+disableRecording (Some r) =
+  case r of
+    SCEF.Recording _currentRef nestedState -> (Some nestedState, ())
+    SCEF.Monitoring -> (Some r, ())
+    SCEF.Inactive -> (Some r, ())
+    SCEF.InactiveUntil {} -> (Some r, ())
+
+-- | Set the debugger state to the given value, while keeping the current state
+-- recording configuration
+setDebugState :: SCEF.DebuggerFeatureState p sym ext SCEF.Normal
+              -> Some (SCEF.DebuggerFeatureState p sym ext)
+              -> (Some (SCEF.DebuggerFeatureState p sym ext), ())
+setDebugState newState (Some s) =
+  case s of
+    SCEF.Recording ref _ -> (Some (SCEF.Recording ref newState), ())
+    SCEF.Monitoring -> (Some newState, ())
+    SCEF.Inactive -> (Some newState, ())
+    SCEF.InactiveUntil {} -> (Some newState, ())
 
 -- | Return True once execution returns from the current function
 --
@@ -131,6 +186,7 @@ switchToExecutingState s0 symEx@(SymEx.Suspended _nonce suspSt) = do
                                            , SymEx.executionOutputHandle = hdl
                                            , SymEx.executionConfig = symConf
                                            , SymEx.executionInterrupt = SymEx.suspendedDebugFeatureConfig suspSt
+                                           , SymEx.executionResume = SymEx.suspendedResumeUnmodified suspSt
                                            }
   let exState = SymEx.Executing exProgress
   liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState (s0 ^. SCS.lNonce) exState)

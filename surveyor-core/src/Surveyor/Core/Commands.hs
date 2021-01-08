@@ -23,6 +23,10 @@ module Surveyor.Core.Commands (
   stepOutExecutionC,
   continueExecutionC,
   interruptExecutionC,
+  disableRecordingC,
+  enableRecordingC,
+  stepTraceBackwardC,
+  stepTraceForwardC,
   contextForwardC,
   initializeSymbolicExecutionC,
   beginSymbolicExecutionSetupC,
@@ -79,6 +83,10 @@ allCommands =
   , C.SomeCommand stepExecutionC
   , C.SomeCommand continueExecutionC
   , C.SomeCommand interruptExecutionC
+  , C.SomeCommand enableRecordingC
+  , C.SomeCommand disableRecordingC
+  , C.SomeCommand stepTraceBackwardC
+  , C.SomeCommand stepTraceForwardC
   , C.SomeCommand initializeSymbolicExecutionC
   , C.SomeCommand beginSymbolicExecutionSetupC
   , C.SomeCommand startSymbolicExecutionC
@@ -241,6 +249,46 @@ continueExecutionC =
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
         SCE.emitEvent customEventChan (SCE.ContinueExecution sessionID)
+
+enableRecordingC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+enableRecordingC =
+  C.Command "enable-recording" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
+  where
+    doc = "Start recording symbolic states for replay"
+    callback :: Callback s st '[]
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.EnableRecording sessionID)
+
+disableRecordingC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+disableRecordingC =
+  C.Command "disable-recording" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
+  where
+    doc = "Stop recording symbolic states for replay"
+    callback :: Callback s st '[]
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.DisableRecording sessionID)
+
+stepTraceBackwardC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+stepTraceBackwardC =
+  C.Command "step-trace-backward" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
+  where
+    doc = "Step back in the symbolic trace"
+    callback :: Callback s st '[]
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.SymbolicStateBack (s ^. CS.lNonce) sessionID)
+
+stepTraceForwardC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
+stepTraceForwardC =
+  C.Command "step-trace-forward" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
+  where
+    doc = "Step forward in the symbolic trace"
+    callback :: Callback s st '[]
+    callback = \customEventChan (AR.SomeState s) PL.Nil ->
+      CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
+        SCE.emitEvent customEventChan (SCE.SymbolicStateForward (s ^. CS.lNonce) sessionID)
 
 setLogFileC :: forall s st . Command s st '[AR.FilePathType]
 setLogFileC =
