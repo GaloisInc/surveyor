@@ -39,8 +39,13 @@ int main(void)
   for (i=0; i<BUFFER_LEN; i++)
     buff[i] = (byte) crucible_uint8_t("byte");
 
+  crucible_breakpoint("Initialized buffer");
+
   // Compute and output CRC
   crc32 = update_crc(-1, buff, BUFFER_LEN);
+
+  crucible_breakpoint("Updated CRC");
+
   crucible_assert(crc32 != crc32_0, __FILE__, __LINE__);
   printf("CRC = %08X \n", crc32);
   return 0;
