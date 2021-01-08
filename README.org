@@ -1,29 +1,26 @@
 * Overview
 
-Surveyor aims to provide a UI for interactive exploration, inspection, and reasoning about programs.  It supports programs represented as:
-
+Surveyor provides a user interface for exploring, inspecting, and reasoning about programs.  It is structured as a core engine supporting multiple user interfaces.  There are currently two frontends: ~crux-dbg~ and ~surveyor-brick~.  It supports programs represented as:
 - Machine code (x86_64 and PowerPC 32 and PowerPC 64)
 - LLVM bitcode
 - JVM bytecode
 
-Programs can also be viewed in their native representations or in intermediate representations (e.g., [[https://github.com/GaloisInc/macaw][macaw]] and [[https://github.com/GaloisInc/crucible][crucible]]).  The eventual goal is to provide rich interaction, especially in these intermediate representations.  This will include interactive symbolic execution through crucible.
+The primary frontend is currently ~crux-dbg~, which is intended as a drop-in replacement for the [[https://github.com/GaloisInc/crucible/tree/master/crux-llvm][crux-llvm]] tool, but with extra debugging capabilities.
 
-The core of surveyor is implemented in a UI independent core library.  Currently, the supported UI is surveyor-brick, which is a terminal UI (TUI) in the style of ncurses using the [[http://hackage.haskell.org/package/brick][brick]] library.  There is a bitrotted proof-of-concept QML GUI.  Eventually, it will probably make sense to have a web UI and possibly a Qt UI.
-
-* Build
+** Build
 
 #+BEGIN_SRC shell
-git clone git@github.com:travitch/surveyor.git
+git clone git@github.com:GaloisInc/surveyor.git
 cd surveyor
 git submodule update --init
 ln -s cabal.project.dist cabal.project
-cabal v2-build surveyor-brick
+cabal v2-build pkg:crux-dbg
 #+END_SRC
 
-* Usage
+** Usage
 
 #+BEGIN_SRC shell
-cabal v2-run surveyor-brick -- /path/to/binary
+cabal v2-run exe:crux-dbg -- examples/crc_break.bc
 #+END_SRC
 
 Surveyor will load the binary and make its contents available for exploration.  The interface is styled after emacs.  Commands can be run by pressing ~M-x~ and entering a command.  Some useful commands include
@@ -32,3 +29,40 @@ Surveyor will load the binary and make its contents available for exploration.  
 - ~list-functions~
 
 Selecting a function will list its blocks (eventually, this will be a rendered control flow graph).  Within a block, the arrow keys can be used to select instructions.  Machine code blocks can be viewed in two alternative intermediate representations: macaw and crucible.  The relevant commands (accessible via ~M-x~) are ~show-macaw-block~ and ~show-crucible-block~, respectively.
+
+* ~crux-dbg~ Features
+
+The ~crux-dbg~ tool is intended to be a drop-in replacement for [[https://github.com/GaloisInc/crucible/tree/master/crux-llvm][crux-llvm]] (and eventually other crux frontends).  Beyond the functionality provided by ~crux-llvm~, it adds:
+- Support for explicit source-level breakpoints through the ~crucible_breakpoint~ function, which drops the user into an interactive TUI for inspecting symbolic execution states.  Additionally, the breakpoint function can "capture" values for inspection in the symbolic debugger.
+- Signal handling to allow users to interrupt execution at any time by sending ~SIGUSR2~ to the ~crux-dbg~ process (e.g., to interrupt a non-terminating loop for diagnosis).
+- Eager checking of assertions for validity, dropping into the debugger as soon as any ~crucible_assert~ does not hold.
+- Rendering of complex symbolic terms into graphviz graphs for easier visualization.
+
+From the suspended symbolic execution state, the user can inspect the Crucible code being symbolically executed and inspect individual symbolic values at each program point.  The symbolic debugger provides commands to step execution.
+
+* ~surveyor-brick~ Features
+
+The ~surveyor-brick~ tool is intended to be a standalone interface for interactively loading programs and exploring them by initiating symbolic execution queries and interactively adding breakpoints and watchpoints.  These features are not yet complete.
+
+* Common Features
+
+The frontends support a number of common commands:
+- ~describe-command~ provides explanations of the capabilities and arguments for each command
+- ~list-functions~ lists all of the functions in the program
+- ~load-file~ loads a new program
+- ~enable-recording~ records a trace of symbolic events that can be replayed in the symbolic debugger
+- ~step-trace-backwards~ walks backwards in time through a recorded trace (supporting replay debugging)
+- ~step-trace-forwards~ walks forwards in time through a recorded trace (without resuming program execution)
+- ~step-execution~ steps symbolic execution forward by one step
+- ~continue-execution~ resumes symbolic exeuction
+- ~step-out-execution~ steps out of the current function frame (to the caller)
+
+Commands can be accessed by invoking them through the minibuffer.  To activate the minibuffer, use ~M-x~.  Commands auto-complete based on fragments typed in.  Commands that require additional arguments (e.g., file names) will prompt for them.
+
+* Plans
+- Qt UI
+- Web UI
+- Interactive breakpoints
+- Symbolic watchpoints
+- Scheme extensions for dynamic value inspection
+- Integration with external tools (e.g., ghidra)
