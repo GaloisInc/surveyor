@@ -42,6 +42,7 @@ module Surveyor.Core.SymbolicExecution (
   Suspend,
   SymbolicExecutionState(..),
   SuspendedState(..),
+  RecordedStateLog(..),
   suspendedState,
   symbolicExecutionConfig,
   initialSymbolicExecutionState,
@@ -67,11 +68,13 @@ import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.Functor.Identity as I
 import qualified Data.IORef as IOR
 import qualified Data.Map.Strict as Map
+import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Vector as DV
 import qualified Lang.Crucible.Backend as CB
@@ -130,6 +133,13 @@ breakpointArguments rsn =
     SuspendedAssertionFailure {} -> Nothing
     SuspendedExecutionStep {} -> Nothing
 
+toHistory :: Maybe (Seq.Seq (Some (CSET.ExecState p sym ext)))
+          -> Maybe Int
+          -> Maybe (RecordedStateLog p sym ext)
+toHistory mTrace offset = do
+  t <- mTrace
+  return (RecordedStateLog (fromMaybe 0 offset) t)
+
 suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                 . ( CB.IsSymInterface sym
                   , CA.Architecture arch s
@@ -145,10 +155,12 @@ suspendedState :: forall sym arch s ext st fs m init reg p rtp f a
                -- ^ The reason that the symbolic execution was suspended
                -> IO ()
                -- ^ An action to run in order to resume execution with an unmodified state
-               -> IOR.IORef SCEF.DebuggerFeatureState
+               -> SCEF.DebuggerStateRef p sym ext
                -- ^ The configuration flag for the debugging execution feature
+               -> Maybe (Seq.Seq (Some (CSET.ExecState p sym ext)))
+               -> Maybe Int
                -> m (SymbolicExecutionState arch s Suspend)
-suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf =
+suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf mHistory historyOffset =
   case topFrame ^. CSET.gpValue of
     LCSC.RF {} ->
       -- FIXME: Need to do some better signaling that this is a return frame
@@ -164,6 +176,7 @@ suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf =
                                 , suspendedResumeUnmodified = resumeAction
                                 , suspendedDebugFeatureConfig = debugConf
                                 , suspendedReason = reason
+                                , suspendedHistory = toHistory mHistory historyOffset
                                 }
         return (Suspended symNonce st)
     LCSC.OF {} ->
@@ -179,6 +192,7 @@ suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf =
                                 , suspendedResumeUnmodified = resumeAction
                                 , suspendedDebugFeatureConfig = debugConf
                                 , suspendedReason = reason
+                                , suspendedHistory = toHistory mHistory historyOffset
                                 }
         return (Suspended symNonce st)
     LCSC.MF cf ->
@@ -195,6 +209,7 @@ suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf =
                                   , suspendedResumeUnmodified = resumeAction
                                   , suspendedDebugFeatureConfig = debugConf
                                   , suspendedReason = reason
+                                  , suspendedHistory = toHistory mHistory historyOffset
                                   }
           return (Suspended symNonce st)
         Some valAssignment@(_ Ctx.:> _) -> do
@@ -209,6 +224,7 @@ suspendedState ng surveyorSymState crucSimState reason resumeAction debugConf =
                                   , suspendedResumeUnmodified = resumeAction
                                   , suspendedDebugFeatureConfig = debugConf
                                   , suspendedReason = reason
+                                  , suspendedHistory = toHistory mHistory historyOffset
                                   }
           return (Suspended symNonce st)
 
@@ -292,11 +308,14 @@ cleanupActiveSessions (SessionState sessions) = mapM_ cleanupActiveSession sessi
         Suspended _ suspSt -> do
           -- Disable monitoring mode for this instance and then restart
           -- execution
-          IOR.writeIORef (suspendedDebugFeatureConfig suspSt) SCEF.Inactive
+          SCEF.setDebuggerState (suspendedDebugFeatureConfig suspSt) SCEF.Inactive
           suspendedResumeUnmodified suspSt
         Configuring {} -> return ()
         Initializing {} -> return ()
-        Executing {} -> return ()
+        Executing ep -> do
+          SCEF.setDebuggerState (executionInterrupt ep) SCEF.Inactive
+          executionResume ep
+          return ()
         Inspecting {} -> return ()
 
 
@@ -429,6 +448,7 @@ startSymbolicExecution ng archNonce eventChan ares st =
                                        , executionOutputHandle = readH
                                        , executionConfig = symbolicConfig st
                                        , executionInterrupt = SCEF.debuggerConfigStateVar debuggerConfig
+                                       , executionResume = return ()
                                        }
       return (Executing progress, startExec)
 

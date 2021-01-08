@@ -9,15 +9,15 @@ import qualified Control.Concurrent.Chan as CCC
 import           Control.Lens ( (^.), (^?), (.~), (&), (%~), _Just )
 import qualified Control.Lens as L
 import           Control.Monad ( join )
+import qualified Control.Monad.Catch as CMC
 import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Control.NF as NF
 import qualified Data.Foldable as F
-import qualified Data.IORef as IOR
 import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
-import qualified Data.Sequence   as Seq
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as LCCC
@@ -45,6 +45,7 @@ import qualified Surveyor.Core.ValueNames as SCV
 handleSymbolicExecutionEvent :: ( SCA.Architecture arch s
                                 , SCA.CrucibleExtension arch
                                 , MonadIO m
+                                , CMC.MonadThrow m
                                 )
                              => SCS.S e u arch s
                              -> SCE.SymbolicExecutionEvent s (SCS.S e u)
@@ -155,6 +156,34 @@ handleSymbolicExecutionEvent s0 evt =
           return (SCS.State s1)
       | otherwise -> return (SCS.State s0)
 
+    SCE.SymbolicStateBack archNonce sessionID
+      | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce)
+      , Just archState <- s0 ^. SCS.lArchState
+      , symExSt <- archState ^. SCS.symExStateL
+      , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID
+      , Just (SES.RecordedStateLog idx trace) <- SymEx.suspendedHistory suspSt
+      , Just (Some execSt) <- trace Seq.!? (idx + 1)
+      , Just (LCSET.SomeSimState simState) <- LCSET.execStateSimState execSt -> do
+          let rsn = SES.SuspendedExecutionStep execSt
+          let resume = SymEx.suspendedResumeUnmodified suspSt
+          let debuggerRef = SymEx.suspendedDebugFeatureConfig suspSt
+          makeSuspendedState s0 archState archNonce sessionID simState rsn resume debuggerRef (Just (idx + 1))
+      | otherwise -> return (SCS.State s0)
+
+    SCE.SymbolicStateForward archNonce sessionID
+      | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce)
+      , Just archState <- s0 ^. SCS.lArchState
+      , symExSt <- archState ^. SCS.symExStateL
+      , Just (Some (SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID
+      , Just (SES.RecordedStateLog idx trace) <- SymEx.suspendedHistory suspSt
+      , Just (Some execSt) <- trace Seq.!? (idx - 1)
+      , Just (LCSET.SomeSimState simState) <- LCSET.execStateSimState execSt -> do
+          let rsn = SES.SuspendedExecutionStep execSt
+          let resume = SymEx.suspendedResumeUnmodified suspSt
+          let debuggerRef = SymEx.suspendedDebugFeatureConfig suspSt
+          makeSuspendedState s0 archState archNonce sessionID simState rsn resume debuggerRef (Just (idx - 1))
+      | otherwise -> return (SCS.State s0)
+
     SCE.DebugMonitorEvent archNonce sessionID (SCEF.CrucibleExecState _rtpNonce execState) returnChan debugConf
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce)
       , Just archState <- s0 ^. SCS.lArchState
@@ -172,7 +201,7 @@ handleSymbolicExecutionEvent s0 evt =
           liftIO $ SCS.logMessage s0 msg
           let resumeAction = CCC.writeChan returnChan SCEF.UnmodifiedExecState
           let reason = SES.SuspendedExecutionStep execState
-          makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction debugConf
+          makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction debugConf Nothing
       | otherwise -> return (SCS.State s0)
     SCE.OverrideMonitorEvent archNonce sessionID (SEO.CrucibleSimState _rtpNonce _argsNonce simState reason) returnChan debugConf
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce)
@@ -184,7 +213,7 @@ handleSymbolicExecutionEvent s0 evt =
                                 }
           liftIO $ SCS.logMessage s0 msg
 
-          makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction debugConf
+          makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction debugConf Nothing
       | otherwise -> return (SCS.State s0)
 
 -- | Analyze the current state of the symbolic execution engine and create a
@@ -199,6 +228,7 @@ makeSuspendedState :: ( MonadIO m
                       , SCA.Architecture arch s
                       , SCA.CrucibleExtension arch
                       , ext ~ SCA.CrucibleExt arch
+                      , CMC.MonadThrow m
                       )
                    => SCS.S e u arch s
                    -> SCS.ArchState u arch s
@@ -207,9 +237,10 @@ makeSuspendedState :: ( MonadIO m
                    -> LCSET.SimState p sym ext rtp f a
                    -> SES.SuspendedReason p sym ext rtp
                    -> IO ()
-                   -> IOR.IORef SCEF.DebuggerFeatureState
+                   -> SCEF.DebuggerStateRef p sym ext
+                   -> Maybe Int
                    -> m (SCS.State e u s)
-makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction debugConf = do
+makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction debugConf historyOffset = do
   -- Create a new suspended symbolic execution state based on what the
   -- override sent us.
   let topFrame = simState ^. LCSET.stateTree . LCSET.actFrame
@@ -220,7 +251,7 @@ makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction
   let ares = archState ^. SCS.lAnalysisResult
 
   let ifNoCFG = do
-        liftIO $ IOR.atomicWriteIORef debugConf SCEF.Inactive
+        liftIO $ SCEF.setDebuggerState debugConf SCEF.Inactive
         liftIO resumeAction
         return (SCS.State s0)
   withParentFrameCFG (simState ^. LCSET.stateTree . L.to LCSET.activeFrames) ifNoCFG $ \parentFrameCFG -> do
@@ -238,9 +269,11 @@ makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction
     let msg = SCL.msgWith { SCL.logText = [T.pack "Making a suspended state"]
                           }
     liftIO $ SCS.logMessage s0 msg
-    symExState <- liftIO $ SymEx.suspendedState (WEB.exprCounter sym) symState simState reason resumeAction debugConf
 
+    symExState <- SCEF.withRecordedStates debugConf $ \mStates -> do
+      SymEx.suspendedState (WEB.exprCounter sym) symState simState reason resumeAction debugConf mStates historyOffset
     liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState archNonce symExState)
+
     -- We are updating the symbolic execution state via a dedicated
     -- message, but need to update the active session ID in the context
     -- separately

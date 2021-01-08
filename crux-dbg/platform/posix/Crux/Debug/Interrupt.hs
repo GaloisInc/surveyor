@@ -2,7 +2,6 @@ module Crux.Debug.Interrupt (
   installInterruptHandler
   ) where
 
-import qualified Data.IORef as IOR
 import qualified System.Posix.Signals as SPS
 
 import qualified Surveyor.Core as SC
@@ -22,9 +21,9 @@ import qualified Surveyor.Core as SC
 --
 -- NOTE: This is currently UNIX only.  Another approach (using
 -- GHC.ConsoleHandler) will be required for Windows.
-installInterruptHandler :: IOR.IORef SC.DebuggerFeatureState -> IO ()
+installInterruptHandler :: SC.DebuggerStateRef p sym ext -> IO ()
 installInterruptHandler ref = do
   _ <- SPS.installHandler SPS.sigUSR2 (SPS.CatchOnce handler) Nothing
   return ()
   where
-    handler = IOR.writeIORef ref SC.Monitoring
+    handler = SC.setDebuggerState ref SC.Monitoring
