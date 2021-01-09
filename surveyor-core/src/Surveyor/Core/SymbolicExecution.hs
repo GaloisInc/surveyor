@@ -300,24 +300,8 @@ updateSessionState session (SessionState m) =
 -- Note that this does not terminate the symbolic execution engine instances, as
 -- the invoking tool (e.g., crux-dbg) might want to continue.
 cleanupActiveSessions :: forall arch s . SessionState arch s -> IO ()
-cleanupActiveSessions (SessionState sessions) = mapM_ cleanupActiveSession sessions
-  where
-    cleanupActiveSession :: Some (SymbolicExecutionState arch s) -> IO ()
-    cleanupActiveSession (Some symExState) =
-      case symExState of
-        Suspended _ suspSt -> do
-          -- Disable monitoring mode for this instance and then restart
-          -- execution
-          SCEF.setDebuggerState (suspendedDebugFeatureConfig suspSt) SCEF.Inactive
-          suspendedResumeUnmodified suspSt
-        Configuring {} -> return ()
-        Initializing {} -> return ()
-        Executing ep -> do
-          SCEF.setDebuggerState (executionInterrupt ep) SCEF.Inactive
-          executionResume ep
-          return ()
-        Inspecting {} -> return ()
-
+cleanupActiveSessions (SessionState sessions) =
+  mapM_ cleanupSymbolicExecutionState sessions
 
 -- | Updates the given session ID with additional metrics IFF that 'SessionID'
 -- corresponds to a session in the 'Executing' state.
@@ -538,14 +522,21 @@ allocateSymbolicValue proxy sym rep =
 -- | Clean up any resources held by the provided state.
 --
 -- Using the state after this is unsafe.
-cleanupSymbolicExecutionState :: SymbolicExecutionState arch s k -> IO ()
-cleanupSymbolicExecutionState s =
-  case s of
+cleanupSymbolicExecutionState :: Some (SymbolicExecutionState arch s) -> IO ()
+cleanupSymbolicExecutionState (Some symExState) =
+  case symExState of
+    Suspended _ suspSt -> do
+      -- Disable monitoring mode for this instance and then restart
+      -- execution
+      SCEF.setDebuggerState (suspendedDebugFeatureConfig suspSt) SCEF.Inactive
+      suspendedResumeUnmodified suspSt
     Configuring {} -> return ()
     Initializing {} -> return ()
-    Executing {} -> return ()
+    Executing ep -> do
+      SCEF.setDebuggerState (executionInterrupt ep) SCEF.Inactive
+      executionResume ep
+      return ()
     Inspecting {} -> return ()
-    Suspended {} -> return ()
 
 solverFeatures :: Solver -> WPF.ProblemFeatures
 solverFeatures s =

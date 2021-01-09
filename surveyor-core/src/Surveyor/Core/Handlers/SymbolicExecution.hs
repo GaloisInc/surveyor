@@ -62,7 +62,7 @@ handleSymbolicExecutionEvent s0 evt =
           let ng = SCS.sNonceGenerator s0
           conf <- liftIO $ maybe (SymEx.defaultSymbolicExecutionConfig ng) return mConfig
           case SymEx.lookupSessionState symExSt sessionID of
-            Just (Some oldState) -> liftIO $ SymEx.cleanupSymbolicExecutionState oldState
+            Just oldState -> liftIO $ SymEx.cleanupSymbolicExecutionState oldState
             Nothing -> return ()
           let newState = SymEx.configuringSymbolicExecution conf
           liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState archNonce newState)
