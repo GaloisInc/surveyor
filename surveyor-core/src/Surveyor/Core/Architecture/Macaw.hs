@@ -465,6 +465,13 @@ macawStmtOperands cache ng stmt =
                                 , v1'
                                 , v2'
                                 ]
+            MC.MkTuple tps vs -> do
+              n1 <- PN.freshNonce ng
+              let vsM = FC.toListFC (toValueCached cache ng) vs
+              vs' <- sequence vsM
+              return $! OL.fromList ( MacawOperand n1 (TypeReprs tps)
+                                    : vs'
+                                    )
             MC.TupleField tps v ix -> do
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
@@ -622,7 +629,7 @@ macawStmtOperands cache ng stmt =
               n1 <- PN.freshNonce ng
               v' <- toValueCached cache ng v
               return $ OL.fromList [MacawOperand n1 (NatRepr tp), v']
-            MC.Bitcast v proof -> do
+            MC.Bitcast v _proof -> do
               v' <- toValueCached cache ng v
               return $ OL.fromList [ v' ]
 
@@ -655,6 +662,7 @@ macawPrettyOpcode opc =
       case a of
         MC.Eq {} -> PP.pretty "eq"
         MC.Mux {} -> PP.pretty "mux"
+        MC.MkTuple {} -> PP.pretty "mk-tuple"
         MC.TupleField {} -> PP.pretty "tuple"
         MC.AndApp {} -> PP.pretty "andp"
         MC.OrApp {} -> PP.pretty "orp"
