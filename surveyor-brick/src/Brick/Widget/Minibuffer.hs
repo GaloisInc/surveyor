@@ -232,7 +232,7 @@ handleMinibufferEvent evt customEventChan s mb@(Minibuffer { parseArgument = par
              | otherwise -> do
                cmdList'' <- case SW.matcher (ZG.toList (FL.editorContents cmdList')) of
                  Nothing -> return cmdList'
-                 Just matcher -> return (FL.updateList (V.filter (commandMatches matcher)) cmdList')
+                 Just matcher -> return (FL.updateList (V.filter (commandMatches matcher s)) cmdList')
                return $ Completed mb { commandList = cmdList'' }
         CollectingArguments _expectedArgNames expectedArgTypes _ _ _ _ -> do
           case expectedArgTypes of
@@ -313,8 +313,9 @@ withReversedF l1 l2 k = go PL.Nil PL.Nil l1 l2
         (PL.Nil, PL.Nil) -> k acc1 acc2
         (x1 PL.:< xs1, x2 PL.:< xs2) -> go (x1 PL.:< acc1) (x2 PL.:< acc2) xs1 xs2
 
-commandMatches :: SW.Matcher -> C.SomeCommand b -> Bool
-commandMatches m (C.SomeCommand cmd) = SW.matches m (C.cmdName cmd)
+commandMatches :: SW.Matcher -> C.StateType b -> C.SomeCommand b -> Bool
+commandMatches m s (C.SomeCommand cmd) =
+  SW.matches m (C.cmdName cmd) && C.cmdApplicable cmd s
 
 renderMinibuffer :: (Ord n, Show n, B.TextWidth t, ZG.GenericTextZipper t)
                  => Bool
