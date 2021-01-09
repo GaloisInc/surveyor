@@ -1,5 +1,4 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE OverloadedStrings #-}
 -- | A widget for displaying the semantics for an individual instruction
 --
 -- This is intended for displaying machine code instruction semantics.  It
@@ -14,8 +13,8 @@ import qualified Brick as B
 import           Control.DeepSeq ( NFData, rnf )
 import           Control.Lens ( (^?), (^.) )
 import qualified Data.Vector as V
-import qualified Data.Text.Prettyprint.Doc as PP
-import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 
 import qualified Surveyor.Core as C
 import           Surveyor.Brick.Names ( Names(..) )
@@ -43,14 +42,17 @@ renderInstructionSemanticsViewer ares cs _
   | Just ctx <- cs ^? C.currentContext
   , Just blkState <- ctx ^. C.blockStateFor C.BaseRepr =
       case blkState ^. C.blockStateSelection of
-        C.NoSelection -> B.txt "No selected instruction"
-        C.MultipleSelection {} -> B.txt "Multiple instructions selected"
+        C.NoSelection -> B.str "No selected instruction"
+        C.MultipleSelection {} -> B.str "Multiple instructions selected"
         C.SingleSelection ix _addr _ ->
           let insns = blkState ^. C.blockStateList
           in case insns V.!? ix of
-            Nothing -> B.txt (PPT.renderStrict (PP.layoutCompact ("ERROR: Instruction index out of range:" PP.<+> PP.pretty ix)))
+            Nothing -> bDoc (PP.pretty "ERROR: Instruction index out of range:" PP.<+> PP.pretty ix)
             Just (_, addr, i) ->
               case C.genericSemantics ares i of
-                Nothing -> B.txt (PPT.renderStrict (PP.layoutCompact ("No semantics for instruction:" PP.<+> PP.pretty (C.prettyInstruction addr i))))
+                Nothing -> bDoc (PP.pretty "No semantics for instruction:" PP.<+> C.prettyInstruction addr i)
                 Just sem -> B.txt (C.prettyParameterizedFormula sem)
-  | otherwise = B.txt "No current block"
+  | otherwise = B.str "No current block"
+
+bDoc :: PP.Doc ann -> B.Widget n
+bDoc = B.txt . PPT.renderStrict . PP.layoutCompact

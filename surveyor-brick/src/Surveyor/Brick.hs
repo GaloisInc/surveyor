@@ -32,8 +32,8 @@ import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Text as T
-import qualified Data.Text.Prettyprint.Doc as PP
-import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 import qualified Data.Traversable as T
 import           Data.Void ( Void )
 import qualified Graphics.Vty as V
@@ -81,9 +81,9 @@ drawDiagnostics diags = B.viewport DiagnosticView B.Vertical body
           comp = renderComponent (C.logSource (C.logMsg msg))
       in case C.logText (C.logMsg msg) of
         [] -> B.markup tm B.<+> B.markup sev B.<+> B.markup comp
-        [txt] -> B.markup tm B.<+> B.markup sev B.<+> B.markup comp B.<+> B.txtWrap txt
+        [txt] -> B.markup tm B.<+> B.markup sev B.<+> B.markup comp B.<+> bDocWrap txt
         txts -> B.vBox ( B.markup tm B.<+> B.markup sev B.<+> B.markup comp
-                       : map B.txtWrap txts
+                       : map bDocWrap txts
                        )
     renderComponent comp =
       case comp of
@@ -121,6 +121,12 @@ drawStatusBar s =
         C.Ready -> B.str "Ready"
         C.AwaitingFile -> B.str "Waiting for file"
 
+bDoc :: PP.Doc ann -> B.Widget names
+bDoc = B.txt . PPT.renderStrict . PP.layoutCompact
+
+bDocWrap :: PP.Doc ann -> B.Widget names
+bDocWrap = B.txtWrap . PPT.renderStrict . PP.layoutCompact
+
 drawAppShell :: (C.Architecture arch s) => C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names -> [B.Widget Names]
 drawAppShell s w =
   [ B.vBox [ B.borderWithLabel (title (C.sUIMode s)) (B.padRight B.Max (B.padBottom B.Max w))
@@ -133,7 +139,7 @@ drawAppShell s w =
     title sm =
       case sm of
         C.SomeMiniBuffer (C.MiniBuffer m') -> title (C.SomeUIMode m')
-        C.SomeUIMode m' -> B.txt (C.prettyMode m')
+        C.SomeUIMode m' -> bDoc (C.prettyMode m')
     bottomLine =
       case C.sUIMode s of
         C.SomeMiniBuffer (C.MiniBuffer _)

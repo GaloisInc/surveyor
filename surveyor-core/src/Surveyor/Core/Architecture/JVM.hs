@@ -6,7 +6,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -36,7 +35,7 @@ import qualified Lang.Crucible.Simulator as CS
 import qualified Language.JVM.CFG as J
 import qualified Language.JVM.Common as J
 import qualified Language.JVM.Parser as J
-import           Text.Printf ( printf )
+import qualified Prettyprinter as PP
 
 import           Surveyor.Core.Architecture.Class
 import qualified Surveyor.Core.Architecture.Crucible as AC
@@ -141,7 +140,7 @@ instance IR JVM s where
   data Operand JVM s = JVMOperand JVMOperand'
   data Opcode JVM s = JVMOpcode J.Instruction
   data Instruction JVM s = JVMInstruction J.Instruction
-  prettyInstruction _ (JVMInstruction i) = T.pack (show (J.ppInstruction i))
+  prettyInstruction _ (JVMInstruction i) = PP.viaShow (J.ppInstruction i)
   prettyOpcode (JVMOpcode i) = ppOpcode i
   prettyOperand (JVMAddress _) (JVMOperand op) = ppOperand op
   prettyAddress (JVMAddress a) = ppAddress a
@@ -213,13 +212,13 @@ instance CrucibleExtension JVM where
   prettyExtensionApp _ = prettyJVMApp
   prettyExtensionOperand _ = prettyJVMExtensionOperand
 
-prettyJVMExtensionOperand :: CrucibleJVMOperand s -> T.Text
+prettyJVMExtensionOperand :: CrucibleJVMOperand s -> PP.Doc ann
 prettyJVMExtensionOperand _ = error "Unimplemented"
 
-prettyJVMApp :: CCE.ExprExtension CJ.JVM (CCC.Reg ctx) tp -> T.Text
+prettyJVMApp :: CCE.ExprExtension CJ.JVM (CCC.Reg ctx) tp -> PP.Doc ann
 prettyJVMApp = error "Unimplemented"
 
-prettyJVMStmt :: CCE.StmtExtension CJ.JVM (CCC.Reg ctx) tp -> T.Text
+prettyJVMStmt :: CCE.StmtExtension CJ.JVM (CCC.Reg ctx) tp -> PP.Doc ann
 prettyJVMStmt = error "Unimplemented"
 
 jvmExtensionStmtOperands :: SCAN.NonceCache s ctx
@@ -282,8 +281,8 @@ jvmFunctions r =
 
 jvmSummarize :: JVMResult s -> [(T.Text, T.Text)]
 jvmSummarize jr =
-  [ ("Classes", t (M.size (jvmClassIndex jr)))
-  , ("Methods", t (sum (map (M.size . snd) (M.elems (jvmClassIndex jr)))))
+  [ (T.pack "Classes", t (M.size (jvmClassIndex jr)))
+  , (T.pack "Methods", t (sum (map (M.size . snd) (M.elems (jvmClassIndex jr)))))
   ]
   where
     t = T.pack . show
@@ -449,174 +448,176 @@ toBlock maddr method bb =
 toInstruction :: Addr 'BlockK -> (J.PC, J.Instruction) -> (Address JVM s, Instruction JVM s)
 toInstruction baddr (pc, i) = (JVMAddress (InsnAddr baddr pc), JVMInstruction i)
 
-ppAddress :: Addr addrTy -> T.Text
+ppAddress :: Addr addrTy -> PP.Doc ann
 ppAddress a =
   case a of
-    ClassAddr s -> T.pack (J.unClassName s)
-    MethodAddr _ k -> T.pack (show (J.ppMethodKey k))
-    BlockAddr m i -> T.pack (printf "%s:%s" (ppAddress m) (show i))
-    InsnAddr b pc -> T.pack (printf "%s:%s" (ppAddress b) (show pc))
+    ClassAddr s -> PP.pretty (J.unClassName s)
+    MethodAddr _ k -> PP.viaShow (J.ppMethodKey k)
+    BlockAddr m i -> ppAddress m <> PP.pretty ":" <> PP.viaShow i
+    InsnAddr b pc -> ppAddress b <> PP.pretty ":" <> PP.viaShow pc
 
-ppOperand :: JVMOperand' -> T.Text
+ppOperand :: JVMOperand' -> PP.Doc ann
 ppOperand op =
   case op of
-    LocalVariableIndex ix -> T.pack (show ix)
-    Type t -> T.pack (show (J.ppType t))
-    FieldId fid -> T.pack (J.ppFldId fid)
-    PC pc -> T.pack (show pc)
-    MethodKey k -> T.pack (show (J.ppMethodKey k))
+    LocalVariableIndex ix -> PP.viaShow ix
+    Type t -> PP.viaShow (J.ppType t)
+    FieldId fid -> PP.pretty (J.ppFldId fid)
+    PC pc -> PP.viaShow pc
+    MethodKey k -> PP.viaShow (J.ppMethodKey k)
     SwitchTable entries ->
-      T.intercalate ", " [ T.pack (printf "(%d, %d)" v pc) | (v, pc) <- entries ]
-    ConstantPoolValue cpv -> T.pack (show cpv)
-    StringOp s -> T.pack (show s) -- for quoting
-    I16 i -> T.pack (show i)
-    I32 i -> T.pack (show i)
-    W8 w -> T.pack (show w)
-    W16 w -> T.pack (show w)
+      PP.hsep $ PP.punctuate PP.comma [ PP.parens (PP.pretty v <> PP.pretty ", " <> PP.pretty pc)
+                                      | (v, pc) <- entries
+                                      ]
+    ConstantPoolValue cpv -> PP.viaShow cpv
+    StringOp s -> PP.dquotes (PP.pretty s)
+    I16 i -> PP.viaShow i
+    I32 i -> PP.viaShow i
+    W8 w -> PP.viaShow w
+    W16 w -> PP.viaShow w
 
-ppOpcode :: J.Instruction -> T.Text
+ppOpcode :: J.Instruction -> PP.Doc ann
 ppOpcode i =
   case i of
-    J.Aaload -> "aaload"
-    J.Aastore -> "aastore"
-    J.Aconst_null -> "aconst_null"
-    J.Aload {} -> "aload"
-    J.Areturn -> "areturn"
-    J.Arraylength -> "arraylength"
-    J.Astore {} -> "astore"
-    J.Athrow -> "athrow"
-    J.Baload -> "baload"
-    J.Bastore -> "bastore"
-    J.Caload -> "caload"
-    J.Castore -> "castore"
-    J.Checkcast {} -> "checkcast"
-    J.D2f -> "d2f"
-    J.D2i -> "d2i"
-    J.D2l -> "d2l"
-    J.Dadd -> "dadd"
-    J.Daload -> "daload"
-    J.Dastore -> "dastore"
-    J.Dcmpg -> "dcmpg"
-    J.Dcmpl -> "dcmpl"
-    J.Ddiv -> "ddiv"
-    J.Dload {} -> "dload"
-    J.Dmul -> "dmul"
-    J.Dneg -> "dneg"
-    J.Drem -> "drem"
-    J.Dreturn -> "dreturn"
-    J.Dstore {} -> "dstore"
-    J.Dsub -> "dsub"
-    J.Dup -> "dup"
-    J.Dup_x1 -> "dup_x1"
-    J.Dup_x2 -> "dup_x2"
-    J.Dup2 -> "dup2"
-    J.Dup2_x1 -> "dup2_x1"
-    J.Dup2_x2 -> "dup2_x2"
-    J.F2d -> "f2d"
-    J.F2i -> "f2i"
-    J.F2l -> "f2l"
-    J.Fadd -> "fadd"
-    J.Faload -> "faload"
-    J.Fastore -> "fastore"
-    J.Fcmpg -> "fcmpg"
-    J.Fcmpl -> "fcmpl"
-    J.Fdiv -> "fdiv"
-    J.Fload {} -> "fload"
-    J.Fmul -> "fmul"
-    J.Fneg -> "fneg"
-    J.Frem -> "frem"
-    J.Freturn -> "freturn"
-    J.Fstore {} -> "fstore"
-    J.Fsub -> "fsub"
-    J.Getfield {} -> "getfield"
-    J.Getstatic {} -> "getstatic"
-    J.Goto {} -> "goto"
-    J.I2b -> "i2b"
-    J.I2c -> "i2c"
-    J.I2d -> "i2d"
-    J.I2f -> "i2f"
-    J.I2l -> "i2l"
-    J.I2s -> "i2s"
-    J.Iadd -> "iadd"
-    J.Iaload -> "iaload"
-    J.Iand -> "iand"
-    J.Iastore -> "iastore"
-    J.Idiv -> "idiv"
-    J.If_acmpeq {} -> "if_acmpeq"
-    J.If_acmpne {} -> "if_acmpne"
-    J.If_icmpeq {} -> "if_icmpeq"
-    J.If_icmpne {} -> "if_icmpne"
-    J.If_icmplt {} -> "if_icmplt"
-    J.If_icmpge {} -> "if_icmpge"
-    J.If_icmpgt {} -> "if_icmpgt"
-    J.If_icmple {} -> "if_icmple"
-    J.Ifeq {} -> "ifeq"
-    J.Ifne {} -> "ifne"
-    J.Iflt {} -> "iflt"
-    J.Ifge {} -> "ifge"
-    J.Ifgt {} -> "ifgt"
-    J.Ifle {} -> "ifle"
-    J.Ifnonnull {} -> "ifnonnull"
-    J.Ifnull {} -> "ifnull"
-    J.Iinc {} -> "iinc"
-    J.Iload {} -> "iload"
-    J.Imul -> "imul"
-    J.Ineg -> "ineg"
-    J.Instanceof {} -> "instanceof"
-    J.Invokeinterface {} -> "invokeinterface"
-    J.Invokespecial {} -> "invokespecial"
-    J.Invokestatic {} -> "invokestatic"
-    J.Invokevirtual {} -> "invokevirtual"
-    J.Invokedynamic {} -> "invokedynamic"
-    J.Ior -> "ior"
-    J.Irem -> "irem"
-    J.Ireturn -> "ireturn"
-    J.Ishl -> "ishl"
-    J.Ishr -> "ishr"
-    J.Istore {} -> "istore"
-    J.Isub -> "isub"
-    J.Iushr -> "iushr"
-    J.Ixor -> "ixor"
-    J.Jsr {} -> "jsr"
-    J.L2d -> "l2d"
-    J.L2f -> "l2f"
-    J.L2i -> "l2i"
-    J.Ladd -> "ladd"
-    J.Laload -> "laload"
-    J.Land -> "land"
-    J.Lastore -> "lastore"
-    J.Lcmp -> "lcmp"
-    J.Ldc {} -> "ldc"
-    J.Ldiv -> "ldiv"
-    J.Lload {} -> "lload"
-    J.Lmul -> "lmul"
-    J.Lneg -> "lneg"
-    J.Lookupswitch {} -> "lookupswitch"
-    J.Lor -> "lor"
-    J.Lrem -> "lrem"
-    J.Lreturn -> "lreturn"
-    J.Lshl -> "lshl"
-    J.Lshr -> "lshr"
-    J.Lstore {} -> "lstore"
-    J.Lsub -> "lsub"
-    J.Lushr -> "lushr"
-    J.Lxor -> "lxor"
-    J.Monitorenter -> "monitorenter"
-    J.Monitorexit -> "monitorexit"
-    J.Multianewarray {} -> "multianewarray"
-    J.New {} -> "new"
-    J.Newarray {} -> "newarray"
-    J.Nop -> "nop"
-    J.Pop -> "pop"
-    J.Pop2 -> "pop2"
-    J.Putfield {} -> "putfield"
-    J.Putstatic {} -> "putstatic"
-    J.Ret {} -> "ret"
-    J.Return -> "return"
-    J.Saload -> "saload"
-    J.Sastore -> "sastore"
-    J.Swap -> "swap"
-    J.Tableswitch {} -> "tableswitch"
+    J.Aaload -> PP.pretty "aaload"
+    J.Aastore -> PP.pretty "aastore"
+    J.Aconst_null -> PP.pretty "aconst_null"
+    J.Aload {} -> PP.pretty "aload"
+    J.Areturn -> PP.pretty "areturn"
+    J.Arraylength -> PP.pretty "arraylength"
+    J.Astore {} -> PP.pretty "astore"
+    J.Athrow -> PP.pretty "athrow"
+    J.Baload -> PP.pretty "baload"
+    J.Bastore -> PP.pretty "bastore"
+    J.Caload -> PP.pretty "caload"
+    J.Castore -> PP.pretty "castore"
+    J.Checkcast {} -> PP.pretty "checkcast"
+    J.D2f -> PP.pretty "d2f"
+    J.D2i -> PP.pretty "d2i"
+    J.D2l -> PP.pretty "d2l"
+    J.Dadd -> PP.pretty "dadd"
+    J.Daload -> PP.pretty "daload"
+    J.Dastore -> PP.pretty "dastore"
+    J.Dcmpg -> PP.pretty "dcmpg"
+    J.Dcmpl -> PP.pretty "dcmpl"
+    J.Ddiv -> PP.pretty "ddiv"
+    J.Dload {} -> PP.pretty "dload"
+    J.Dmul -> PP.pretty "dmul"
+    J.Dneg -> PP.pretty "dneg"
+    J.Drem -> PP.pretty "drem"
+    J.Dreturn -> PP.pretty "dreturn"
+    J.Dstore {} -> PP.pretty "dstore"
+    J.Dsub -> PP.pretty "dsub"
+    J.Dup -> PP.pretty "dup"
+    J.Dup_x1 -> PP.pretty "dup_x1"
+    J.Dup_x2 -> PP.pretty "dup_x2"
+    J.Dup2 -> PP.pretty "dup2"
+    J.Dup2_x1 -> PP.pretty "dup2_x1"
+    J.Dup2_x2 -> PP.pretty "dup2_x2"
+    J.F2d -> PP.pretty "f2d"
+    J.F2i -> PP.pretty "f2i"
+    J.F2l -> PP.pretty "f2l"
+    J.Fadd -> PP.pretty "fadd"
+    J.Faload -> PP.pretty "faload"
+    J.Fastore -> PP.pretty "fastore"
+    J.Fcmpg -> PP.pretty "fcmpg"
+    J.Fcmpl -> PP.pretty "fcmpl"
+    J.Fdiv -> PP.pretty "fdiv"
+    J.Fload {} -> PP.pretty "fload"
+    J.Fmul -> PP.pretty "fmul"
+    J.Fneg -> PP.pretty "fneg"
+    J.Frem -> PP.pretty "frem"
+    J.Freturn -> PP.pretty "freturn"
+    J.Fstore {} -> PP.pretty "fstore"
+    J.Fsub -> PP.pretty "fsub"
+    J.Getfield {} -> PP.pretty "getfield"
+    J.Getstatic {} -> PP.pretty "getstatic"
+    J.Goto {} -> PP.pretty "goto"
+    J.I2b -> PP.pretty "i2b"
+    J.I2c -> PP.pretty "i2c"
+    J.I2d -> PP.pretty "i2d"
+    J.I2f -> PP.pretty "i2f"
+    J.I2l -> PP.pretty "i2l"
+    J.I2s -> PP.pretty "i2s"
+    J.Iadd -> PP.pretty "iadd"
+    J.Iaload -> PP.pretty "iaload"
+    J.Iand -> PP.pretty "iand"
+    J.Iastore -> PP.pretty "iastore"
+    J.Idiv -> PP.pretty "idiv"
+    J.If_acmpeq {} -> PP.pretty "if_acmpeq"
+    J.If_acmpne {} -> PP.pretty "if_acmpne"
+    J.If_icmpeq {} -> PP.pretty "if_icmpeq"
+    J.If_icmpne {} -> PP.pretty "if_icmpne"
+    J.If_icmplt {} -> PP.pretty "if_icmplt"
+    J.If_icmpge {} -> PP.pretty "if_icmpge"
+    J.If_icmpgt {} -> PP.pretty "if_icmpgt"
+    J.If_icmple {} -> PP.pretty "if_icmple"
+    J.Ifeq {} -> PP.pretty "ifeq"
+    J.Ifne {} -> PP.pretty "ifne"
+    J.Iflt {} -> PP.pretty "iflt"
+    J.Ifge {} -> PP.pretty "ifge"
+    J.Ifgt {} -> PP.pretty "ifgt"
+    J.Ifle {} -> PP.pretty "ifle"
+    J.Ifnonnull {} -> PP.pretty "ifnonnull"
+    J.Ifnull {} -> PP.pretty "ifnull"
+    J.Iinc {} -> PP.pretty "iinc"
+    J.Iload {} -> PP.pretty "iload"
+    J.Imul -> PP.pretty "imul"
+    J.Ineg -> PP.pretty "ineg"
+    J.Instanceof {} -> PP.pretty "instanceof"
+    J.Invokeinterface {} -> PP.pretty "invokeinterface"
+    J.Invokespecial {} -> PP.pretty "invokespecial"
+    J.Invokestatic {} -> PP.pretty "invokestatic"
+    J.Invokevirtual {} -> PP.pretty "invokevirtual"
+    J.Invokedynamic {} -> PP.pretty "invokedynamic"
+    J.Ior -> PP.pretty "ior"
+    J.Irem -> PP.pretty "irem"
+    J.Ireturn -> PP.pretty "ireturn"
+    J.Ishl -> PP.pretty "ishl"
+    J.Ishr -> PP.pretty "ishr"
+    J.Istore {} -> PP.pretty "istore"
+    J.Isub -> PP.pretty "isub"
+    J.Iushr -> PP.pretty "iushr"
+    J.Ixor -> PP.pretty "ixor"
+    J.Jsr {} -> PP.pretty "jsr"
+    J.L2d -> PP.pretty "l2d"
+    J.L2f -> PP.pretty "l2f"
+    J.L2i -> PP.pretty "l2i"
+    J.Ladd -> PP.pretty "ladd"
+    J.Laload -> PP.pretty "laload"
+    J.Land -> PP.pretty "land"
+    J.Lastore -> PP.pretty "lastore"
+    J.Lcmp -> PP.pretty "lcmp"
+    J.Ldc {} -> PP.pretty "ldc"
+    J.Ldiv -> PP.pretty "ldiv"
+    J.Lload {} -> PP.pretty "lload"
+    J.Lmul -> PP.pretty "lmul"
+    J.Lneg -> PP.pretty "lneg"
+    J.Lookupswitch {} -> PP.pretty "lookupswitch"
+    J.Lor -> PP.pretty "lor"
+    J.Lrem -> PP.pretty "lrem"
+    J.Lreturn -> PP.pretty "lreturn"
+    J.Lshl -> PP.pretty "lshl"
+    J.Lshr -> PP.pretty "lshr"
+    J.Lstore {} -> PP.pretty "lstore"
+    J.Lsub -> PP.pretty "lsub"
+    J.Lushr -> PP.pretty "lushr"
+    J.Lxor -> PP.pretty "lxor"
+    J.Monitorenter -> PP.pretty "monitorenter"
+    J.Monitorexit -> PP.pretty "monitorexit"
+    J.Multianewarray {} -> PP.pretty "multianewarray"
+    J.New {} -> PP.pretty "new"
+    J.Newarray {} -> PP.pretty "newarray"
+    J.Nop -> PP.pretty "nop"
+    J.Pop -> PP.pretty "pop"
+    J.Pop2 -> PP.pretty "pop2"
+    J.Putfield {} -> PP.pretty "putfield"
+    J.Putstatic {} -> PP.pretty "putstatic"
+    J.Ret {} -> PP.pretty "ret"
+    J.Return -> PP.pretty "return"
+    J.Saload -> PP.pretty "saload"
+    J.Sastore -> PP.pretty "sastore"
+    J.Swap -> PP.pretty "swap"
+    J.Tableswitch {} -> PP.pretty "tableswitch"
 
 instance Eq (Address JVM s) where
   JVMAddress a1 == JVMAddress a2 = isJust (testEquality a1 a2)

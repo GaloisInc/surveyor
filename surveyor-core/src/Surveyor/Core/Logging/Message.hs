@@ -57,7 +57,7 @@ data Timestamped a =
 data LogMessage =
   LogMessage { logLevel :: !Severity
              , logSource :: !Source
-             , logText :: [T.Text]
+             , logText :: [PP.Doc ()]
              , logContext :: GS.CallStack
              }
 
@@ -132,11 +132,11 @@ prettyLogMessage lm =
                   ]
     [msg] -> PP.hsep [ prettySeverity (logLevel lm)
                      , prettySource (logSource lm)
-                     , PP.pretty msg
+                     , PP.unAnnotate msg
                      ]
     msgLines ->
       let pfx = prettySeverity (logLevel lm) PP.<+> prettySource (logSource lm)
-      in pfx PP.<+> PP.align (PP.vsep (map PP.pretty msgLines))
+      in pfx PP.<+> PP.align (PP.unAnnotate (PP.vsep msgLines))
 
 instance PP.Pretty LogMessage where
   pretty = prettyLogMessage

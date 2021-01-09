@@ -6,7 +6,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -53,14 +52,13 @@ import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import           Data.Word ( Word64 )
-import           Fmt ( (+|), (|+), (||+) )
-import qualified Fmt as Fmt
 import qualified Lang.Crucible.CFG.Core as C
 import qualified Lang.Crucible.CFG.Expr as C
 import qualified Lang.Crucible.FunctionHandle as CFH
+import           Numeric ( showHex )
 import           Numeric.Natural ( Natural )
-import qualified Renovate as R
 import qualified Prettyprinter as PP
+import qualified Renovate as R
 import           Text.Printf ( printf )
 import qualified What4.FunctionName as WF
 import qualified What4.InterpretedFloatingPoint as WIF
@@ -231,16 +229,16 @@ instance (CrucibleConstraints arch s, CrucibleExtension arch) => IR (Crucible ar
   opcode (CrucibleTermStmt s _) = crucibleTermStmtOpcode s
 
   prettyInstruction _ (CrucibleStmt sz s _ _) =
-    Fmt.fmt ("" +| C.ppStmt sz s ||+ "")
+    C.ppStmt sz s
   prettyInstruction _ (CrucibleTermStmt ts _) =
-    Fmt.fmt ("" +| PP.pretty ts ||+ "")
+    PP.pretty ts
   prettyOpcode (CrucibleOpcode o) = cruciblePrettyOpcode o
   prettyOperand _addr (CrucibleOperand _ o) = cruciblePrettyOperand o
   prettyAddress (CrucibleAddress a) =
     case a of
-      FunctionAddr w -> Fmt.fmt ("" +| Fmt.hexF w |+ "")
-      BlockAddr fa idx -> Fmt.fmt ("" +| fa ||+ "[" +| idx ||+ "]")
-      InstructionAddr ba idx -> Fmt.fmt ("" +| ba ||+ "@" +| idx ||+ "")
+      FunctionAddr w -> PP.pretty "0x" <> PP.pretty (showHex w "")
+      BlockAddr fa idx -> PP.viaShow fa <> PP.brackets (PP.viaShow idx)
+      InstructionAddr ba idx -> PP.viaShow ba <> PP.pretty "@" <> PP.pretty idx
 
 
   parseAddress _ = Nothing
@@ -371,256 +369,259 @@ crucibleTermStmtOpcode ts =
     C.TailCall {} -> CrucibleOpcode TailCall
     C.ErrorStmt {} -> CrucibleOpcode ErrorStmt
 
-cruciblePrettyOperand :: forall arch s . (CrucibleExtension arch) => CrucibleOperand arch s -> T.Text
+cruciblePrettyOperand :: forall arch s ann . (CrucibleExtension arch) => CrucibleOperand arch s -> PP.Doc ann
 cruciblePrettyOperand o =
   case o of
-    BoolLit b -> T.pack (show b)
-    NatLit n -> T.pack (show n)
-    IntegerLit i -> T.pack (show i)
-    BVLit nr bv -> T.pack (DBS.ppHex nr bv)
-    RationalLit r -> T.pack (show r)
-    StringLiteral s -> T.pack (show s)
-    FloatLit f -> T.pack (show f)
-    DoubleLit d -> T.pack (show d)
-    X86_80Lit l -> T.pack (show l)
+    BoolLit b -> PP.viaShow b
+    NatLit n -> PP.viaShow n
+    IntegerLit i -> PP.viaShow i
+    BVLit nr bv -> PP.pretty (DBS.ppHex nr bv)
+    RationalLit r -> PP.viaShow r
+    StringLiteral s -> PP.viaShow s
+    FloatLit f -> PP.viaShow f
+    DoubleLit d -> PP.viaShow d
+    X86_80Lit l -> PP.viaShow l
 
-    Reg r -> T.pack (show r)
-    GlobalVar g -> T.pack (show g)
-    RoundingMode rm -> T.pack (show rm)
-    FnHandle fh -> T.pack (show fh)
-    Index idx -> T.pack (show idx)
-    BaseTerm bt -> Fmt.fmt ("" +| C.baseTermVal bt ||+ ":" +| C.baseTermType bt ||+ "")
-    JumpTarget bid -> T.pack (show bid)
+    Reg r -> PP.viaShow r
+    GlobalVar g -> PP.viaShow g
+    RoundingMode rm -> PP.viaShow rm
+    FnHandle fh -> PP.viaShow fh
+    Index idx -> PP.viaShow idx
+    BaseTerm bt -> PP.viaShow (C.baseTermVal bt) <> PP.pretty ":" <> PP.viaShow (C.baseTermType bt)
+    JumpTarget bid -> PP.viaShow bid
 
-    BaseTypeRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
-    TypeRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
-    FloatInfoRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
-    StringInfoRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
-    NatRepr rep -> Fmt.fmt ("[NatRepr " +| rep ||+ "]")
-    SymbolRepr rep -> Fmt.fmt ("[SymbolRepr " +| rep ||+ "]")
-    CtxRepr rep -> Fmt.fmt ("[" +| show rep |+ "]")
+    BaseTypeRepr rep -> PP.brackets (PP.viaShow rep)
+    TypeRepr rep -> PP.brackets (PP.viaShow rep)
+    FloatInfoRepr rep -> PP.brackets (PP.viaShow rep)
+    StringInfoRepr rep -> PP.brackets (PP.viaShow rep)
+    NatRepr rep -> PP.brackets (PP.pretty "NatRepr@" <> PP.viaShow rep)
+    SymbolRepr rep -> PP.brackets (PP.pretty "SymbolRepr@" <> PP.dquotes (PP.viaShow rep))
+    CtxRepr rep -> PP.brackets (PP.viaShow rep)
 
     ExtensionOperand ce -> prettyExtensionOperand (Proxy @arch) ce
 
-    Syntax t -> t
+    Syntax t -> PP.pretty t
 
-cruciblePrettyOpcode :: forall arch s . (CrucibleConstraints arch s, CrucibleExtension arch) => CrucibleOpcode arch s -> T.Text
+cruciblePrettyOpcode :: forall arch s ann
+                      . (CrucibleConstraints arch s, CrucibleExtension arch)
+                     => CrucibleOpcode arch s
+                     -> PP.Doc ann
 cruciblePrettyOpcode o =
   case o of
-    CallHandle -> "call"
-    Print -> "print"
-    ReadGlobal -> "read-global"
-    WriteGlobal -> "write-global"
-    FreshConstant -> "fresh-constant"
-    FreshFloat -> "fresh-float"
-    NewRefCell -> "new-ref"
-    NewEmptyRefCell -> "new-empty-ref"
-    ReadRefCell -> "read-ref"
-    WriteRefCell -> "write-ref"
-    DropRefCell -> "drop-ref"
-    Assert -> "assert"
-    Assume -> "assume"
+    CallHandle -> PP.pretty "call"
+    Print -> PP.pretty "print"
+    ReadGlobal -> PP.pretty "read-global"
+    WriteGlobal -> PP.pretty "write-global"
+    FreshConstant -> PP.pretty "fresh-constant"
+    FreshFloat -> PP.pretty "fresh-float"
+    NewRefCell -> PP.pretty "new-ref"
+    NewEmptyRefCell -> PP.pretty "new-empty-ref"
+    ReadRefCell -> PP.pretty "read-ref"
+    WriteRefCell -> PP.pretty "write-ref"
+    DropRefCell -> PP.pretty "drop-ref"
+    Assert -> PP.pretty "assert"
+    Assume -> PP.pretty "assume"
     ExtendAssign ext -> prettyExtensionStmt (Proxy @arch) ext
-    Jump -> "jump"
-    Br -> "br"
-    MaybeBranch -> "maybe-branch"
-    VariantElim -> "variant-elim"
-    Return -> "return"
-    TailCall -> "tail-call"
-    ErrorStmt -> "error"
+    Jump -> PP.pretty "jump"
+    Br -> PP.pretty "br"
+    MaybeBranch -> PP.pretty "maybe-branch"
+    VariantElim -> PP.pretty "variant-elim"
+    Return -> PP.pretty "return"
+    TailCall -> PP.pretty "tail-call"
+    ErrorStmt -> PP.pretty "error"
     SetReg (C.App app) ->
       case app of
         C.ExtensionApp extApp -> prettyExtensionApp (Proxy @arch) extApp
-        C.BaseIsEq {} -> "eq"
-        C.BaseIte {} -> "ite"
-        C.EmptyApp -> "()"
-        C.PackAny {} -> "pack"
-        C.UnpackAny {} -> "unpack"
+        C.BaseIsEq {} -> PP.pretty "eq"
+        C.BaseIte {} -> PP.pretty "ite"
+        C.EmptyApp -> PP.pretty "()"
+        C.PackAny {} -> PP.pretty "pack"
+        C.UnpackAny {} -> PP.pretty "unpack"
 
-        C.BoolLit {} -> "bool-lit"
-        C.Not {} -> "not"
-        C.And {} -> "and"
-        C.Or {} -> "or"
-        C.BoolXor {} -> "xor"
+        C.BoolLit {} -> PP.pretty "bool-lit"
+        C.Not {} -> PP.pretty "not"
+        C.And {} -> PP.pretty "and"
+        C.Or {} -> PP.pretty "or"
+        C.BoolXor {} -> PP.pretty "xor"
 
-        C.NatLit {} -> "nat-lit"
-        C.NatLt {} -> "nat-lt"
-        C.NatLe {} -> "nat-le"
-        C.NatAdd {} -> "nat-add"
-        C.NatSub {} -> "nat-sub"
-        C.NatMul {} -> "nat-mul"
-        C.NatDiv {} -> "nat-div"
-        C.NatMod {} -> "nat-mod"
+        C.NatLit {} -> PP.pretty "nat-lit"
+        C.NatLt {} -> PP.pretty "nat-lt"
+        C.NatLe {} -> PP.pretty "nat-le"
+        C.NatAdd {} -> PP.pretty "nat-add"
+        C.NatSub {} -> PP.pretty "nat-sub"
+        C.NatMul {} -> PP.pretty "nat-mul"
+        C.NatDiv {} -> PP.pretty "nat-div"
+        C.NatMod {} -> PP.pretty "nat-mod"
 
-        C.IntLit {} -> "int-lit"
-        C.IntLt {} -> "int-lt"
-        C.IntLe {} -> "int-le"
-        C.IntNeg {} -> "int-neg"
-        C.IntAdd {} -> "int-add"
-        C.IntSub {} -> "int-sub"
-        C.IntMul {} -> "int-mul"
-        C.IntDiv {} -> "int-div"
-        C.IntMod {} -> "int-mod"
-        C.IntAbs {} -> "int-abs"
+        C.IntLit {} -> PP.pretty "int-lit"
+        C.IntLt {} -> PP.pretty "int-lt"
+        C.IntLe {} -> PP.pretty "int-le"
+        C.IntNeg {} -> PP.pretty "int-neg"
+        C.IntAdd {} -> PP.pretty "int-add"
+        C.IntSub {} -> PP.pretty "int-sub"
+        C.IntMul {} -> PP.pretty "int-mul"
+        C.IntDiv {} -> PP.pretty "int-div"
+        C.IntMod {} -> PP.pretty "int-mod"
+        C.IntAbs {} -> PP.pretty "int-abs"
 
-        C.RationalLit {} -> "rational-lit"
-        C.RealLt {} -> "real-lt"
-        C.RealLe {} -> "real-le"
-        C.RealNeg {} -> "real-neg"
-        C.RealAdd {} -> "real-add"
-        C.RealSub {} -> "real-sub"
-        C.RealMul {} -> "real-mul"
-        C.RealDiv {} -> "real-div"
-        C.RealMod {} -> "real-mod"
-        C.RealIsInteger {} -> "real-is-integer"
+        C.RationalLit {} -> PP.pretty "rational-lit"
+        C.RealLt {} -> PP.pretty "real-lt"
+        C.RealLe {} -> PP.pretty "real-le"
+        C.RealNeg {} -> PP.pretty "real-neg"
+        C.RealAdd {} -> PP.pretty "real-add"
+        C.RealSub {} -> PP.pretty "real-sub"
+        C.RealMul {} -> PP.pretty "real-mul"
+        C.RealDiv {} -> PP.pretty "real-div"
+        C.RealMod {} -> PP.pretty "real-mod"
+        C.RealIsInteger {} -> PP.pretty "real-is-integer"
 
-        C.FloatLit {} -> "float-lit"
-        C.DoubleLit {} -> "double-lit"
-        C.X86_80Lit {} -> "x86_80-lit"
-        C.FloatNaN {} -> "float-nan"
-        C.FloatPInf {} -> "float-pinf"
-        C.FloatNInf {} -> "float-ninf"
-        C.FloatPZero {} -> "float-pzero"
-        C.FloatNZero {} -> "float-nzero"
-        C.FloatNeg {} -> "float-neg"
-        C.FloatAbs {} -> "float-abs"
-        C.FloatSqrt {} -> "float-sqrt"
-        C.FloatAdd {} -> "float-add"
-        C.FloatSub {} -> "float-sub"
-        C.FloatMul {} -> "float-mul"
-        C.FloatDiv {} -> "float-div"
-        C.FloatRem {} -> "float-rem"
-        C.FloatMin {} -> "float-min"
-        C.FloatMax {} -> "float-max"
-        C.FloatFMA {} -> "float-fma"
-        C.FloatEq {} -> "float-eq"
-        C.FloatFpEq {} -> "float-fpeq"
-        C.FloatGt {} -> "float-gt"
-        C.FloatGe {} -> "float-ge"
-        C.FloatLt {} -> "float-lt"
-        C.FloatLe {} -> "float-le"
-        C.FloatNe {} -> "float-ne"
-        C.FloatFpNe {} -> "float-fpne"
-        C.FloatIte {} -> "float-ite"
-        C.FloatCast {} -> "float-cast"
-        C.FloatFromBinary {} -> "float-from-binary"
-        C.FloatToBinary {} -> "float-to-binary"
-        C.FloatFromBV {} -> "float-from-bv"
-        C.FloatFromSBV {} -> "float-from-sbv"
-        C.FloatFromReal {} -> "float-from-real"
-        C.FloatToBV {} -> "float-to-bv"
-        C.FloatToSBV {} -> "float-to-sbv"
-        C.FloatToReal {} -> "float-to-real"
-        C.FloatIsNaN {} -> "float-is-nan"
-        C.FloatIsInfinite {} -> "float-is-infinite"
-        C.FloatIsZero {} -> "float-is-zero"
-        C.FloatIsPositive {} -> "float-is-positive"
-        C.FloatIsNegative {} -> "float-is-negative"
-        C.FloatIsSubnormal {} -> "float-is-subnormal"
-        C.FloatIsNormal {} -> "float-is-normal"
+        C.FloatLit {} -> PP.pretty "float-lit"
+        C.DoubleLit {} -> PP.pretty "double-lit"
+        C.X86_80Lit {} -> PP.pretty "x86_80-lit"
+        C.FloatNaN {} -> PP.pretty "float-nan"
+        C.FloatPInf {} -> PP.pretty "float-pinf"
+        C.FloatNInf {} -> PP.pretty "float-ninf"
+        C.FloatPZero {} -> PP.pretty "float-pzero"
+        C.FloatNZero {} -> PP.pretty "float-nzero"
+        C.FloatNeg {} -> PP.pretty "float-neg"
+        C.FloatAbs {} -> PP.pretty "float-abs"
+        C.FloatSqrt {} -> PP.pretty "float-sqrt"
+        C.FloatAdd {} -> PP.pretty "float-add"
+        C.FloatSub {} -> PP.pretty "float-sub"
+        C.FloatMul {} -> PP.pretty "float-mul"
+        C.FloatDiv {} -> PP.pretty "float-div"
+        C.FloatRem {} -> PP.pretty "float-rem"
+        C.FloatMin {} -> PP.pretty "float-min"
+        C.FloatMax {} -> PP.pretty "float-max"
+        C.FloatFMA {} -> PP.pretty "float-fma"
+        C.FloatEq {} -> PP.pretty "float-eq"
+        C.FloatFpEq {} -> PP.pretty "float-fpeq"
+        C.FloatGt {} -> PP.pretty "float-gt"
+        C.FloatGe {} -> PP.pretty "float-ge"
+        C.FloatLt {} -> PP.pretty "float-lt"
+        C.FloatLe {} -> PP.pretty "float-le"
+        C.FloatNe {} -> PP.pretty "float-ne"
+        C.FloatFpNe {} -> PP.pretty "float-fpne"
+        C.FloatIte {} -> PP.pretty "float-ite"
+        C.FloatCast {} -> PP.pretty "float-cast"
+        C.FloatFromBinary {} -> PP.pretty "float-from-binary"
+        C.FloatToBinary {} -> PP.pretty "float-to-binary"
+        C.FloatFromBV {} -> PP.pretty "float-from-bv"
+        C.FloatFromSBV {} -> PP.pretty "float-from-sbv"
+        C.FloatFromReal {} -> PP.pretty "float-from-real"
+        C.FloatToBV {} -> PP.pretty "float-to-bv"
+        C.FloatToSBV {} -> PP.pretty "float-to-sbv"
+        C.FloatToReal {} -> PP.pretty "float-to-real"
+        C.FloatIsNaN {} -> PP.pretty "float-is-nan"
+        C.FloatIsInfinite {} -> PP.pretty "float-is-infinite"
+        C.FloatIsZero {} -> PP.pretty "float-is-zero"
+        C.FloatIsPositive {} -> PP.pretty "float-is-positive"
+        C.FloatIsNegative {} -> PP.pretty "float-is-negative"
+        C.FloatIsSubnormal {} -> PP.pretty "float-is-subnormal"
+        C.FloatIsNormal {} -> PP.pretty "float-is-normal"
 
-        C.JustValue {} -> "just"
-        C.NothingValue {} -> "nothing"
-        C.FromJustValue {} -> "from-just"
+        C.JustValue {} -> PP.pretty "just"
+        C.NothingValue {} -> PP.pretty "nothing"
+        C.FromJustValue {} -> PP.pretty "from-just"
 
-        C.RollRecursive {} -> "roll"
-        C.UnrollRecursive {} -> "unroll"
+        C.RollRecursive {} -> PP.pretty "roll"
+        C.UnrollRecursive {} -> PP.pretty "unroll"
 
-        C.VectorLit {} -> "vector-lit"
-        C.VectorReplicate {} -> "vector-replicate"
-        C.VectorIsEmpty {} -> "vector-is-empty"
-        C.VectorSize {} -> "vector-size"
-        C.VectorGetEntry {} -> "vector-get"
-        C.VectorSetEntry {} -> "vector-set"
-        C.VectorCons {} -> "vector-cons"
+        C.VectorLit {} -> PP.pretty "vector-lit"
+        C.VectorReplicate {} -> PP.pretty "vector-replicate"
+        C.VectorIsEmpty {} -> PP.pretty "vector-is-empty"
+        C.VectorSize {} -> PP.pretty "vector-size"
+        C.VectorGetEntry {} -> PP.pretty "vector-get"
+        C.VectorSetEntry {} -> PP.pretty "vector-set"
+        C.VectorCons {} -> PP.pretty "vector-cons"
 
-        C.HandleLit {} -> "handle-lit"
-        C.Closure {} -> "closure"
+        C.HandleLit {} -> PP.pretty "handle-lit"
+        C.Closure {} -> PP.pretty "closure"
 
-        C.NatToInteger {} -> "nat-to-integer"
-        C.IntegerToReal {} -> "integer-to-real"
-        C.RealRound {} -> "real-round"
-        C.RealFloor {} -> "real-floor"
-        C.RealCeil {} -> "real-ceil"
-        C.IntegerToBV {} -> "integer-to-bv"
-        C.RealToNat {} -> "real-to-nat"
+        C.NatToInteger {} -> PP.pretty "nat-to-integer"
+        C.IntegerToReal {} -> PP.pretty "integer-to-real"
+        C.RealRound {} -> PP.pretty "real-round"
+        C.RealFloor {} -> PP.pretty "real-floor"
+        C.RealCeil {} -> PP.pretty "real-ceil"
+        C.IntegerToBV {} -> PP.pretty "integer-to-bv"
+        C.RealToNat {} -> PP.pretty "real-to-nat"
 
-        C.Complex {} -> "complex"
-        C.RealPart {} -> "real-part"
-        C.ImagPart {} -> "imag-part"
+        C.Complex {} -> PP.pretty "complex"
+        C.RealPart {} -> PP.pretty "real-part"
+        C.ImagPart {} -> PP.pretty "imag-part"
 
-        C.BVUndef {} -> "bv-undef"
-        C.BVLit {} -> "bv-lit"
-        C.BVConcat {} -> "bv-concat"
-        C.BVSelect {} -> "bv-select"
-        C.BVTrunc {} -> "bv-trunc"
-        C.BVZext {} -> "bv-zext"
-        C.BVSext {} -> "bv-sext"
-        C.BVNot {} -> "bv-not"
-        C.BVAnd {} -> "bv-and"
-        C.BVOr {} -> "bv-or"
-        C.BVXor {} -> "bv-xor"
-        C.BVNeg {} -> "bv-neg"
-        C.BVAdd {} -> "bv-add"
-        C.BVSub {} -> "bv-sub"
-        C.BVMul {} -> "bv-mul"
-        C.BVUdiv {} -> "bv-udiv"
-        C.BVSdiv {} -> "bv-sdiv"
-        C.BVUrem {} -> "bv-urem"
-        C.BVSrem {} -> "bv-srem"
-        C.BVUle {} -> "bv-ule"
-        C.BVUlt {} -> "bv-ult"
-        C.BVSle {} -> "bv-sle"
-        C.BVSlt {} -> "bv-slt"
-        C.BVCarry {} -> "bv-carry"
-        C.BVSCarry {} -> "bv-scarry"
-        C.BVSBorrow {} -> "bv-sborrow"
-        C.BVShl {} -> "bv-shl"
-        C.BVLshr {} -> "bv-lshr"
-        C.BVAshr {} -> "bv-ashr"
-        C.BoolToBV {} -> "bool-to-bv"
-        C.BvToInteger {} -> "bv-to-integer"
-        C.SbvToInteger {} -> "sbv-to-integer"
-        C.BvToNat {} -> "bv-to-nat"
-        C.BVNonzero {} -> "bv-nonzero"
-        C.BVUMin {} -> "bv-umin"
-        C.BVUMax {} -> "bv-umax"
-        C.BVSMin {} -> "bv-smin"
-        C.BVSMax {} -> "bv-smax"
+        C.BVUndef {} -> PP.pretty "bv-undef"
+        C.BVLit {} -> PP.pretty "bv-lit"
+        C.BVConcat {} -> PP.pretty "bv-concat"
+        C.BVSelect {} -> PP.pretty "bv-select"
+        C.BVTrunc {} -> PP.pretty "bv-trunc"
+        C.BVZext {} -> PP.pretty "bv-zext"
+        C.BVSext {} -> PP.pretty "bv-sext"
+        C.BVNot {} -> PP.pretty "bv-not"
+        C.BVAnd {} -> PP.pretty "bv-and"
+        C.BVOr {} -> PP.pretty "bv-or"
+        C.BVXor {} -> PP.pretty "bv-xor"
+        C.BVNeg {} -> PP.pretty "bv-neg"
+        C.BVAdd {} -> PP.pretty "bv-add"
+        C.BVSub {} -> PP.pretty "bv-sub"
+        C.BVMul {} -> PP.pretty "bv-mul"
+        C.BVUdiv {} -> PP.pretty "bv-udiv"
+        C.BVSdiv {} -> PP.pretty "bv-sdiv"
+        C.BVUrem {} -> PP.pretty "bv-urem"
+        C.BVSrem {} -> PP.pretty "bv-srem"
+        C.BVUle {} -> PP.pretty "bv-ule"
+        C.BVUlt {} -> PP.pretty "bv-ult"
+        C.BVSle {} -> PP.pretty "bv-sle"
+        C.BVSlt {} -> PP.pretty "bv-slt"
+        C.BVCarry {} -> PP.pretty "bv-carry"
+        C.BVSCarry {} -> PP.pretty "bv-scarry"
+        C.BVSBorrow {} -> PP.pretty "bv-sborrow"
+        C.BVShl {} -> PP.pretty "bv-shl"
+        C.BVLshr {} -> PP.pretty "bv-lshr"
+        C.BVAshr {} -> PP.pretty "bv-ashr"
+        C.BoolToBV {} -> PP.pretty "bool-to-bv"
+        C.BvToInteger {} -> PP.pretty "bv-to-integer"
+        C.SbvToInteger {} -> PP.pretty "sbv-to-integer"
+        C.BvToNat {} -> PP.pretty "bv-to-nat"
+        C.BVNonzero {} -> PP.pretty "bv-nonzero"
+        C.BVUMin {} -> PP.pretty "bv-umin"
+        C.BVUMax {} -> PP.pretty "bv-umax"
+        C.BVSMin {} -> PP.pretty "bv-smin"
+        C.BVSMax {} -> PP.pretty "bv-smax"
 
-        C.EmptyWordMap {} -> "empty-wordmap"
-        C.InsertWordMap {} -> "insert-wordmap"
-        C.LookupWordMap {} -> "lookup-wordmap"
-        C.LookupWordMapWithDefault {} -> "lookup-wordmap-with-default"
+        C.EmptyWordMap {} -> PP.pretty "empty-wordmap"
+        C.InsertWordMap {} -> PP.pretty "insert-wordmap"
+        C.LookupWordMap {} -> PP.pretty "lookup-wordmap"
+        C.LookupWordMapWithDefault {} -> PP.pretty "lookup-wordmap-with-default"
 
-        C.InjectVariant {} -> "inject"
-        C.ProjectVariant {} -> "project"
+        C.InjectVariant {} -> PP.pretty "inject"
+        C.ProjectVariant {} -> PP.pretty "project"
 
-        C.MkStruct {} -> "mk-struct"
-        C.GetStruct {} -> "get-struct"
-        C.SetStruct {} -> "set-struct"
+        C.MkStruct {} -> PP.pretty "mk-struct"
+        C.GetStruct {} -> PP.pretty "get-struct"
+        C.SetStruct {} -> PP.pretty "set-struct"
 
-        C.EmptyStringMap {} -> "empty-stringmap"
-        C.LookupStringMapEntry {} -> "lookup-stringmap"
-        C.InsertStringMapEntry {} -> "insert-stringmap"
+        C.EmptyStringMap {} -> PP.pretty "empty-stringmap"
+        C.LookupStringMapEntry {} -> PP.pretty "lookup-stringmap"
+        C.InsertStringMapEntry {} -> PP.pretty "insert-stringmap"
 
-        C.StringLit {} -> "string-lit"
-        C.StringEmpty {} -> "string-empty"
-        C.StringConcat {} -> "string-concat"
-        C.StringLength {} -> "string-length"
-        C.StringContains {} -> "string-contains"
-        C.StringIsPrefixOf {} -> "string-is-prefix-of"
-        C.StringIsSuffixOf {} -> "string-is-suffix-of"
-        C.StringIndexOf {} -> "string-index-of"
-        C.StringSubstring {} -> "string-substring"
-        C.ShowValue {} -> "show-value"
-        C.ShowFloat {} -> "show-float"
+        C.StringLit {} -> PP.pretty "string-lit"
+        C.StringEmpty {} -> PP.pretty "string-empty"
+        C.StringConcat {} -> PP.pretty "string-concat"
+        C.StringLength {} -> PP.pretty "string-length"
+        C.StringContains {} -> PP.pretty "string-contains"
+        C.StringIsPrefixOf {} -> PP.pretty "string-is-prefix-of"
+        C.StringIsSuffixOf {} -> PP.pretty "string-is-suffix-of"
+        C.StringIndexOf {} -> PP.pretty "string-index-of"
+        C.StringSubstring {} -> PP.pretty "string-substring"
+        C.ShowValue {} -> PP.pretty "show-value"
+        C.ShowFloat {} -> PP.pretty "show-float"
 
-        C.SymArrayLookup {} -> "symarray-lookup"
-        C.SymArrayUpdate {} -> "symarray-update"
+        C.SymArrayLookup {} -> PP.pretty "symarray-lookup"
+        C.SymArrayUpdate {} -> PP.pretty "symarray-update"
 
-        C.IsConcrete {} -> "is-concrete"
-        C.ReferenceEq {} -> "reference-eq"
+        C.IsConcrete {} -> PP.pretty "is-concrete"
+        C.ReferenceEq {} -> PP.pretty "reference-eq"
 
 toRegisterOperand :: SCAN.NonceCache s ctx
                   -> C.Reg ctx tp

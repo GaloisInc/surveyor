@@ -43,9 +43,9 @@ import           Control.Lens ( (^.), (^?) )
 import qualified Data.Functor.Const as C
 import qualified Data.Parameterized.List as PL
 import           Data.Parameterized.Some ( Some(..) )
-import           Fmt ( (+||), (||+) )
-import qualified Fmt as Fmt
+import qualified Data.Text as T
 import qualified Lang.Crucible.CFG.Core as CCC
+import qualified Prettyprinter as PP
 
 import qualified Surveyor.Core.Architecture as CA
 import qualified Surveyor.Core.Arguments as AR
@@ -56,6 +56,12 @@ import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.State as CS
 import qualified Surveyor.Core.SymbolicExecution as SymEx
+
+-- | This is a trivial wrapper to force the type of its argument to 'T.Text';
+-- this is really useful because @-XOverloadedStrings@ is enabled, and string
+-- literals are otherwise too polymorphic to use with the prettyprinter
+text :: T.Text -> PP.Doc ann
+text = PP.pretty
 
 type Command s st tps = C.Command (AR.SurveyorCommand s st) tps
 type Callback s st tps = C.Chan (SCE.Events s st)
@@ -101,7 +107,7 @@ exitC :: forall s st . Command s st '[]
 exitC =
   C.Command "exit" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Exit the application"
+    doc = text "Cleanly shut down the application and exit"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil -> SCE.emitEvent customEventChan SCE.Exit
 
@@ -109,7 +115,7 @@ describeCommandC :: forall s st . Command s st '[AR.CommandType]
 describeCommandC =
   C.Command "describe-command" doc names rep callback (const True)
   where
-    doc = "Display the docstring of the named command"
+    doc = text "Display the docstring of the named command"
     names = C.Const "command-name" PL.:< PL.Nil
     rep = AR.CommandTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.CommandType]
@@ -120,7 +126,7 @@ describeKeysC :: forall s st . Command s st '[]
 describeKeysC =
   C.Command "describe-keys" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Describe the keybindings active in the current mode"
+    doc = text "Describe the keybindings active in the current mode"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.DescribeKeys
@@ -129,7 +135,7 @@ nameValueC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.ValueNonceT
 nameValueC =
   C.Command "name-value" doc argNames argTypes callback CS.hasCurrentValue
   where
-    doc = "Name a sub-term in a formula"
+    doc = text "Provide a name to a distinguished sub-term in a formula inside of the symbolic execution engine"
     argNames = C.Const "nonce" PL.:< C.Const "name" PL.:< PL.Nil
     argTypes = AR.ValueNonceTypeRepr PL.:< AR.StringTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.ValueNonceType, AR.StringType]
@@ -140,7 +146,7 @@ nameCurrentValueC :: forall s st e u . (st ~ CS.S e u) => Command s st '[AR.Stri
 nameCurrentValueC =
   C.Command "name-current-value" doc argNames argTypes callback CS.hasCurrentValue
   where
-    doc = "Name a sub-term in the current value (determined by context)"
+    doc = text "Name a sub-term in the current value (determined by context)"
     callback :: Callback s st '[AR.StringType]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) (AR.StringArgument name PL.:< PL.Nil) ->
       SCE.emitEvent customEventChan (SCE.InitializeValueNamePrompt archNonce name)
@@ -151,7 +157,7 @@ selectNextInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextInstructionC =
   C.Command "select-next-instruction" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Select the next instruction in the current block viewer"
+    doc = text "Select the next instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       SCE.emitEvent customEventChan (SCE.SelectNextInstruction archNonce)
@@ -160,7 +166,7 @@ selectPreviousInstructionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousInstructionC =
   C.Command "select-previous-instruction" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Select the previous instruction in the current block viewer"
+    doc = text "Select the previous instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       SCE.emitEvent customEventChan (SCE.SelectPreviousInstruction archNonce)
@@ -169,7 +175,7 @@ selectNextOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectNextOperandC =
   C.Command "select-next-operand" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Select the next operand of the current instruction in the current block viewer"
+    doc = text "Select the next operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       SCE.emitEvent customEventChan (SCE.SelectNextOperand archNonce)
@@ -178,7 +184,7 @@ selectPreviousOperandC :: forall s st . (AR.HasNonce st) => Command s st '[]
 selectPreviousOperandC =
   C.Command "select-previous-operand" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Select the previous operand of the current instruction in the current block viewer"
+    doc = text "Select the previous operand of the current instruction in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       SCE.emitEvent customEventChan (SCE.SelectPreviousOperand archNonce)
@@ -187,7 +193,7 @@ resetInstructionSelectionC :: forall s st . (AR.HasNonce st) => Command s st '[]
 resetInstructionSelectionC =
   C.Command "reset-instruction-selection" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Clear the selection in the current block viewer"
+    doc = text "Clear the selection in the current block viewer"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       SCE.emitEvent customEventChan (SCE.ResetInstructionSelection archNonce)
@@ -196,7 +202,7 @@ contextBackC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 contextBackC =
   C.Command "context-back" doc PL.Nil PL.Nil callback CS.hasContext
   where
-    doc = "Go backward (down) in the context stack"
+    doc = text "Go backward (down) in the context stack"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.ContextBack
@@ -205,7 +211,7 @@ contextForwardC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 contextForwardC =
   C.Command "context-forward" doc PL.Nil PL.Nil callback CS.hasContext
   where
-    doc = "Go forward (up) in the context stack"
+    doc = text "Go forward (up) in the context stack"
     callback :: Callback s st '[]
     callback = \customEventChan _ PL.Nil ->
       SCE.emitEvent customEventChan SCE.ContextForward
@@ -214,7 +220,7 @@ stepExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 stepExecutionC =
   C.Command "step-execution" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
-    doc = "Step execution from the current breakpoint (operates on the current symbolic execution session)"
+    doc = text "Step execution from the current breakpoint (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -224,7 +230,7 @@ stepOutExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 stepOutExecutionC =
   C.Command "step-out-execution" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
-    doc = "Step out of the current function, pausing at the return state"
+    doc = text "Step out of the current function, pausing at the return state"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -234,7 +240,7 @@ interruptExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 interruptExecutionC =
   C.Command "interrupt-execution" doc PL.Nil PL.Nil callback CS.hasExecutingSymbolicExecutionSession
   where
-    doc = "Interrupt the current symbolic execution session (operates on the current symbolic execution session)"
+    doc = text "Interrupt the current symbolic execution session (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -244,7 +250,7 @@ continueExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 continueExecutionC =
   C.Command "continue-execution" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
-    doc = "Continue execution from the stopped location (operates on the current symbolic execution session)"
+    doc = text "Continue execution from the stopped location (operates on the current symbolic execution session)"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -254,7 +260,7 @@ enableRecordingC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 enableRecordingC =
   C.Command "enable-recording" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
-    doc = "Start recording symbolic states for replay"
+    doc = text "Start recording symbolic states for replay"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -264,7 +270,7 @@ disableRecordingC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 disableRecordingC =
   C.Command "disable-recording" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
-    doc = "Stop recording symbolic states for replay"
+    doc = text "Stop recording symbolic states for replay"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -274,7 +280,7 @@ stepTraceBackwardC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 stepTraceBackwardC =
   C.Command "step-trace-backward" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
-    doc = "Step back in the symbolic trace"
+    doc = text "Step back in the symbolic trace"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -284,7 +290,7 @@ stepTraceForwardC :: forall s st e u . (st ~ CS.S e u) => Command s st '[]
 stepTraceForwardC =
   C.Command "step-trace-forward" doc PL.Nil PL.Nil callback CS.hasSuspendedSymbolicExecutionSession
   where
-    doc = "Step forward in the symbolic trace"
+    doc = text "Step forward in the symbolic trace"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.SomeState s) PL.Nil ->
       CS.withCurrentSymbolicExecutionSession s (return ()) $ \sessionID ->
@@ -294,7 +300,7 @@ setLogFileC :: forall s st . Command s st '[AR.FilePathType]
 setLogFileC =
   C.Command "set-log-file" doc names rep callback (const True)
   where
-    doc = "Log to a file (in addition to the internal buffer); if the provided filepath is the empty string, the default is used (~/.cache/surveyor.log)"
+    doc = text "Log to a file (in addition to the internal buffer); if the provided filepath is the empty string, the default is used (~/.cache/surveyor.log)"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
@@ -305,7 +311,7 @@ disableFileLoggingC :: forall s st . Command s st '[]
 disableFileLoggingC =
   C.Command "disable-file-logging" doc PL.Nil PL.Nil callback (const True)
   where
-    doc = "Disable logging to a file, if it is enabled"
+    doc = text "Disable logging to a file, if it is enabled"
     callback :: Callback s st '[]
     callback = \customEventChan _ _ ->
       SCE.emitEvent customEventChan SCE.DisableFileLogging
@@ -314,7 +320,7 @@ loadFileC :: forall s st . Command s st '[AR.FilePathType]
 loadFileC =
   C.Command "load-file" doc names rep callback (const True)
   where
-    doc = "Load a file, attempting to determine its type automatically"
+    doc = text "Load a file, attempting to determine its type automatically"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
@@ -325,7 +331,7 @@ loadELFC :: forall s st . Command s st '[AR.FilePathType]
 loadELFC =
   C.Command "load-elf" doc names rep callback (const True)
   where
-    doc = "Load an ELF file"
+    doc = text "Load an ELF file"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
@@ -336,7 +342,7 @@ loadLLVMC :: forall s st . Command s st '[AR.FilePathType]
 loadLLVMC =
   C.Command "load-llvm" doc names rep callback (const True)
   where
-    doc = "Load an LLVM bitcode file"
+    doc = text "Load an LLVM bitcode file"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
@@ -347,7 +353,7 @@ loadJARC :: forall s st . Command s st '[AR.FilePathType]
 loadJARC =
   C.Command "load-jar" doc names rep callback (const True)
   where
-    doc = "Load a JAR file"
+    doc = text "Load a JAR file"
     names = C.Const "file-name" PL.:< PL.Nil
     rep = AR.FilePathTypeRepr PL.:< PL.Nil
     callback :: Callback s st '[AR.FilePathType]
@@ -358,7 +364,7 @@ initializeSymbolicExecutionC :: forall s st e u . (st ~ CS.S e u) => Command s s
 initializeSymbolicExecutionC =
   C.Command "initialize-symbolic-execution" doc PL.Nil PL.Nil callback CS.hasContext
   where
-    doc = "Initialize symbolic execution for the currently-selected function"
+    doc = text "Initialize symbolic execution for the currently-selected function"
     callback :: Callback s st '[]
     callback = \customEventChan (AR.getNonce -> AR.SomeNonce archNonce) PL.Nil ->
       SCE.emitEvent customEventChan (SCE.InitializeSymbolicExecution archNonce Nothing Nothing)
@@ -367,7 +373,7 @@ beginSymbolicExecutionSetupC :: forall s st e u . (st ~ CS.S e u) => Command s s
 beginSymbolicExecutionSetupC =
   C.Command "begin-symbolic-execution-setup" doc PL.Nil PL.Nil callback CS.hasContext
   where
-    doc = "Allocate an initial symbolic execution state and prepare it for user customization"
+    doc = text "Allocate an initial symbolic execution state and prepare it for user customization"
     callback :: Callback s st '[]
     callback customEventChan (AR.SomeState state) PL.Nil
       | nonce <- state ^. CS.lNonce
@@ -381,12 +387,12 @@ beginSymbolicExecutionSetupC =
               let conf = SymEx.symbolicExecutionConfig symExecState
               SCE.emitEvent customEventChan (SCE.BeginSymbolicExecutionSetup nonce conf (CCC.SomeCFG cfg))
             Nothing ->
-              CS.logMessage state (SCL.msgWith { SCL.logText = [Fmt.fmt ("Missing CFG for function "+||fh||+"")]
+              CS.logMessage state (SCL.msgWith { SCL.logText = [text "Missing CFG for function " <> PP.viaShow fh]
                                                , SCL.logLevel = SCL.Warn
                                                , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
                                                })
       | otherwise =
-        CS.logMessage state (SCL.msgWith { SCL.logText = ["Missing context for symbolic execution"]
+        CS.logMessage state (SCL.msgWith { SCL.logText = [text "Missing context for symbolic execution"]
                                          , SCL.logLevel = SCL.Warn
                                          , SCL.logSource = SCL.CommandCallback "BeginSymbolicExecution"
                                          })
@@ -404,7 +410,7 @@ startSymbolicExecutionC =
           let ares = archState ^. CS.lAnalysisResult
           SCE.emitEvent customEventChan (SCE.StartSymbolicExecution nonce ares symExecState initialRegs)
       | otherwise =
-          CS.logMessage state (SCL.msgWith { SCL.logText = ["Wrong state for starting symbolic execution"]
+          CS.logMessage state (SCL.msgWith { SCL.logText = [text "Wrong state for starting symbolic execution (expected Initializing)"]
                                            , SCL.logLevel = SCL.Error
                                            , SCL.logSource = SCL.CommandCallback "StartSymbolicExecution"
                                            })

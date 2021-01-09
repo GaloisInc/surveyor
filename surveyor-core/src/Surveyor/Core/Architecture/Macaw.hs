@@ -6,7 +6,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -41,11 +40,9 @@ import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import           Data.Word ( Word64 )
-import           Fmt ( (||+), (+|), (|+) )
-import qualified Fmt as Fmt
 import qualified Renovate as R
 import qualified Prettyprinter as PP
-import           Text.Printf ( printf )
+import qualified Prettyprinter.Render.String as PPS
 import           Text.Read ( readMaybe )
 
 import           Surveyor.Core.Architecture.Class
@@ -232,16 +229,16 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
   opcode (MacawTermStmt stmt _) = macawTermStmtOpcode stmt
   prettyInstruction addr (MacawStmt stmt _ _) =
     case addr of
-      MacawAddress a -> T.pack (show (MC.ppStmt (\off -> PP.viaShow (a + off)) stmt))
-      BlockNumber _ -> Fmt.fmt ("" +|MC.ppStmt (\off -> PP.viaShow off) stmt||+ "")
-      InstructionNumber i -> Fmt.fmt ("i" +|i|+ "")
-  prettyInstruction _ (MacawInstructionStart _ _ stmt _) = T.pack (show stmt)
-  prettyInstruction _ (MacawTermStmt stmt _) = T.pack (show stmt)
+      MacawAddress a -> MC.ppStmt (\off -> PP.viaShow (a + off)) stmt
+      BlockNumber _ -> MC.ppStmt (\off -> PP.viaShow off) stmt
+      InstructionNumber i -> PP.pretty "i" <> PP.pretty i
+  prettyInstruction _ (MacawInstructionStart _ _ stmt _) = PP.viaShow stmt
+  prettyInstruction _ (MacawTermStmt stmt _) = PP.viaShow stmt
   prettyAddress a =
     case a of
-      MacawAddress addr -> T.pack (show addr)
-      BlockNumber n -> Fmt.fmt ("b" +| n ||+"")
-      InstructionNumber n -> Fmt.fmt ("i" +| n ||+"")
+      MacawAddress addr -> PP.viaShow addr
+      BlockNumber n -> PP.pretty "b" <> PP.viaShow n
+      InstructionNumber n -> PP.pretty "i" <> PP.viaShow n
   prettyOpcode (MacawOpcode opc) = macawPrettyOpcode opc
   prettyOperand _addr (MacawOperand _ opr) =
     macawPrettyOperand opr
@@ -275,7 +272,7 @@ instance (MacawConstraints arch s) => IR (Macaw arch) s where
 deriving instance Eq (Address (Macaw arch) s)
 deriving instance Ord (Address (Macaw arch) s)
 instance (MacawConstraints arch s) => Show (Address (Macaw arch) s) where
-  show a = T.unpack (prettyAddress a)
+  show a = PPS.renderString (PP.layoutCompact (prettyAddress a))
 instance NFData (Address (Macaw arch) s) where
   rnf a =
     case a of
@@ -629,97 +626,97 @@ macawStmtOperands cache ng stmt =
               v' <- toValueCached cache ng v
               return $ OL.fromList [ v' ]
 
-macawPrettyOpcode :: (MacawConstraints arch s) => MacawOpcode arch s -> T.Text
+macawPrettyOpcode :: (MacawConstraints arch s) => MacawOpcode arch s -> PP.Doc ann
 macawPrettyOpcode opc =
   case opc of
-    Comment -> T.pack "#"
-    WriteMem -> T.pack "write-mem"
-    Undefined -> T.pack "undefined"
-    ReadMem -> T.pack "read-mem"
-    CondReadMem -> T.pack "cond-read-mem"
-    CondWriteMem -> T.pack "cond-write-mem"
-    ArchState -> T.pack "arch_state"
-    Call -> T.pack "call"
-    TailCall -> T.pack "tailcall"
-    Jump -> T.pack "jump"
-    Branch -> T.pack "branch"
-    IndirectJumpTable -> T.pack "indirect-jump"
-    ClassifyFailure -> T.pack "classify-failure"
-    Return -> T.pack "return"
-    TranslateError t -> T.pack (printf "translate-error %s" t)
+    Comment -> PP.pretty "#"
+    WriteMem -> PP.pretty "write-mem"
+    Undefined -> PP.pretty "undefined"
+    ReadMem -> PP.pretty "read-mem"
+    CondReadMem -> PP.pretty "cond-read-mem"
+    CondWriteMem -> PP.pretty "cond-write-mem"
+    ArchState -> PP.pretty "arch_state"
+    Call -> PP.pretty "call"
+    TailCall -> PP.pretty "tailcall"
+    Jump -> PP.pretty "jump"
+    Branch -> PP.pretty "branch"
+    IndirectJumpTable -> PP.pretty "indirect-jump"
+    ClassifyFailure -> PP.pretty "classify-failure"
+    Return -> PP.pretty "return"
+    TranslateError t -> PP.pretty "translate-error" PP.<+> PP.pretty t
     -- FIXME: This isn't very good - we need an arch-specific backend to print
     -- each archfn correctly
-    EvalArchFn fn -> T.pack (show (MC.ppArchFn (Just . MC.ppValue 0) fn))
+    EvalArchFn fn -> PP.pretty (show (MC.ppArchFn (Just . MC.ppValue 0) fn))
     -- FIXME: Same
-    ExecArchStmt stmt -> T.pack (show (MC.ppArchStmt (MC.ppValue 0) stmt))
+    ExecArchStmt stmt -> PP.pretty (show (MC.ppArchStmt (MC.ppValue 0) stmt))
     -- FIXME: Same
-    ArchTermStmt t -> T.pack (show (MC.prettyF t))
+    ArchTermStmt t -> PP.pretty (show (MC.prettyF t))
     App a ->
       case a of
-        MC.Eq {} -> T.pack "eq"
-        MC.Mux {} -> T.pack "mux"
-        MC.TupleField {} -> T.pack "tuple"
-        MC.AndApp {} -> T.pack "andp"
-        MC.OrApp {} -> T.pack "orp"
-        MC.NotApp {} -> T.pack "notp"
-        MC.XorApp {} -> T.pack "xorp"
-        MC.Trunc {} -> T.pack "trunc"
-        MC.SExt {} -> T.pack "sext"
-        MC.UExt {} -> T.pack "uext"
-        MC.BVAdd {} -> T.pack "bv-add"
-        MC.BVAdc {} -> T.pack "bv-adc"
-        MC.BVSub {} -> T.pack "bv-sub"
-        MC.BVSbb {} -> T.pack "bv-sbb"
-        MC.BVMul {} -> T.pack "bv-mul"
-        MC.BVUnsignedLe {} -> T.pack "bv-ule"
-        MC.BVUnsignedLt {} -> T.pack "bv-ult"
-        MC.BVSignedLe {} -> T.pack "bv-sle"
-        MC.BVSignedLt {} -> T.pack "bv-slt"
-        MC.BVTestBit {} -> T.pack "test_bit"
-        MC.BVComplement {} -> T.pack "bv-complement"
-        MC.BVAnd {} -> T.pack "bv-and"
-        MC.BVOr {} -> T.pack "bv-or"
-        MC.BVXor {} -> T.pack "bv-xor"
-        MC.BVShl {} -> T.pack "bv-shl"
-        MC.BVShr {} -> T.pack "bv-shr"
-        MC.BVSar {} -> T.pack "bv-sar"
-        MC.UadcOverflows {} -> T.pack "uadc_overflows"
-        MC.SadcOverflows {} -> T.pack "sadc_overflows"
-        MC.UsbbOverflows {} -> T.pack "usbb_overflows"
-        MC.SsbbOverflows {} -> T.pack "ssbb_overflows"
-        MC.PopCount {} -> T.pack "popcount"
-        MC.ReverseBytes {} -> T.pack "reverse_bytes"
-        MC.Bsf {} -> T.pack "bsf"
-        MC.Bsr {} -> T.pack "bsr"
-        MC.Bitcast {} -> T.pack "bitcast"
+        MC.Eq {} -> PP.pretty "eq"
+        MC.Mux {} -> PP.pretty "mux"
+        MC.TupleField {} -> PP.pretty "tuple"
+        MC.AndApp {} -> PP.pretty "andp"
+        MC.OrApp {} -> PP.pretty "orp"
+        MC.NotApp {} -> PP.pretty "notp"
+        MC.XorApp {} -> PP.pretty "xorp"
+        MC.Trunc {} -> PP.pretty "trunc"
+        MC.SExt {} -> PP.pretty "sext"
+        MC.UExt {} -> PP.pretty "uext"
+        MC.BVAdd {} -> PP.pretty "bv-add"
+        MC.BVAdc {} -> PP.pretty "bv-adc"
+        MC.BVSub {} -> PP.pretty "bv-sub"
+        MC.BVSbb {} -> PP.pretty "bv-sbb"
+        MC.BVMul {} -> PP.pretty "bv-mul"
+        MC.BVUnsignedLe {} -> PP.pretty "bv-ule"
+        MC.BVUnsignedLt {} -> PP.pretty "bv-ult"
+        MC.BVSignedLe {} -> PP.pretty "bv-sle"
+        MC.BVSignedLt {} -> PP.pretty "bv-slt"
+        MC.BVTestBit {} -> PP.pretty "test_bit"
+        MC.BVComplement {} -> PP.pretty "bv-complement"
+        MC.BVAnd {} -> PP.pretty "bv-and"
+        MC.BVOr {} -> PP.pretty "bv-or"
+        MC.BVXor {} -> PP.pretty "bv-xor"
+        MC.BVShl {} -> PP.pretty "bv-shl"
+        MC.BVShr {} -> PP.pretty "bv-shr"
+        MC.BVSar {} -> PP.pretty "bv-sar"
+        MC.UadcOverflows {} -> PP.pretty "uadc_overflows"
+        MC.SadcOverflows {} -> PP.pretty "sadc_overflows"
+        MC.UsbbOverflows {} -> PP.pretty "usbb_overflows"
+        MC.SsbbOverflows {} -> PP.pretty "ssbb_overflows"
+        MC.PopCount {} -> PP.pretty "popcount"
+        MC.ReverseBytes {} -> PP.pretty "reverse_bytes"
+        MC.Bsf {} -> PP.pretty "bsf"
+        MC.Bsr {} -> PP.pretty "bsr"
+        MC.Bitcast {} -> PP.pretty "bitcast"
 
 
-macawPrettyOperand :: (MacawConstraints arch s) => MacawOperand arch s -> T.Text
+macawPrettyOperand :: (MacawConstraints arch s) => MacawOperand arch s -> PP.Doc ann
 macawPrettyOperand opr =
   case opr of
-    Binder aid -> T.pack (show (MC.ppAssignId aid))
-    CommentText t -> t
-    AddressLiteral adr -> T.pack (show adr)
-    TypeRepr tp -> T.pack (show tp)
-    TypeReprs tps -> T.pack (show (FC.toListFC (\x -> show x) tps))
-    Index idx -> T.pack (show idx)
-    NatRepr tp -> T.pack (show tp)
-    MemRepr tp -> T.pack (show tp)
-    Value v -> T.pack (show v)
-    Addr a -> T.pack (show a)
-    SegmentOffset off -> T.pack (show off)
-    JumpTable tbl -> T.pack (show tbl)
-    BlockId w -> T.pack (show w)
+    Binder aid -> PP.viaShow (MC.ppAssignId aid)
+    CommentText t -> PP.pretty t
+    AddressLiteral adr -> PP.viaShow adr
+    TypeRepr tp -> PP.viaShow tp
+    TypeReprs tps -> PP.viaShow (FC.toListFC (\x -> show x) tps)
+    Index idx -> PP.viaShow idx
+    NatRepr tp -> PP.viaShow tp
+    MemRepr tp -> PP.viaShow tp
+    Value v -> PP.viaShow v
+    Addr a -> PP.viaShow a
+    SegmentOffset off -> PP.viaShow off
+    JumpTable tbl -> PP.viaShow tbl
+    BlockId w -> PP.viaShow w
     StateUpdate m -> prettyStateUpdate m
     RegState rs -> prettyStateUpdate (MC.regStateMap rs)
-    Relocation relo -> T.pack (show relo)
+    Relocation relo -> PP.viaShow relo
 
 prettyStateUpdate :: (ShowF (MC.ArchReg arch), MC.RegisterInfo (MC.ArchReg arch))
                   => MapF.MapF (MC.ArchReg arch) (MC.Value arch ids)
-                  -> T.Text
+                  -> PP.Doc ann
 prettyStateUpdate m =
-  T.intercalate (T.pack ", ")
-  [ T.pack (printf "%s -> %s" (showF reg) (show (MC.ppValue 0 val)))
+  PP.hsep $ PP.punctuate PP.comma
+  [ PP.pretty (showF reg) <> PP.pretty " -> " <> PP.viaShow (MC.ppValue 0 val)
   | MapF.Pair reg val <- MapF.toList m
   ]
 

@@ -27,21 +27,20 @@ import qualified Data.Functor.Const as C
 import           Data.Int ( Int16, Int64 )
 import qualified Data.Map as M
 import           Data.Parameterized.Classes ( ShowF(showF) )
-import qualified Data.Parameterized.TraversableFC as FC
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.NatRepr as NR
 import qualified Data.Parameterized.Nonce as NG
 import           Data.Parameterized.Some ( Some(..) )
+import qualified Data.Parameterized.TraversableFC as FC
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TE
-import           Data.Word ( Word32, Word64 )
 import           Data.Void
+import           Data.Word ( Word32, Word64 )
 import           Numeric ( showHex )
 import qualified Prettyprinter as PP
-import qualified Prettyprinter.Render.Text as PPT
 import           Text.Read ( readMaybe )
 
 import qualified Data.Macaw.BinaryLoader as MBL
@@ -117,35 +116,35 @@ macawExtensionOperandSelectable o =
     Offset {} -> False
     Text {} -> False
 
-prettyMacawExtensionStmt :: MS.MacawStmtExtension arch f tp -> T.Text
+prettyMacawExtensionStmt :: MS.MacawStmtExtension arch f tp -> PP.Doc ann
 prettyMacawExtensionStmt s =
   case s of
-    MS.MacawReadMem {} -> T.pack "macaw:read-mem"
-    MS.MacawCondReadMem {} -> T.pack "macaw:cond-read-mem"
-    MS.MacawWriteMem {} -> T.pack "macaw:write-mem"
-    MS.MacawCondWriteMem {} -> T.pack "macaw:cond-write-mem"
-    MS.MacawGlobalPtr {} -> T.pack "macaw:global-ptr"
-    MS.MacawFreshSymbolic {} -> T.pack "macaw:fresh-symbolic"
-    MS.MacawLookupFunctionHandle {} -> T.pack "macaw:lookup-function-handle"
-    MS.MacawArchStmtExtension {} -> T.pack "macaw:arch-stmt-extension"
-    MS.MacawArchStateUpdate {} -> T.pack "macaw:arch-state-update"
-    MS.MacawInstructionStart {} -> T.pack "macaw:instruction-start"
-    MS.PtrEq {} -> T.pack "macaw:ptr-eq"
-    MS.PtrLeq {} -> T.pack "macaw:ptr-leq"
-    MS.PtrLt {} -> T.pack "macaw:ptr-lt"
-    MS.PtrMux {} -> T.pack "macaw:ptr-mux"
-    MS.PtrAdd {} -> T.pack "macaw:ptr-add"
-    MS.PtrSub {} -> T.pack "macaw:ptr-sub"
-    MS.PtrAnd {} -> T.pack "macaw:ptr-and"
+    MS.MacawReadMem {} -> PP.pretty "macaw:read-mem"
+    MS.MacawCondReadMem {} -> PP.pretty "macaw:cond-read-mem"
+    MS.MacawWriteMem {} -> PP.pretty "macaw:write-mem"
+    MS.MacawCondWriteMem {} -> PP.pretty "macaw:cond-write-mem"
+    MS.MacawGlobalPtr {} -> PP.pretty "macaw:global-ptr"
+    MS.MacawFreshSymbolic {} -> PP.pretty "macaw:fresh-symbolic"
+    MS.MacawLookupFunctionHandle {} -> PP.pretty "macaw:lookup-function-handle"
+    MS.MacawArchStmtExtension {} -> PP.pretty "macaw:arch-stmt-extension"
+    MS.MacawArchStateUpdate {} -> PP.pretty "macaw:arch-state-update"
+    MS.MacawInstructionStart {} -> PP.pretty "macaw:instruction-start"
+    MS.PtrEq {} -> PP.pretty "macaw:ptr-eq"
+    MS.PtrLeq {} -> PP.pretty "macaw:ptr-leq"
+    MS.PtrLt {} -> PP.pretty "macaw:ptr-lt"
+    MS.PtrMux {} -> PP.pretty "macaw:ptr-mux"
+    MS.PtrAdd {} -> PP.pretty "macaw:ptr-add"
+    MS.PtrSub {} -> PP.pretty "macaw:ptr-sub"
+    MS.PtrAnd {} -> PP.pretty "macaw:ptr-and"
 
-prettyMacawExtensionApp :: MS.MacawExprExtension arch f tp -> T.Text
+prettyMacawExtensionApp :: MS.MacawExprExtension arch f tp -> PP.Doc ann
 prettyMacawExtensionApp e =
   case e of
-    MS.MacawOverflows {} -> T.pack "macaw:overflows"
-    MS.PtrToBits {} -> T.pack "macaw:ptr-to-bits"
-    MS.BitsToPtr {} -> T.pack "macaw:bits-to-ptr"
-    MS.MacawNullPtr {} -> T.pack "macaw:nullptr"
-    MS.MacawBitcast {} -> T.pack "macaw:bitcast"
+    MS.MacawOverflows {} -> PP.pretty "macaw:overflows"
+    MS.PtrToBits {} -> PP.pretty "macaw:ptr-to-bits"
+    MS.BitsToPtr {} -> PP.pretty "macaw:bits-to-ptr"
+    MS.MacawNullPtr {} -> PP.pretty "macaw:nullptr"
+    MS.MacawBitcast {} -> PP.pretty "macaw:bitcast"
 
 data MacawOperand arch s where
   AddrRepr :: MM.AddrWidthRepr (MM.ArchAddrWidth arch) -> MacawOperand arch s
@@ -160,21 +159,18 @@ data MacawOperand arch s where
 
 prettyMacawExtensionOperand :: (ShowF (MM.ArchReg arch), MM.MemWidth (MM.ArchAddrWidth arch))
                             => MacawOperand arch s
-                            -> T.Text
+                            -> PP.Doc ann
 prettyMacawExtensionOperand o =
   case o of
-    AddrRepr arep -> asText (PP.brackets (PP.viaShow arep))
-    MemRepr mrep -> asText (PP.brackets (PP.viaShow mrep))
-    MachineAddress addr -> asText (PP.viaShow addr)
-    MacawTypeRepr mrep -> asText (PP.brackets (PP.viaShow mrep))
-    NatRepr mrep -> asText (PP.brackets (PP.viaShow mrep))
-    MachineRegister r -> asText (PP.pretty (showF r))
-    MacawOverflowOp oop -> asText (PP.viaShow oop)
-    Text t -> asText (PP.dquotes (PP.pretty t))
-    Offset off -> asText (PP.viaShow off)
-
-asText :: PP.Doc ann -> T.Text
-asText = PPT.renderStrict . PP.layoutCompact
+    AddrRepr arep -> PP.brackets (PP.viaShow arep)
+    MemRepr mrep -> PP.brackets (PP.viaShow mrep)
+    MachineAddress addr -> PP.viaShow addr
+    MacawTypeRepr mrep -> PP.brackets (PP.viaShow mrep)
+    NatRepr mrep -> PP.brackets (PP.viaShow mrep)
+    MachineRegister r -> PP.pretty (showF r)
+    MacawOverflowOp oop -> PP.viaShow oop
+    Text t -> PP.dquotes (PP.pretty t)
+    Offset off -> PP.viaShow off
 
 macawExtensionExprOperands :: (AC.CrucibleExtensionOperand arch ~ MacawOperand arch)
                            => SCAN.NonceCache s ctx
@@ -413,11 +409,11 @@ mcParseAddress64 t = (MM.absoluteAddr . fromIntegral) <$> mn
     mn :: Maybe Word64
     mn = readMaybe t
 
-mcPrettyAddress :: (MM.MemWidth w) => MM.MemAddr w -> T.Text
-mcPrettyAddress = T.pack . show
+mcPrettyAddress :: (MM.MemWidth w) => MM.MemAddr w -> PP.Doc ann
+mcPrettyAddress = PP.viaShow
 
-mcPrettyInstruction :: (PP.Pretty (i ())) => i () -> T.Text
-mcPrettyInstruction = T.pack . show . PP.pretty
+mcPrettyInstruction :: (PP.Pretty (i ())) => i () -> PP.Doc ann
+mcPrettyInstruction = PP.pretty
 
 mcContainingBlocks :: (w ~ MM.ArchAddrWidth arch, MM.MemWidth w)
                    => (MM.MemAddr w -> Address arch s)
@@ -502,7 +498,7 @@ toInstX86 :: (X86.Instruction X86.OnlyEncoding (), R.ConcreteAddress X86.X86_64)
 toInstX86 (i, addr) = (X86Address (MM.absoluteAddr (R.absoluteAddress addr)),
                        X86Instruction i)
 
-ppcPrettyOperand :: (MM.MemWidth w) => MM.MemAddr w -> DPPC.Operand tp -> T.Text
+ppcPrettyOperand :: (MM.MemWidth w) => MM.MemAddr w -> DPPC.Operand tp -> PP.Doc ann
 ppcPrettyOperand _addr op =
   case op of
     DPPC.Abscondbrtarget off -> textViaShow off
@@ -541,8 +537,8 @@ ppcPrettyOperand _addr op =
     DPPC.Vrrc vr -> textViaShow vr
     DPPC.Vsrc vr -> textViaShow vr
 
-textViaShow :: (Show a) => a -> T.Text
-textViaShow = PPT.renderStrict . PP.layoutCompact . PP.viaShow
+textViaShow :: (Show a) => a -> PP.Doc ann
+textViaShow = PP.viaShow
 
 instance IR PPC.PPC32 s where
   data Instruction PPC.PPC32 s = PPC32Instruction !(R.Instruction PPC.PPC32 PPC.OnlyEncoding ())
@@ -561,7 +557,7 @@ instance IR PPC.PPC32 s where
   boundValue _ = Nothing
   prettyOperand (PPC32Address addr) (PPC32Operand op) =
     ppcPrettyOperand addr op
-  prettyOpcode (PPC32Opcode opc) = T.pack (show opc)
+  prettyOpcode (PPC32Opcode opc) = PP.viaShow opc
   parseAddress t = PPC32Address <$> mcParseAddress32 t
   rawRepr = Just (\(PPC32Instruction i) -> PPC.assemble i)
   showInstructionAddresses _ = True
@@ -737,7 +733,7 @@ instance IR PPC.PPC64 s where
   boundValue _ = Nothing
   prettyOperand (PPC64Address addr) (PPC64Operand op) =
     ppcPrettyOperand addr op
-  prettyOpcode (PPC64Opcode opc) = T.pack (show opc)
+  prettyOpcode (PPC64Opcode opc) = PP.viaShow opc
   parseAddress t = PPC64Address <$> mcParseAddress64 t
   rawRepr = Just (\(PPC64Instruction i) -> PPC.assemble i)
   showInstructionAddresses _ = True
@@ -828,12 +824,12 @@ instance IR X86.X86_64 s where
   opcode (X86Instruction i) = X86Opcode (X86.instrOpcode i)
   operands (X86Instruction i) = OL.fromList (map (uncurry X86Operand) (X86.instrOperands i))
   boundValue _ = Nothing
-  prettyOpcode (X86Opcode s) = T.pack s
+  prettyOpcode (X86Opcode s) = PP.pretty s
   prettyOperand (X86Address addr) (X86Operand v _) =
     let waddr = fromIntegral (MM.addrOffset addr)
-    in T.pack (show (ppValue waddr v))
+    in PP.viaShow (ppValue waddr v)
   prettyInstruction (X86Address _addr) (X86Instruction i) =
-    T.pack (show (FD.ppInstruction (X86.toFlexInst i)))
+    PP.viaShow (FD.ppInstruction (X86.toFlexInst i))
   parseAddress t = X86Address <$> mcParseAddress64 t
   rawRepr = Just (\(X86Instruction i) -> X86.assemble i)
   showInstructionAddresses _ = True
@@ -1026,7 +1022,7 @@ ppValue base v =
       PP.viaShow sym <> PP.pretty "+" <> PP.pretty (off - fromIntegral (fromIntegral base + ioff))
 
 ppHex :: (Integral a, Show a) => a -> PP.Doc ann
-ppHex i = PP.pretty (showHex i "")
+ppHex i = PP.pretty "0x" <> PP.pretty (showHex i "")
 
 ppImm :: (Integral w, Show w) => w -> PP.Doc ann
 ppImm i | i >= 0 = PP.pretty "0x" <> ppHex i

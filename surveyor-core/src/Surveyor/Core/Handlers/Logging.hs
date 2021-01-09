@@ -1,11 +1,11 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
 module Surveyor.Core.Handlers.Logging ( handleLoggingEvent ) where
 
 import qualified Control.Concurrent.Async as A
 import           Control.Lens ( (&), (^.), (.~), (%~) )
 import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.Text as T
+import qualified Prettyprinter as PP
 
 import qualified Surveyor.Core.Architecture as SCA
 import qualified Surveyor.Core.Events as SCE
@@ -34,8 +34,8 @@ handleLoggingEvent s0 evt =
         Just (task, _) -> liftIO $ A.cancel task
       let s1 = s0 & SCS.lLogActions . SCS.lFileLogger .~ Just (newTask, newAction)
       liftIO $ SCS.logMessage s1 (SCL.msgWith { SCL.logLevel = SCL.Info
-                                              , SCL.logText = ["Logging to file " <> T.pack logFile]
-                                              , SCL.logSource = SCL.EventHandler "SetLogFile"
+                                              , SCL.logText = [PP.pretty "Logging to file " <> PP.pretty logFile]
+                                              , SCL.logSource = SCL.EventHandler (T.pack "SetLogFile")
                                               })
       return $! SCS.State s1
     SCE.DisableFileLogging -> do

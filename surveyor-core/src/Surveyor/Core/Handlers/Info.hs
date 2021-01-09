@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
 module Surveyor.Core.Handlers.Info (
   handleInfoEvent
   ) where
@@ -9,10 +8,8 @@ import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.GraphViz as DG
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
-import           Fmt ( (+|), (|+), (||+) )
-import qualified Fmt as Fmt
+import qualified Prettyprinter.Render.Text as PPT
 import           System.FilePath ( (<.>) )
-import           Text.Printf ( printf )
 
 import qualified Surveyor.Core.Architecture as SCA
 import qualified Surveyor.Core.Command as SCC
@@ -34,7 +31,7 @@ handleInfoEvent :: ( SCA.Architecture arch s
 handleInfoEvent s0 evt =
   case evt of
     SCE.DescribeCommand (SCC.SomeCommand cmd) -> do
-      let msg = T.pack (printf "%s: %s" (SCC.cmdName cmd) (SCC.cmdDocstring cmd))
+      let msg = PP.pretty (SCC.cmdName cmd) <> PP.pretty ": " <> SCC.cmdDocstring cmd
       liftIO (SCS.sEmitEvent s0 (SCE.EchoText msg))
       return $! SCS.State s0
     SCE.EchoText txt -> do
@@ -43,18 +40,18 @@ handleInfoEvent s0 evt =
                                               , SCL.logSource = SCL.EchoAreaUpdate
                                               , SCL.logText = [txt]
                                               })
-      ea' <- liftIO (SCEA.setEchoAreaText (SCS.sEchoArea s0) txt)
+      ea' <- liftIO (SCEA.setEchoAreaText (SCS.sEchoArea s0) (PPT.renderStrict (PP.layoutCompact txt)))
       return $! SCS.State (s0 & SCS.lEchoArea .~ ea')
     SCE.ResetEchoArea -> return $! SCS.State (s0 & SCS.lEchoArea %~ SCEA.resetEchoArea)
     SCE.DescribeKeys -> do
       withBaseMode (s0 ^. SCS.lUIMode) $ \normalMode -> do
         let keys = SCK.modeKeybindings (s0 ^. SCS.lKeymap) (SCM.SomeUIMode normalMode)
         let formatKey (k, SCC.SomeCommand cmd) =
-              Fmt.fmt ("  "+| PP.pretty k ||+ ": " +| SCC.cmdName cmd |+ "")
+              PP.pretty "  " <> PP.pretty k <> PP.pretty ": " <> PP.pretty (SCC.cmdName cmd)
         liftIO $ SCS.logMessage s0 (SCL.msgWith { SCL.logLevel = SCL.Requested
-                                                , SCL.logSource = SCL.EventHandler "DescribeKeys"
-                                                , SCL.logText = ( Fmt.fmt ("Keybindings for " +| SCM.prettyMode normalMode |+ ":")
-                                                                  : map formatKey keys
+                                                , SCL.logSource = SCL.EventHandler (T.pack "DescribeKeys")
+                                                , SCL.logText = ( (PP.pretty "Keybindings for " <> SCM.prettyMode normalMode)
+                                                                : map formatKey keys
                                                                 )
                                                 })
       let s1 = s0 & SCS.lUIMode .~ SCM.SomeUIMode SCM.Diags
@@ -70,8 +67,8 @@ handleInfoEvent s0 evt =
             Nothing -> liftIO $ DG.runGraphvizCanvas cmd dot DG.Gtk
             Just path -> do
               let msg = SCL.msgWith { SCL.logLevel = SCL.Info
-                                    , SCL.logSource = SCL.EventHandler "VisualizeSymbolicTerm"
-                                    , SCL.logText = [T.pack ("Saving to SVG " ++ path)]
+                                    , SCL.logSource = SCL.EventHandler (T.pack "VisualizeSymbolicTerm")
+                                    , SCL.logText = [ PP.pretty "Saving to SVG " <> PP.pretty path ]
                                     }
               liftIO $ SCS.logMessage s0 msg
               _ <- liftIO $ DG.runGraphvizCommand cmd dot DG.Svg path
@@ -79,8 +76,8 @@ handleInfoEvent s0 evt =
               return ()
         False -> do
           let msg = SCL.msgWith { SCL.logLevel = SCL.Warn
-                                , SCL.logSource = SCL.EventHandler "VisualizeSymbolicTerm"
-                                , SCL.logText = [T.pack "Graphviz is not installed"]
+                                , SCL.logSource = SCL.EventHandler (T.pack "VisualizeSymbolicTerm")
+                                , SCL.logText = [PP.pretty "Graphviz is not installed"]
                                 }
           liftIO $ SCS.logMessage s0 msg
       return $! SCS.State s0

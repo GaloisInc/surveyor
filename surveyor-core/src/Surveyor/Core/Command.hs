@@ -16,6 +16,7 @@ import qualified Data.Functor.Const as C
 import           Data.Kind ( Type )
 import qualified Data.Parameterized.List as PL
 import qualified Data.Text as T
+import qualified Prettyprinter as PP
 
 import qualified Surveyor.Core.Chan as C
 
@@ -30,7 +31,7 @@ data SomeCommand b where
 data Command (b :: Type) (tps :: [ArgumentKind b]) =
   Command { cmdName :: T.Text
           -- ^ The name of the command
-          , cmdDocstring :: T.Text
+          , cmdDocstring :: PP.Doc ()
           -- ^ Documentation for the command
           , cmdArgNames :: PL.List (C.Const T.Text) tps
           -- ^ Argument names

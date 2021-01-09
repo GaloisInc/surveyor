@@ -2,7 +2,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 module Surveyor.Core.Mode (
@@ -19,9 +18,7 @@ import           Data.Maybe ( isJust )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.TH.GADT as PT
-import qualified Data.Text as T
-import           Fmt ( (+|), (||+) )
-import qualified Fmt as Fmt
+import qualified Prettyprinter as PP
 
 import           Surveyor.Core.IRRepr ( IRRepr )
 
@@ -56,17 +53,17 @@ data UIMode s k where
   -- keystrokes except for C-g
   MiniBuffer :: UIMode s NormalK -> UIMode s MiniBufferK
 
-prettyMode :: UIMode s NormalK -> T.Text
+prettyMode :: UIMode s NormalK -> PP.Doc ann
 prettyMode m =
   case m of
-    Diags -> "Diagnostics"
-    Summary -> "Summary"
-    FunctionSelector -> "Function Selector"
-    BlockSelector -> "Block Selector"
-    BlockViewer _nonce repr -> Fmt.fmt ("Block Viewer[" +| repr ||+ "]")
-    FunctionViewer _nonce repr -> Fmt.fmt ("Function Viewer[" +| repr ||+ "]")
-    SemanticsViewer -> "Semantics Viewer"
-    SymbolicExecutionManager -> "Symbolic Execution Manager"
+    Diags -> PP.pretty "Diagnostics"
+    Summary -> PP.pretty "Summary"
+    FunctionSelector -> PP.pretty "Function Selector"
+    BlockSelector -> PP.pretty "Block Selector"
+    BlockViewer _nonce repr -> PP.pretty "Block Viewer" <> PP.brackets (PP.pretty repr)
+    FunctionViewer _nonce repr -> PP.pretty "Function Viewer" <> PP.brackets (PP.pretty repr)
+    SemanticsViewer -> PP.pretty "Semantics Viewer"
+    SymbolicExecutionManager -> PP.pretty "Symbolic Execution Manager"
 
 data SomeUIMode s where
   SomeMiniBuffer :: UIMode s MiniBufferK -> SomeUIMode s

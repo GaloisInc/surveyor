@@ -26,6 +26,7 @@ import qualified Lang.Crucible.Simulator.CallFrame as LCSC
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Lang.Crucible.Simulator.RegMap as CSR
 import qualified Lang.Crucible.Types as LCT
+import qualified Prettyprinter as PP
 import qualified What4.Expr.Builder as WEB
 
 import qualified Surveyor.Core.Architecture as SCA
@@ -127,15 +128,15 @@ handleSymbolicExecutionEvent s0 evt =
       | otherwise -> do
           let msg = SCL.msgWith { SCL.logLevel = SCL.Debug
                                 , SCL.logSource = SCL.EventHandler (T.pack "InitializeValueNamePrompt")
-                                , SCL.logText = [T.pack "Pattern matches failed"]
+                                , SCL.logText = [PP.pretty "Pattern matches failed"]
                                 }
           liftIO $ SCS.logMessage s0 msg
           return (SCS.State s0)
 
     SCE.UpdateSymbolicExecutionState archNonce newState
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce) -> do
-          let msg = SCL.msgWith { SCL.logText = [T.pack "Updating symbolic execution state"
-                                                , T.pack ("  Session ID is " ++ show (SymEx.symbolicSessionID newState))
+          let msg = SCL.msgWith { SCL.logText = [ PP.pretty "Updating symbolic execution state"
+                                                , PP.pretty "  Session ID is " <> PP.viaShow (SymEx.symbolicSessionID newState)
                                                 ]
                                 }
           liftIO $ SCS.logMessage s0 msg
@@ -194,8 +195,8 @@ handleSymbolicExecutionEvent s0 evt =
           --
           -- TODO In the 'LCSET.ResultState', we could instantiate the
           -- "Inspecting" state instead of the "Suspended" state
-          let msg = SCL.msgWith { SCL.logText = [ T.pack "In DebugMonitorEvent"
-                                                , T.pack ("  SessionID=" ++ show sessionID)
+          let msg = SCL.msgWith { SCL.logText = [ PP.pretty "In DebugMonitorEvent"
+                                                , PP.pretty "  SessionID=" <> PP.pretty sessionID
                                                 ]
                                 }
           liftIO $ SCS.logMessage s0 msg
@@ -207,8 +208,8 @@ handleSymbolicExecutionEvent s0 evt =
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce)
       , Just archState <- s0 ^. SCS.lArchState -> do
           let resumeAction = CCC.writeChan returnChan SEO.UnmodifiedSimState
-          let msg = SCL.msgWith { SCL.logText = [ T.pack "In OverrideMonitorEvent"
-                                                , T.pack ("  SessionID=" ++ show sessionID)
+          let msg = SCL.msgWith { SCL.logText = [ PP.pretty "In OverrideMonitorEvent"
+                                                , PP.pretty "  SessionID=" <> PP.pretty sessionID
                                                 ]
                                 }
           liftIO $ SCS.logMessage s0 msg
@@ -263,7 +264,7 @@ makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction
                                      , SES.someCFG = LCCC.SomeCFG parentFrameCFG
                                      , SES.symbolicGlobals = topFrame ^. LCSET.gpGlobals
                                      }
-    let msg = SCL.msgWith { SCL.logText = [T.pack "Making a suspended state"]
+    let msg = SCL.msgWith { SCL.logText = [PP.pretty "Making a suspended state"]
                           }
     liftIO $ SCS.logMessage s0 msg
 
@@ -277,7 +278,7 @@ makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction
     let s1 = s0 & SCS.lArchState . _Just . SCS.contextL .~ contextStack
                 & SCS.lUIMode .~ SCM.SomeUIMode SCM.SymbolicExecutionManager
     let curSesId = s1 ^? SCS.lArchState . _Just . SCS.contextL . SCCx.currentContext . SCCx.symExecSessionIDL
-    let msg2 = SCL.msgWith { SCL.logText = [ T.pack ("  Current session ID is " ++ show curSesId)
+    let msg2 = SCL.msgWith { SCL.logText = [ PP.pretty "  Current session ID is " <> PP.pretty curSesId
                                            ]
                            }
     liftIO $ SCS.logMessage s0 msg2
