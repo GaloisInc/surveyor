@@ -10,6 +10,7 @@ module Surveyor.Core.IRRepr (
 
 import           Data.Parameterized.Classes
 import qualified Data.Parameterized.TH.GADT as PT
+import qualified Prettyprinter as PP
 
 data Macaw arch
 data Crucible arch
@@ -30,6 +31,9 @@ instance Show (IRRepr arch ir) where
       BaseRepr -> "base"
       MacawRepr -> "macaw"
       CrucibleRepr -> "crucible"
+
+instance PP.Pretty (IRRepr arch ir) where
+  pretty = PP.viaShow
 
 $(return [])
 

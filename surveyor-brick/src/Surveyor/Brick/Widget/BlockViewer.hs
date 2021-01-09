@@ -1,7 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -31,8 +30,8 @@ import           Data.Parameterized.Classes
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Set as S
 import qualified Data.Vector as V
-import qualified Data.Text.Prettyprint.Doc as PP
-import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 import           Text.Printf ( printf )
 
 import qualified Surveyor.Core as C
@@ -65,6 +64,9 @@ withBlockViewerConstraints (BlockViewer _ _) a = a
 blockViewer :: (C.Architecture arch s, C.IR ir s) => Names -> C.IRRepr arch ir -> BlockViewer arch s ir
 blockViewer names repr = BlockViewer names repr
 
+bDoc :: PP.Doc ann -> B.Widget n
+bDoc = B.txt . PPT.renderStrict . PP.layoutCompact
+
 renderBlockViewer :: forall arch s ir
                    . (C.Architecture arch s)
                   => C.BlockState arch s ir
@@ -74,15 +76,15 @@ renderBlockViewer blkState (BlockViewer names repr) =
   B.borderWithLabel (B.hBox (map pad (irIndicators ++ [header]))) body
   where
     blk = blkState ^. C.blockStateBlock
-    header = B.txt (PPT.renderStrict (PP.layoutCompact ("Basic Block" PP.<+> PP.pretty (C.prettyAddress (C.blockAddress blk)) PP.<+> ")")))
+    header = bDoc (PP.pretty "Basic Block" <> PP.parens (C.prettyAddress (C.blockAddress blk)))
     bl = mkBlockListState names blkState
     body = B.renderList (renderListItem (blkState ^. C.blockStateSelection)) False bl
     pad = B.padLeftRight 1
     irIndicators = map toIRLabel (C.SomeIRRepr C.BaseRepr : C.alternativeIRs (Proxy @(arch, s)))
     toIRLabel (C.SomeIRRepr r)
       | Just Refl <- testEquality r repr =
-          B.withAttr B.listSelectedFocusedAttr (B.txt (PPT.renderStrict (PP.layoutCompact ("[" PP.<+> PP.viaShow (showF r) PP.<+> "]"))))
-      | otherwise = B.txt (PPT.renderStrict (PP.layoutCompact ("[" PP.<+> PP.viaShow (showF r) PP.<+> "]")))
+          B.withAttr B.listSelectedFocusedAttr (bDoc (PP.brackets (PP.viaShow (showF r))))
+      | otherwise = bDoc (PP.brackets (PP.viaShow (showF r)))
 
 -- | Construct a state for the block list widget on-demand based on the state in
 -- the context
@@ -111,7 +113,7 @@ renderListItem :: forall arch s
                -> B.Widget Names
 renderListItem sel _isFocused (idx, addr, i) =
   B.hBox [ if C.showInstructionAddresses (Proxy @(arch, s))
-           then B.padRight (B.Pad 2) (B.txt (C.prettyAddress addr))
+           then B.padRight (B.Pad 2) (bDoc (C.prettyAddress addr))
            else B.emptyWidget
          , maybe B.emptyWidget (renderRawRepr i) C.rawRepr
          , renderListItemWithSelection sel idx addr i
@@ -122,7 +124,7 @@ renderRawRepr :: C.Instruction arch s
               -> B.Widget Names
 renderRawRepr i asBytes =
   case asBytes i of
-    Nothing -> B.txt "<error>"
+    Nothing -> B.str "<error>"
     Just bs -> B.padRight (B.Pad 1) (B.hBox (map fmtByte (BS.unpack bs)))
   where
     fmtByte b = B.padRight (B.Pad 1) (B.str (printf "%02x" b))
@@ -163,10 +165,10 @@ renderInstruction :: (C.IR arch s)
 renderInstruction addr i mSelOperand =
   case C.boundValue i of
     Nothing -> B.hBox rhs
-    Just bv -> B.hBox (B.txt (C.prettyOperand addr bv) : B.txt " = " : rhs)
+    Just bv -> B.hBox (bDoc (C.prettyOperand addr bv) : B.str " = " : rhs)
   where
-    opc = B.txt (C.prettyOpcode (C.opcode i))
-    rhs = B.padRight (B.Pad 1) opc : L.intersperse (B.txt ",") operandWidgets
+    opc = bDoc (C.prettyOpcode (C.opcode i))
+    rhs = B.padRight (B.Pad 1) opc : L.intersperse (B.str ",") operandWidgets
     operandWidgets = renderOperandList addr mSelOperand (C.indexOperandList (C.operands i))
 
 renderOperand :: (C.IR arch s)
@@ -176,8 +178,8 @@ renderOperand :: (C.IR arch s)
               -> B.Widget Names
 renderOperand addr mSelOperand (idx, op)
   | Just z <- mSelOperand, fst (C.zipperFocused z) == idx =
-      highlightWidget True (B.txt (C.prettyOperand addr op))
-  | otherwise = B.txt (C.prettyOperand addr op)
+      highlightWidget True (bDoc (C.prettyOperand addr op))
+  | otherwise = bDoc (C.prettyOperand addr op)
 
 renderOperandList :: (C.IR arch s)
                   => C.Address arch s
@@ -200,7 +202,7 @@ renderOperandList addr mSelOperand ol =
 renderDelimiter :: C.Delimiter -> (B.Widget Names, B.Widget Names)
 renderDelimiter d =
   case d of
-    C.Parens -> (B.txt "(", B.txt ")")
-    C.Brackets -> (B.txt "[", B.txt "]")
-    C.Braces -> (B.txt "{", B.txt "}")
-    C.Angles -> (B.txt "<", B.txt ">")
+    C.Parens -> (B.str "(", B.str ")")
+    C.Brackets -> (B.str "[", B.str "]")
+    C.Braces -> (B.str "{", B.str "}")
+    C.Angles -> (B.str "<", B.str ">")

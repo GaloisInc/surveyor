@@ -9,9 +9,9 @@ import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.IORef as IOR
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
-import qualified Data.Text as T
 import           GHC.Stack ( HasCallStack )
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
+import qualified Prettyprinter as PP
 
 import qualified Surveyor.Core.Architecture as SCA
 import qualified Surveyor.Core.Events as SCE
@@ -33,7 +33,7 @@ handleDebuggingEvent s0 evt =
     SCE.StepExecution sessionID
       | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
       , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          let msg = SCL.msgWith { SCL.logText = [ T.pack ("Stepping session " ++ show sessionID)
+          let msg = SCL.msgWith { SCL.logText = [ PP.pretty "Stepping session " <> PP.pretty sessionID
                                                 ]
                                 }
           liftIO $ SCS.logMessage s0 msg
@@ -67,7 +67,7 @@ handleDebuggingEvent s0 evt =
     SCE.ContinueExecution sessionID
       | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
       , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          let msg = SCL.msgWith { SCL.logText = [ T.pack ("Stepping session " ++ show sessionID)
+          let msg = SCL.msgWith { SCL.logText = [ PP.pretty "Stepping session " <> PP.pretty sessionID
                                                 ]
                                 }
           liftIO $ SCS.logMessage s0 msg

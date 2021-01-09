@@ -47,6 +47,7 @@ import           Data.Parameterized.Classes ( testEquality )
 import qualified Data.Parameterized.Nonce as NG
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Prettyprinter as PP
 import qualified What4.BaseTypes as WT
 import qualified What4.Expr.Builder as WEB
 
@@ -76,9 +77,9 @@ instance NFData (SomeResult s arch) where
 -- different for JVM and LLVM
 class CrucibleExtension arch where
   type family CrucibleExtensionOperand arch :: Type -> Type
-  prettyExtensionStmt :: proxy arch -> CCE.StmtExtension (CrucibleExt arch) (CCC.Reg ctx) tp -> T.Text
-  prettyExtensionApp :: proxy arch -> CCE.ExprExtension (CrucibleExt arch) (CCC.Reg ctx) tp -> T.Text
-  prettyExtensionOperand :: proxy arch -> CrucibleExtensionOperand arch s -> T.Text
+  prettyExtensionStmt :: proxy arch -> CCE.StmtExtension (CrucibleExt arch) (CCC.Reg ctx) tp -> PP.Doc ann
+  prettyExtensionApp :: proxy arch -> CCE.ExprExtension (CrucibleExt arch) (CCC.Reg ctx) tp -> PP.Doc ann
+  prettyExtensionOperand :: proxy arch -> CrucibleExtensionOperand arch s -> PP.Doc ann
   extensionExprOperands :: SCAN.NonceCache s ctx
                         -> NG.NonceGenerator IO s
                         -> CCE.ExprExtension (CrucibleExt arch) (CCC.Reg ctx) tp
@@ -231,10 +232,10 @@ class (ArchConstraints arch s) => IR (arch :: Type) (s :: Type) where
   -- | Parse a string into an architecture-specific 'Address'
   parseAddress :: String -> Maybe (Address arch s)
   -- | Pretty print an address
-  prettyAddress :: Address arch s -> T.Text
-  prettyInstruction :: Address arch s -> Instruction arch s -> T.Text
-  prettyOperand :: Address arch s -> Operand arch s -> T.Text
-  prettyOpcode :: Opcode arch s -> T.Text
+  prettyAddress :: Address arch s -> PP.Doc ann
+  prettyInstruction :: Address arch s -> Instruction arch s -> PP.Doc ann
+  prettyOperand :: Address arch s -> Operand arch s -> PP.Doc ann
+  prettyOpcode :: Opcode arch s -> PP.Doc ann
 
   showInstructionAddresses :: proxy (arch, s) -> Bool
   operandSelectable :: Operand arch s -> Bool

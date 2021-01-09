@@ -12,6 +12,8 @@ import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as ZG
 import qualified Data.Vector as V
 import qualified Graphics.Vty as V
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 
 import qualified Brick.Widget.FilterList as FL
 import qualified Surveyor.Core as C
@@ -46,12 +48,18 @@ blockSelector callback focAttr blocks =
                                 }
 
 blockToText :: (C.Architecture arch s) => C.Block arch s -> T.Text
-blockToText b = C.prettyAddress (C.blockAddress b)
+blockToText b = asText (C.prettyAddress (C.blockAddress b))
+
+asText :: PP.Doc ann -> T.Text
+asText = PPT.renderStrict . PP.layoutCompact
+
+bDoc :: PP.Doc ann -> B.Widget n
+bDoc = B.txt . asText
 
 renderBlockItem :: (C.Architecture arch s) => B.AttrName -> Bool -> C.Block arch s -> B.Widget Names
 renderBlockItem focAttr isFocused b =
   let xfrm = if isFocused then B.withAttr focAttr else id
-  in xfrm (B.txt (C.prettyAddress (C.blockAddress b)))
+  in xfrm (bDoc (C.prettyAddress (C.blockAddress b)))
 
 renderEditorContent :: (Monoid t, ZG.GenericTextZipper t) => [t] -> B.Widget Names
 renderEditorContent txts = B.str (ZG.toList (mconcat txts))

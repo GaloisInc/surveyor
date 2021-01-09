@@ -1,13 +1,12 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
 module Surveyor.Brick.Handlers.Extension ( handleExtensionEvent ) where
 
 import qualified Brick as B
 import           Control.Lens ( (&), (.~), (^.), _Just )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Parameterized.Classes as PC
-import qualified Data.Text.Prettyprint.Doc as PP
-import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
+import qualified Data.Text as T
+import qualified Prettyprinter as PP
 import qualified Surveyor.Core as C
 
 import           Surveyor.Brick.Attributes ( focusedListAttr )
@@ -37,8 +36,8 @@ handleExtensionEvent s0 evt =
       , ares <- archState ^. C.lAnalysisResult
       , Just PC.Refl <- PC.testEquality (s0 ^. C.lNonce) archNonce -> do
           liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                              , C.logSource = C.EventHandler "FindBlockContaining"
-                                              , C.logText = [PPT.renderStrict (PP.layoutCompact ("Finding block at address" PP.<+> PP.pretty (C.prettyAddress addr)))]
+                                              , C.logSource = C.EventHandler (T.pack "FindBlockContaining")
+                                              , C.logText = [PP.pretty "Finding block at address" PP.<+> C.prettyAddress addr]
                                               })
           case C.containingBlocks ares addr of
             [b] -> do
@@ -66,8 +65,8 @@ handleExtensionEvent s0 evt =
           let callback b = do
                 let fh = C.blockFunction b
                 C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                           , C.logSource = C.EventHandler "ListBlocks"
-                                           , C.logText = [PPT.renderStrict (PP.layoutCompact ("Pushing a block to view:" PP.<+> PP.viaShow (C.blockAddress b)))]
+                                           , C.logSource = C.EventHandler (T.pack "ListBlocks")
+                                           , C.logText = [PP.pretty "Pushing a block to view:" PP.<+> PP.viaShow (C.blockAddress b)]
                                            })
                 C.sEmitEvent s0 (C.PushContext archNonce fh C.BaseRepr b)
                 C.sEmitEvent s0 (C.ViewBlock archNonce C.BaseRepr)
@@ -83,13 +82,13 @@ handleExtensionEvent s0 evt =
                 case C.functionBlocks (archState ^. C.lAnalysisResult) f of
                   [] ->
                     C.logMessage s0 (C.msgWith { C.logLevel = C.Warn
-                                               , C.logSource = C.EventHandler "ListFunctions"
-                                               , C.logText = [PPT.renderStrict (PP.layoutCompact ("Failed to find blocks for function:" PP.<+> PP.viaShow f))]
+                                               , C.logSource = C.EventHandler (T.pack "ListFunctions")
+                                               , C.logText = [PP.pretty "Failed to find blocks for function:" PP.<+> PP.viaShow f]
                                                })
                   entryBlock : _ -> do
                     C.logMessage s0 (C.msgWith { C.logLevel = C.Debug
-                                               , C.logSource = C.EventHandler "ListFunctions"
-                                               , C.logText = [PPT.renderStrict (PP.layoutCompact ("Selecting function:" PP.<+> PP.viaShow f))]
+                                               , C.logSource = C.EventHandler (T.pack "ListFunctions")
+                                               , C.logText = [PP.pretty "Selecting function:" PP.<+> PP.viaShow f]
                                                })
                     C.sEmitEvent s0 (C.PushContext archNonce f C.BaseRepr entryBlock)
                     C.sEmitEvent s0 (C.ViewFunction archNonce C.BaseRepr)

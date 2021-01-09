@@ -6,6 +6,7 @@ module Surveyor.Core.SymbolicExecution.Session (
 
 import           Control.DeepSeq ( NFData(..) )
 import qualified Data.Parameterized.Nonce as PN
+import qualified Prettyprinter as PP
 
 -- | A unique identifier for a symbolic execution task (whose state is one of 'SymbolicExecutionState')
 --
@@ -17,6 +18,9 @@ newtype SessionID s = SessionID (PN.Nonce s ())
 -- | We don't have an 'NFData' instance for nonces, so we just take it to WHNF
 instance NFData (SessionID s) where
   rnf (SessionID n) = n `seq` ()
+
+instance PP.Pretty (SessionID s) where
+  pretty (SessionID nonce) = PP.pretty "Session" <> PP.brackets (PP.pretty (PN.indexValue nonce))
 
 newSessionID :: PN.NonceGenerator IO s -> IO (SessionID s)
 newSessionID ng = SessionID <$> PN.freshNonce ng

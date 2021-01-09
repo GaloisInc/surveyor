@@ -12,7 +12,8 @@ import qualified Data.Text as T
 import qualified Data.Text.Zipper.Generic as ZG
 import qualified Data.Vector as V
 import qualified Graphics.Vty as V
-import           Text.Printf ( printf )
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 
 import qualified Brick.Match.Subword as SW
 import qualified Brick.Widget.FilterList as FL
@@ -43,8 +44,12 @@ functionSelector cb focAttr funcs =
                                 , FL.flRenderEditorContent = renderEditorContent
                                 }
 
+docText :: PP.Doc ann -> T.Text
+docText = PPT.renderStrict . PP.layoutCompact
+
 funcToText :: (C.Architecture arch s) => C.FunctionHandle arch s -> T.Text
-funcToText f = T.pack (printf "%s (%s)" (C.fhName f) (C.prettyAddress (C.fhAddress f)))
+funcToText f =
+  docText (PP.pretty (C.fhName f) PP.<+> PP.parens (C.prettyAddress (C.fhAddress f)))
 
 renderFuncItem :: (C.Architecture arch s) => B.AttrName -> Bool -> C.FunctionHandle arch s -> B.Widget Names
 renderFuncItem focAttr isFocused f =

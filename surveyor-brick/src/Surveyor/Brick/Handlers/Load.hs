@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -17,12 +16,10 @@ import           Data.Parameterized.Some ( Some(..) )
 import           Data.Proxy ( Proxy(..) )
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import qualified Data.Text.Prettyprint.Doc as PP
-import qualified Data.Text.Prettyprint.Doc.Render.Text as PPT
+import           Numeric ( showHex )
+import qualified Prettyprinter as PP
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
-import           Text.Printf ( printf )
-
 
 import           Surveyor.Brick.Attributes ( focusedListAttr )
 import qualified Surveyor.Brick.Command as BC
@@ -45,7 +42,7 @@ handleLoadEvent s0 evt =
   case evt of
     C.AnalysisFinished (C.SomeResult bar) diags -> do
       let newDiags = map (\d -> T.pack ("Analysis: " ++ show d)) diags
-          notification = "Finished loading file"
+      let notification = T.pack "Finished loading file"
       s1 <- liftIO $ stateFromAnalysisResult s0 bar (Seq.fromList newDiags <> Seq.singleton notification) C.Ready (C.SomeUIMode C.Diags)
       B.continue (C.State s1)
     C.AnalysisProgress (C.SomeResult bar) -> do
@@ -53,26 +50,26 @@ handleLoadEvent s0 evt =
       B.continue (C.State s1)
     C.AnalysisFailure exn -> do
       liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "Analysis Failure"
-                                          , C.logText = [PPT.renderStrict (PP.layoutCompact ("Analysis failure:" PP.<+> PP.viaShow exn))]
+                                          , C.logSource = C.EventHandler (T.pack "Analysis Failure")
+                                          , C.logText = [PP.pretty "Analysis failure:" PP.<+> PP.viaShow exn]
                                           })
       B.continue $! C.State s0
     C.ErrorLoadingELFHeader off msg -> do
       liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "ELF Loader"
-                                          , C.logText = [T.pack (printf "ELF Loading error at offset 0x%x: %s" off msg)]
+                                          , C.logSource = C.EventHandler (T.pack "ELF Loader")
+                                          , C.logText = [PP.pretty "ELF Loading error at offset 0x" <> PP.pretty (showHex off "") <> PP.pretty ": " <> PP.pretty msg]
                                           })
       B.continue $! C.State s0
     C.ErrorLoadingELF errs -> do
       liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "ELF Loader"
-                                          , C.logText = map (\d -> PPT.renderStrict (PP.layoutCompact ("ELF Loading error:" PP.<+> PP.viaShow d))) errs
+                                          , C.logSource = C.EventHandler (T.pack "ELF Loader")
+                                          , C.logText = map (\d -> PP.pretty "ELF Loading error:" PP.<+> PP.viaShow d) errs
                                           })
       B.continue $! C.State s0
     C.ErrorLoadingLLVM s -> do
       liftIO $ C.logMessage s0 (C.msgWith { C.logLevel = C.Error
-                                          , C.logSource = C.EventHandler "LLVM Loader"
-                                          , C.logText = [PPT.renderStrict (PP.layoutCompact ("Error loading LLVM bitcode:" PP.<+> PP.pretty s))]
+                                          , C.logSource = C.EventHandler (T.pack "LLVM Loader")
+                                          , C.logText = [PP.pretty "Error loading LLVM bitcode:" PP.<+> PP.pretty s]
                                           })
       B.continue $! C.State s0
     C.LoadFile filename -> do
@@ -140,7 +137,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
   let appendTextLog ls t = do
         msg <- C.timestamp (C.msgWith { C.logText = [t], C.logSource = C.Loader })
         return (C.appendLog msg ls)
-  nextLogStore <- F.foldlM appendTextLog (C.sLogStore s0) newDiags
+  nextLogStore <- F.foldlM appendTextLog (C.sLogStore s0) (fmap PP.pretty newDiags)
   sem <- SEM.symbolicExecutionManager (C.sNonceGenerator s0) (Some (C.Configuring ses))
   return C.S { C.sLogStore = nextLogStore
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
@@ -197,7 +194,7 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              }
   where
     addrParser s = C.SomeAddress (C.archNonce ares) <$> C.parseAddress s
-    uiExt = SBE.BrickUIExtension { SBE.sMinibuffer = MB.minibuffer addrParser (SBE.updateMinibufferCompletions (C.sEmitEvent s0) (C.archNonce ares)) MinibufferEditor MinibufferCompletionList "M-x" (C.allCommands ++ BC.extraCommands)
+    uiExt = SBE.BrickUIExtension { SBE.sMinibuffer = MB.minibuffer addrParser (SBE.updateMinibufferCompletions (C.sEmitEvent s0) (C.archNonce ares)) MinibufferEditor MinibufferCompletionList (T.pack "M-x") (C.allCommands ++ BC.extraCommands)
                                  }
 
     keymap = SBK.defaultKeymap (Just (C.archNonce ares))

@@ -94,11 +94,15 @@ renderFunctionViewer _ares cstk fv
 
 renderNode :: (C.IR arch s) => Bool -> C.Block arch s -> B.Widget Names
 renderNode isFocused b =
-  xfrm $ B.vBox [ B.txt (C.prettyAddress (C.blockAddress b))
-                , B.txt (PPT.renderStrict (PP.layoutCompact ("(" PP.<+> PP.pretty (length (C.blockInstructions b)) PP.<+> ")")))
+  xfrm $ B.vBox [ bDoc (C.prettyAddress (C.blockAddress b))
+                , bDoc (PP.parens (PP.pretty (length (C.blockInstructions b))))
                 ]
   where
     xfrm = if isFocused then B.withAttr B.listSelectedFocusedAttr else id
 
 renderEdge :: () -> B.Widget Names
 renderEdge _el = B.emptyWidget
+
+-- | Render a doc as a Brick widget
+bDoc :: PP.Doc ann -> B.Widget names
+bDoc d = B.txt (PPT.renderStrict (PP.layoutCompact d))

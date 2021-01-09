@@ -6,7 +6,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -62,12 +61,12 @@ import qualified Lang.Crucible.Simulator as CS
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Lang.Crucible.Simulator.GlobalState as LCSG
 import qualified Lang.Crucible.Types as CT
+import qualified Prettyprinter as PP
 import           System.FilePath ( (</>) )
 import qualified System.FilePath as SFP
 import qualified Text.LLVM as LL
 import qualified Text.LLVM.PP as LL
 import qualified Text.PrettyPrint.HughesPJ as TPP
-import           Text.Printf ( printf )
 import qualified What4.Expr.Builder as WEB
 import qualified What4.FunctionName as WFN
 import qualified What4.Interface as WI
@@ -322,16 +321,23 @@ instance IR LLVM s where
       LL.Effect {} -> Nothing
   prettyOperand (LLVMAddress _addr) (LLVMOperand val) =
     let ?config = llvmConfig
-    in T.pack (show (ppOperand val)) -- T.pack (show (LL.ppValue val))
+    in PP.viaShow (ppOperand val)
   prettyAddress (LLVMAddress addr) =
     case addr of
-      FunctionAddr (LL.Symbol name) -> T.pack name
+      FunctionAddr (LL.Symbol name) -> PP.pretty name
       BlockAddr (FunctionAddr (LL.Symbol name)) l ->
-        T.pack (printf "%s%s" name (maybe "" (("@"++) . show . LL.ppLabel) l))
-      InsnAddr (BlockAddr (FunctionAddr (LL.Symbol name)) l) i -> T.pack (printf "%s%s:%d" name (maybe "" (("@"++) . show . LL.ppLabel) l) i)
+        let ldoc = fromMaybe mempty $ do
+                              lab <- l
+                              return (PP.pretty "@" <> PP.viaShow (LL.ppLabel lab))
+        in PP.pretty name <> ldoc
+      InsnAddr (BlockAddr (FunctionAddr (LL.Symbol name)) l) i ->
+        let ldoc = fromMaybe mempty $ do
+              lab <- l
+              return (PP.pretty "@" <> PP.viaShow (LL.ppLabel lab))
+        in PP.pretty name <> ldoc <> PP.pretty ":" <> PP.pretty i
   prettyInstruction _ (LLVMInstruction stmt) =
     let ?config = llvmConfig
-    in T.pack (show (LL.ppStmt stmt))
+    in PP.viaShow (LL.ppStmt stmt)
   opcode (LLVMInstruction stmt) =
     case stmt of
       LL.Result _ i _ -> LLVMOpcode i
@@ -456,41 +462,41 @@ instance AC.CrucibleExtension LLVM where
   -- FIXME: Figure out which kinds of LLVM-specific operands can be selected
   extensionOperandSelectable _ _ = False
 
-prettyLLVMExtensionOperand :: CrucibleLLVMOperand arch s -> T.Text
+prettyLLVMExtensionOperand :: CrucibleLLVMOperand arch s -> PP.Doc ann
 prettyLLVMExtensionOperand o =
   case o of
-    Alignment a -> T.pack (show (CLDL.fromAlignment a))
-    StringLiteral s -> T.pack (show s)
-    StorageType t -> T.pack (show t)
-    Bytes b -> T.pack (show b)
-    GlobalSymbol sym -> T.pack (show sym)
+    Alignment a -> PP.viaShow (CLDL.fromAlignment a)
+    StringLiteral s -> PP.dquotes (PP.pretty s)
+    StorageType t -> PP.viaShow t
+    Bytes b -> PP.viaShow b
+    GlobalSymbol sym -> PP.viaShow sym
 
-prettyLLVMStmt :: CCE.StmtExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp -> T.Text
+prettyLLVMStmt :: CCE.StmtExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp -> PP.Doc ann
 prettyLLVMStmt s =
   case s of
-    LE.LLVM_PushFrame {} -> "llvm.push-frame"
-    LE.LLVM_PopFrame {} -> "llvm.pop-frame"
-    LE.LLVM_Alloca {} -> "llvm.alloca"
-    LE.LLVM_Load {} -> "llvm.load"
-    LE.LLVM_Store {} -> "llvm.store"
-    LE.LLVM_MemClear {} -> "llvm.mem-clear"
-    LE.LLVM_LoadHandle {} -> "llvm.load-handle"
-    LE.LLVM_ResolveGlobal {} -> "llvm.load-global"
-    LE.LLVM_PtrEq {} -> "llvm.ptr-eq"
-    LE.LLVM_PtrLe {} -> "llvm.ptr-le"
-    LE.LLVM_PtrAddOffset {} -> "llvm.ptr-add-offset"
-    LE.LLVM_PtrSubtract {} -> "llvm.ptr-subtract"
+    LE.LLVM_PushFrame {} -> PP.pretty "llvm.push-frame"
+    LE.LLVM_PopFrame {} -> PP.pretty "llvm.pop-frame"
+    LE.LLVM_Alloca {} -> PP.pretty "llvm.alloca"
+    LE.LLVM_Load {} -> PP.pretty "llvm.load"
+    LE.LLVM_Store {} -> PP.pretty "llvm.store"
+    LE.LLVM_MemClear {} -> PP.pretty "llvm.mem-clear"
+    LE.LLVM_LoadHandle {} -> PP.pretty "llvm.load-handle"
+    LE.LLVM_ResolveGlobal {} -> PP.pretty "llvm.load-global"
+    LE.LLVM_PtrEq {} -> PP.pretty "llvm.ptr-eq"
+    LE.LLVM_PtrLe {} -> PP.pretty "llvm.ptr-le"
+    LE.LLVM_PtrAddOffset {} -> PP.pretty "llvm.ptr-add-offset"
+    LE.LLVM_PtrSubtract {} -> PP.pretty "llvm.ptr-subtract"
 
-prettyLLVMApp :: CCE.ExprExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp -> T.Text
+prettyLLVMApp :: CCE.ExprExtension (LE.LLVM (LE.X86 64)) (C.Reg ctx) tp -> PP.Doc ann
 prettyLLVMApp a =
   case a of
-    LE.LLVM_PointerExpr {} -> "llvm.pointer-expr"
-    LE.LLVM_PointerBlock {} -> "llvm.pointer-block"
-    LE.LLVM_PointerOffset {} -> "llvm.pointer-offset"
-    LE.LLVM_PointerIte {} -> "llvm.pointer-ite"
+    LE.LLVM_PointerExpr {} -> PP.pretty "llvm.pointer-expr"
+    LE.LLVM_PointerBlock {} -> PP.pretty "llvm.pointer-block"
+    LE.LLVM_PointerOffset {} -> PP.pretty "llvm.pointer-offset"
+    LE.LLVM_PointerIte {} -> PP.pretty "llvm.pointer-ite"
     -- FIXME: Probably need to examine the x86.ExtX86 here
-    LE.X86Expr {} -> "llvm.x86-expr"
-    LE.LLVM_SideConditions {} -> "llvm.side-conditions"
+    LE.X86Expr {} -> PP.pretty "llvm.x86-expr"
+    LE.LLVM_SideConditions {} -> PP.pretty "llvm.side-conditions"
 
 
 llvmExtensionExprOperands :: SCAN.NonceCache s ctx
@@ -903,53 +909,53 @@ instrOperands i =
 
 summarizeModule :: LL.Module -> [(T.Text, T.Text)]
 summarizeModule m =
-  [ ("Data Layout", T.pack (show (LL.ppDataLayout (LL.modDataLayout m))))
-  , ("# Globals", T.pack (show (length (LL.modGlobals m))))
-  , ("# Aliases", T.pack (show (length (LL.modAliases m))))
+  [ (T.pack "Data Layout", T.pack (show (LL.ppDataLayout (LL.modDataLayout m))))
+  , (T.pack "# Globals", T.pack (show (length (LL.modGlobals m))))
+  , (T.pack "# Aliases", T.pack (show (length (LL.modAliases m))))
   ]
 
-ppOpcode :: LL.Instr -> T.Text
+ppOpcode :: LL.Instr -> PP.Doc ann
 ppOpcode i =
   case i of
-    LL.Ret {} -> "ret"
-    LL.RetVoid -> "ret"
-    LL.Call False _ _ _ -> "call"
-    LL.Call True _ _ _ -> "call tail"
-    LL.Invoke {} -> "invoke"
-    LL.Alloca {} -> "alloca"
-    LL.Load {} -> "load"
-    LL.Store {} -> "store"
-    LL.ICmp {} -> "icmp"
-    LL.FCmp {} -> "fcmp"
-    LL.Phi {} -> "phi"
-    LL.GEP False _ _ -> "getelementptr"
-    LL.GEP True _ _ -> "getelementptr inbounds"
-    LL.Select {} -> "select"
-    LL.ExtractValue {} -> "extractvalue"
-    LL.InsertValue {} -> "insertvalue"
-    LL.ExtractElt {} -> "extractelement"
-    LL.InsertElt {} -> "insertelement"
-    LL.ShuffleVector {} -> "shufflevector"
-    LL.Jump {} -> "jump"
-    LL.Br {} -> "br"
-    LL.Comment {} -> "comment"
-    LL.Unreachable {} -> "unreachable"
-    LL.Unwind {} -> "unwind"
-    LL.VaArg {} -> "va_arg"
-    LL.IndirectBr {} -> "indirectbr"
-    LL.Switch {} -> "switch"
-    LL.LandingPad {} -> "landingpad"
-    LL.Resume {} -> "resume"
-    LL.Fence {} -> "fence"
-    LL.CmpXchg {} -> "cmpxchg"
-    LL.AtomicRW {} -> "atomicrw"
-    LL.Arith LL.FAdd _ _ -> "fadd"
-    LL.Arith LL.FSub _ _ -> "fsub"
-    LL.Arith LL.FMul _ _ -> "fmul"
-    LL.Arith LL.FDiv _ _ -> "fdiv"
-    LL.Arith LL.URem _ _ -> "urem"
-    LL.Arith LL.SRem _ _ -> "srem"
-    LL.Arith LL.FRem _ _ -> "frem"
+    LL.Ret {} -> PP.pretty "ret"
+    LL.RetVoid -> PP.pretty "ret"
+    LL.Call False _ _ _ -> PP.pretty "call"
+    LL.Call True _ _ _ -> PP.pretty "call tail"
+    LL.Invoke {} -> PP.pretty "invoke"
+    LL.Alloca {} -> PP.pretty "alloca"
+    LL.Load {} -> PP.pretty "load"
+    LL.Store {} -> PP.pretty "store"
+    LL.ICmp {} -> PP.pretty "icmp"
+    LL.FCmp {} -> PP.pretty "fcmp"
+    LL.Phi {} -> PP.pretty "phi"
+    LL.GEP False _ _ -> PP.pretty "getelementptr"
+    LL.GEP True _ _ -> PP.pretty "getelementptr inbounds"
+    LL.Select {} -> PP.pretty "select"
+    LL.ExtractValue {} -> PP.pretty "extractvalue"
+    LL.InsertValue {} -> PP.pretty "insertvalue"
+    LL.ExtractElt {} -> PP.pretty "extractelement"
+    LL.InsertElt {} -> PP.pretty "insertelement"
+    LL.ShuffleVector {} -> PP.pretty "shufflevector"
+    LL.Jump {} -> PP.pretty "jump"
+    LL.Br {} -> PP.pretty "br"
+    LL.Comment {} -> PP.pretty "comment"
+    LL.Unreachable {} -> PP.pretty "unreachable"
+    LL.Unwind {} -> PP.pretty "unwind"
+    LL.VaArg {} -> PP.pretty "va_arg"
+    LL.IndirectBr {} -> PP.pretty "indirectbr"
+    LL.Switch {} -> PP.pretty "switch"
+    LL.LandingPad {} -> PP.pretty "landingpad"
+    LL.Resume {} -> PP.pretty "resume"
+    LL.Fence {} -> PP.pretty "fence"
+    LL.CmpXchg {} -> PP.pretty "cmpxchg"
+    LL.AtomicRW {} -> PP.pretty "atomicrw"
+    LL.Arith LL.FAdd _ _ -> PP.pretty "fadd"
+    LL.Arith LL.FSub _ _ -> PP.pretty "fsub"
+    LL.Arith LL.FMul _ _ -> PP.pretty "fmul"
+    LL.Arith LL.FDiv _ _ -> PP.pretty "fdiv"
+    LL.Arith LL.URem _ _ -> PP.pretty "urem"
+    LL.Arith LL.SRem _ _ -> PP.pretty "srem"
+    LL.Arith LL.FRem _ _ -> PP.pretty "frem"
     LL.Arith (LL.Add nuw nsw) _ _ -> binOverflow "add" nuw nsw
     LL.Arith (LL.Sub nuw nsw) _ _ -> binOverflow "sub" nuw nsw
     LL.Arith (LL.Mul nuw nsw) _ _ -> binOverflow "mul" nuw nsw
@@ -958,32 +964,32 @@ ppOpcode i =
     LL.Bit (LL.Shl nuw nsw) _ _ -> binOverflow "shl" nuw nsw
     LL.Bit (LL.Lshr exact) _ _ -> binExact "lshr" exact
     LL.Bit (LL.Ashr exact) _ _ -> binExact "ashr" exact
-    LL.Bit LL.And _ _ -> "and"
-    LL.Bit LL.Or _ _ -> "or"
-    LL.Bit LL.Xor _ _ -> "xor"
-    LL.Conv LL.Trunc _ _ -> "trunc"
-    LL.Conv LL.ZExt _ _ -> "zext"
-    LL.Conv LL.SExt _ _ -> "sext"
-    LL.Conv LL.FpTrunc _ _ -> "fptrunc"
-    LL.Conv LL.FpExt _ _ -> "fpext"
-    LL.Conv LL.FpToUi _ _ -> "fptoui"
-    LL.Conv LL.FpToSi _ _ -> "fptosi"
-    LL.Conv LL.UiToFp _ _ -> "uitofp"
-    LL.Conv LL.SiToFp _ _ -> "uitosp"
-    LL.Conv LL.PtrToInt _ _ -> "ptrtoint"
-    LL.Conv LL.IntToPtr _ _ -> "inttoptr"
-    LL.Conv LL.BitCast _ _ -> "bitcast"
+    LL.Bit LL.And _ _ -> PP.pretty "and"
+    LL.Bit LL.Or _ _ -> PP.pretty "or"
+    LL.Bit LL.Xor _ _ -> PP.pretty "xor"
+    LL.Conv LL.Trunc _ _ -> PP.pretty "trunc"
+    LL.Conv LL.ZExt _ _ -> PP.pretty "zext"
+    LL.Conv LL.SExt _ _ -> PP.pretty "sext"
+    LL.Conv LL.FpTrunc _ _ -> PP.pretty "fptrunc"
+    LL.Conv LL.FpExt _ _ -> PP.pretty "fpext"
+    LL.Conv LL.FpToUi _ _ -> PP.pretty "fptoui"
+    LL.Conv LL.FpToSi _ _ -> PP.pretty "fptosi"
+    LL.Conv LL.UiToFp _ _ -> PP.pretty "uitofp"
+    LL.Conv LL.SiToFp _ _ -> PP.pretty "uitosp"
+    LL.Conv LL.PtrToInt _ _ -> PP.pretty "ptrtoint"
+    LL.Conv LL.IntToPtr _ _ -> PP.pretty "inttoptr"
+    LL.Conv LL.BitCast _ _ -> PP.pretty "bitcast"
 
-binExact :: String -> Bool -> T.Text
+binExact :: String -> Bool -> PP.Doc ann
 binExact opc exact =
-  T.pack (printf "%s%s" opc exact')
+  PP.pretty opc <> PP.pretty exact'
   where
     exact' :: String
     exact' = if exact then " exact" else ""
 
-binOverflow :: String -> Bool -> Bool -> T.Text
+binOverflow :: String -> Bool -> Bool -> PP.Doc ann
 binOverflow opc nuw nsw =
-  T.pack (printf "%s%s%s" opc nuw' nsw')
+  PP.pretty opc <> PP.pretty nuw' <> PP.pretty nsw'
   where
     nuw' :: String
     nuw' = if nuw then " nuw" else ""
@@ -1111,8 +1117,8 @@ llvmArchNonceNames baseName symRep ctxRep re
   , Ctx.Empty Ctx.:> CT.BVRepr _wrep <- ctxRep =
       case CS.regValue re of
         LLM.LLVMPointer blockId offsetVal ->
-          catMaybes [ NamedTerm <$> nonceOf blockId <*> pure (baseName <> "_BlockID")
-                    , NamedTerm <$> nonceOf offsetVal <*> pure (baseName <> "_Offset")
+          catMaybes [ NamedTerm <$> nonceOf blockId <*> pure (baseName <> T.pack "_BlockID")
+                    , NamedTerm <$> nonceOf offsetVal <*> pure (baseName <> T.pack "_Offset")
                     ]
   | otherwise = []
 
