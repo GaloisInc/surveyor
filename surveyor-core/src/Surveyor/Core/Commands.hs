@@ -399,10 +399,10 @@ startSymbolicExecutionC =
     callback :: Callback s st '[]
     callback customEventChan (AR.SomeState state) PL.Nil
       | nonce <- state ^. CS.lNonce
-      , Just (Some (SymEx.Initializing symExecState)) <- curSymExState state
+      , Just (Some (SymEx.Initializing symExecState initialRegs)) <- curSymExState state
       , Just archState <- state ^. CS.lArchState = do
           let ares = archState ^. CS.lAnalysisResult
-          SCE.emitEvent customEventChan (SCE.StartSymbolicExecution nonce ares symExecState)
+          SCE.emitEvent customEventChan (SCE.StartSymbolicExecution nonce ares symExecState initialRegs)
       | otherwise =
           CS.logMessage state (SCL.msgWith { SCL.logText = ["Wrong state for starting symbolic execution"]
                                            , SCL.logLevel = SCL.Error

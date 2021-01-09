@@ -79,11 +79,11 @@ handleSymbolicExecutionEvent s0 evt =
           return (SCS.State s1)
       | otherwise -> return (SCS.State s0)
 
-    SCE.StartSymbolicExecution archNonce ares symState
+    SCE.StartSymbolicExecution archNonce ares symState initialRegs
       | Just PC.Refl <- PC.testEquality archNonce (s0 ^. SCS.lNonce) -> do
         let eventChan = s0 ^. SCS.lEventChannel
         let ng = s0 ^. SCS.lNonceGenerator
-        (newState, executionLoop) <- liftIO $ SymEx.startSymbolicExecution ng archNonce eventChan ares symState
+        (newState, executionLoop) <- liftIO $ SymEx.startSymbolicExecution ng archNonce eventChan ares symState initialRegs
         task <- liftIO $ A.async $ do
           inspectState <- executionLoop
           let updateUIMode () st =
@@ -262,9 +262,6 @@ makeSuspendedState s0 archState archNonce sessionID simState reason resumeAction
                                      , SES.withSymConstraints = \x -> x
                                      , SES.someCFG = LCCC.SomeCFG parentFrameCFG
                                      , SES.symbolicGlobals = topFrame ^. LCSET.gpGlobals
-                                     -- FIXME: Factor this out from here
-                                     -- - we don't need it in this case
-                                     , SES.symbolicRegs = error "Initial symbolic regs"
                                      }
     let msg = SCL.msgWith { SCL.logText = [T.pack "Making a suspended state"]
                           }

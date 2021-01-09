@@ -347,7 +347,7 @@ symbolicExecutionConfig :: SymbolicExecutionState arch s k -> SymbolicExecutionC
 symbolicExecutionConfig s =
   case s of
     Configuring c -> c
-    Initializing s' -> symbolicConfig s'
+    Initializing s' _initRegs -> symbolicConfig s'
     Executing s' -> executionConfig s'
     Inspecting _ s' _ -> symbolicConfig s'
     Suspended _ s' -> symbolicConfig (suspendedSymState s')
@@ -386,11 +386,10 @@ initializingSymbolicExecution gen symExConfig@(SymbolicExecutionConfig _sid solv
     let state = SymbolicState { symbolicConfig = symExConfig
                               , symbolicBackend = sym
                               , someCFG = scfg
-                              , symbolicRegs = regs
                               , symbolicGlobals = globals
                               , withSymConstraints = \a -> a
                               }
-    return (Initializing state)
+    return (Initializing state regs)
 
 -- | Set up the rest of the initial state for the symbolic execution engine and
 -- return an action that runs the symbolic execution loop.
@@ -410,10 +409,11 @@ startSymbolicExecution :: ( CA.Architecture arch s
                        -> SCC.Chan (SCE.Events s st)
                        -> CA.AnalysisResult arch s
                        -> SymbolicState arch s sym init reg
+                       -> Ctx.Assignment (LMCR.RegEntry sym) init
                        -> IO ( SymbolicExecutionState arch s Execute
                              , IO (SymbolicExecutionState arch s Inspect)
                              )
-startSymbolicExecution ng archNonce eventChan ares st =
+startSymbolicExecution ng archNonce eventChan ares st initRegs =
   case someCFG st of
     CCC.SomeCFG cfg -> withSymConstraints st $ do
       let sym = symbolicBackend st
@@ -422,7 +422,7 @@ startSymbolicExecution ng archNonce eventChan ares st =
       (intrinsicTypes, halloc, boundFuncs, extImpl, personality) <- CA.symbolicInitializers ares sym
       let ctx = CS.initSimContext sym intrinsicTypes halloc writeH boundFuncs extImpl personality
       let globals = symbolicGlobals st
-      let action = CS.regValue <$> CS.callCFG cfg (CS.RegMap (symbolicRegs st))
+      let action = CS.regValue <$> CS.callCFG cfg (CS.RegMap initRegs)
       let econt = CS.runOverrideSim retRep action
       let simulatorState0 = CS.InitialState ctx globals CS.defaultAbortHandler retRep econt
 
