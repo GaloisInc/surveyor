@@ -47,7 +47,6 @@ data SymbolicState arch s sym init reg =
   SymbolicState { symbolicConfig :: SymbolicExecutionConfig s
                 , symbolicBackend :: sym
                 , someCFG :: CCC.SomeCFG (CA.CrucibleExt arch) init reg
-                , symbolicRegs :: Ctx.Assignment (CS.RegEntry sym) init
                 , symbolicGlobals :: CS.SymGlobalState sym
                 , withSymConstraints :: forall a . (CB.IsSymInterface sym) => a -> a
                 }
@@ -74,6 +73,8 @@ data SymbolicExecutionState arch s (k :: SymExK) where
   -- variables and other memory objects.
   Initializing :: (CB.IsSymInterface sym, sym ~ WEB.ExprBuilder s state fs)
                => SymbolicState arch s sym init reg
+               -> Ctx.Assignment (CS.RegEntry sym) init
+               -- ^ Initial symbolic values for starting the simulator
                -> SymbolicExecutionState arch s SetupArgs
   -- | Holds the state of the symbolic execution engine while it is executing.
   -- This includes incremental metrics and output, as well as the means to
@@ -171,9 +172,9 @@ instance NFData (SymbolicExecutionState arch s k) where
   rnf s =
     case s of
       Configuring cfg -> cfg `deepseq` ()
-      Initializing symState ->
+      Initializing symState initRegs ->
         -- We can't really make a meaningful instance for this one
-        symState `seq` ()
+        symState `seq` initRegs `seq` ()
       Executing progress -> progress `deepseq` ()
       Inspecting metrics symState res -> metrics `seq` symState `seq` res `seq` ()
       Suspended _ symState -> symState `seq` ()

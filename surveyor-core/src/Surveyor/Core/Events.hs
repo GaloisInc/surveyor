@@ -25,6 +25,7 @@ import qualified Data.ElfEdit as E
 import qualified Data.Functor.Identity as I
 import           Data.Int ( Int64 )
 import           Data.Kind ( Type )
+import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Text as T
@@ -114,6 +115,7 @@ data SymbolicExecutionEvent s st where
                          => PN.Nonce s arch
                          -> A.AnalysisResult arch s
                          -> SES.SymbolicState arch s sym init reg
+                         -> Ctx.Assignment (LMCR.RegEntry sym) init
                          -> SymbolicExecutionEvent s st
   ReportSymbolicExecutionMetrics :: CSS.SessionID s -> CSP.Metrics I.Identity -> SymbolicExecutionEvent s st
   -- | Prompt the user for the name for the currently-selected value (which is

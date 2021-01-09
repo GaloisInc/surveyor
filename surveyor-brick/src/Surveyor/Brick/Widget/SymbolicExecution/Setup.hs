@@ -16,7 +16,7 @@ import qualified Surveyor.Core as C
 
 renderSymbolicExecutionSetup :: C.SymbolicExecutionState arch s C.SetupArgs
                              -> B.Widget Names
-renderSymbolicExecutionSetup (C.Initializing st) =
+renderSymbolicExecutionSetup (C.Initializing st _initRegs) =
   B.vBox [ B.hBox [ B.txt "Solver: ", B.txt (T.pack (show solver))
                   , B.padLeft (B.Pad 10) (B.txt "Float Mode: ")
                   , B.txt (T.pack (show fm))
