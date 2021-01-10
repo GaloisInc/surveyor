@@ -73,7 +73,7 @@ selectedValue :: (sym ~ WEB.ExprBuilder s st fs) => ValueViewer s sym -> Maybe (
 selectedValue (ValueViewer vs) = do
   (_ix, RenderWidget { rwValue = mval }) <- BL.listSelectedElement (valueList vs)
   val <- mval
-  return (Some (LMCR.RegEntry (LCT.baseToType (WEB.exprType val)) val))
+  return val
 
 
 -- | A widget state backing the value viewer; it existentially quantifies away
@@ -113,10 +113,9 @@ valueViewer tp re =
 -- values that can have nonces are base types (thus our nonces are restricted to
 -- having base types)
 data RenderWidget sym =
-  forall tp .
   RenderWidget { rwRendering :: Rendering
                , _rwLocation :: Maybe WPL.ProgramLoc
-               , rwValue :: Maybe (WI.SymExpr sym tp)
+               , rwValue :: Maybe (Some (LMCR.RegEntry sym))
                }
 
 -- | Mark widgets as either being rendered inline in operand positions or as
@@ -402,7 +401,9 @@ inlineLoc :: (Monad m, sym ~ WEB.ExprBuilder t st fs)
           -> B.Widget Names
           -> m (RenderWidget sym)
 inlineLoc e w =
-  return (RenderWidget (RenderInline w) (Just (WEB.exprLoc e)) (Just e))
+  return (RenderWidget (RenderInline w) (Just (WEB.exprLoc e)) (Just regEntry))
+  where
+    regEntry = Some (LMCR.RegEntry (LCT.baseToType (WEB.exprType e)) e)
 
 renderCoefficient :: (Monad m) => SR.SemiRingRepr sr -> SR.Coefficient sr -> m (B.Widget n)
 renderCoefficient srep coeff =
@@ -511,9 +512,10 @@ bindExpr :: (HasNonce e, sym ~ WEB.ExprBuilder t st fs)
          -> B.Widget Names
          -> ViewerBuilder t sym (RenderWidget sym)
 bindExpr ae w =
-  returnCached (getNonce ae) $! RenderWidget (RenderBound (thisRef ae) w) (Just (getLoc ae)) (Just re)
+  returnCached (getNonce ae) $! RenderWidget (RenderBound (thisRef ae) w) (Just (getLoc ae)) (Just regEntry)
   where
     re = getSymExpr ae
+    regEntry = Some (LMCR.RegEntry (LCT.baseToType (WI.exprType re)) re)
 
 returnCached :: forall s sym (tp :: WT.BaseType)
               . PN.Nonce s tp
@@ -560,12 +562,22 @@ renderValueViewer viewerFocused valNames (ValueViewer vs) =
                       , B.str (show (WPL.plSourceLoc loc))
                       ]
 
-renderValueName :: Maybe (WEB.Expr s tp)
+asExpr :: (sym ~ WEB.ExprBuilder s st fs)
+       => LMCR.RegEntry sym tp
+       -> Maybe (Some (WEB.Expr s))
+asExpr entry =
+  case LCT.asBaseType (LMCR.regType entry) of
+    LCT.AsBaseType {} -> Just (Some (LMCR.regValue entry))
+    LCT.NotBaseType -> Nothing
+
+renderValueName :: (sym ~ WEB.ExprBuilder s st fs)
+                => Maybe (Some (LMCR.RegEntry sym))
                 -> C.ValueNameMap s
                 -> B.Widget n
-renderValueName mval valNames = fromMaybe B.emptyWidget $ do
-  val <- mval
-  nonce <- exprNonce val
+renderValueName mEntry valNames = fromMaybe B.emptyWidget $ do
+  Some entry <- mEntry
+  Some expr <- asExpr entry
+  nonce <- exprNonce expr
   name <- C.lookupValueName nonce valNames
   return (B.hBox [B.txt "[", B.txt name, B.txt "]"])
 
