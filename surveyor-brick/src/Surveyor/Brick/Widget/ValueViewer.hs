@@ -8,6 +8,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 -- | A viewer for Crucible run-time values (RegEntries)
 module Surveyor.Brick.Widget.ValueViewer (
@@ -20,10 +22,13 @@ module Surveyor.Brick.Widget.ValueViewer (
 
 import qualified Brick as B
 import qualified Brick.Widgets.List as BL
-import           Control.Lens ( (^.) )
+import           Control.Lens ( (^.), (&), (%~) )
+import qualified Control.Lens as L
 import qualified Control.Monad.State.Strict as St
 import qualified Data.BitVector.Sized as DBS
 import qualified Data.List as L
+import qualified Data.List.NonEmpty as DLN
+import qualified Data.Map.Strict as Map
 import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
@@ -51,10 +56,68 @@ import qualified What4.Utils.StringLiteral as WUS
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
 
+-- | Mark widgets as either being rendered inline in operand positions or as
+-- generating a binding that will be referred to by a number in an operand
+-- position
+data Rendering = RenderInline (B.Widget Names)
+               | RenderBound (B.Widget Names) (B.Widget Names)
+
+-- | A wrapper around a 'Rendering' that (possibly) includes program location
+-- information.
+--
+-- It also includes the term that generated it, with the intention that we need
+-- to be able to pull out terms to feed back into the 'ValueViewer' based on
+-- user selections.  NOTE that users can only name/select bound values, which
+-- are bound values by virtue of having a unique nonce identifier.  All of the
+-- values that can have nonces are base types (thus our nonces are restricted to
+-- having base types)
+data RenderWidget sym =
+  RenderWidget { rwRendering :: Rendering
+               , _rwLocation :: Maybe WPL.ProgramLoc
+               , rwValue :: Maybe (Some (LMCR.RegEntry sym))
+               }
+
+-- | This is a simple wrapper around a 'RenderWidget' to throw away a type
+-- parameter so that we can store it in a 'MapF.MapF'.  We need a custom type
+-- instead of just using 'Data.Functor.Const' because that type is too
+-- polymorphic and causes some type inference problems.
+newtype ConstWidget sym (tp :: WT.BaseType) = ConstWidget (RenderWidget sym)
+
+-- This is a very simple wrapper around the 'WEB.Expr' type arranged so that we
+-- can use them as surrogate keys in the cache.  The challenge is that we can't
+-- expose the ExprBuilder in the type (without propagating it everywhere), but
+-- we need it in order to get an Ord instance in scope.  Instead, we capture
+-- that equality in an existential, which is enough to let us derive Eq/Ord.
+data SymExpr s sym where
+  SymExpr :: (sym ~ WEB.ExprBuilder s st fs) => Some (WEB.Expr s) -> SymExpr s sym
+
+deriving instance Eq (SymExpr s sym)
+deriving instance Ord (SymExpr s sym)
+
+-- | A cache of pre-rendered widgets
+--
+-- Re-rendering some widgets is costly (and we need to avoid it to preserve
+-- sharing), so we cache them.  The cache is usually keyed by nonces
+-- ('cachedByNonce').  However, values of non-base type do not have nonces, so
+-- we need to cache them via *surrogate keys*.  Surrogate keys are simply
+-- collections of the nonces of their constituent base type components.  The
+-- caches could be unified on a sum type for keys, but keeping them separate is
+-- more efficient for the common case (of nonce lookups)
+data Cache s sym =
+  Cache { _cachedByNonce :: !(MapF.MapF (PN.Nonce s) (ConstWidget sym))
+        , _cachedBySurrogate :: !(Map.Map (DLN.NonEmpty (SymExpr s sym)) (RenderWidget sym))
+        , _surrogateIdentifiers :: !Int
+        }
+
+emptyCache :: Cache s sym
+emptyCache = Cache MapF.empty mempty 0
+
+L.makeLenses ''Cache
+
 data ValueViewerState s sym tp =
   ValueViewerState { regType :: LCT.TypeRepr tp
                    , regValue :: LCSR.RegValue sym tp
-                   , cache :: MapF.MapF (PN.Nonce s) (ConstWidget sym)
+                   , cache :: Cache s sym
                    -- ^ Previous translations of terms into widgets, cached to
                    -- avoid recomputation
                    , rootWidget :: B.Widget Names
@@ -101,28 +164,7 @@ valueViewer :: forall sym tp s st fs
             -> LCSR.RegValue sym tp
             -> ValueViewer s sym
 valueViewer tp re =
-  St.evalState (unViewBuilder (buildViewer tp re)) MapF.empty
-
--- | A wrapper around a 'Rendering' that (possibly) includes program location
--- information.
---
--- It also includes the term that generated it, with the intention that we need
--- to be able to pull out terms to feed back into the 'ValueViewer' based on
--- user selections.  NOTE that users can only name/select bound values, which
--- are bound values by virtue of having a unique nonce identifier.  All of the
--- values that can have nonces are base types (thus our nonces are restricted to
--- having base types)
-data RenderWidget sym =
-  RenderWidget { rwRendering :: Rendering
-               , _rwLocation :: Maybe WPL.ProgramLoc
-               , rwValue :: Maybe (Some (LMCR.RegEntry sym))
-               }
-
--- | Mark widgets as either being rendered inline in operand positions or as
--- generating a binding that will be referred to by a number in an operand
--- position
-data Rendering = RenderInline (B.Widget Names)
-               | RenderBound (B.Widget Names) (B.Widget Names)
+  St.evalState (unViewBuilder (buildViewer tp re)) emptyCache
 
 renderedWidget :: RenderWidget sym -> B.Widget Names
 renderedWidget rw =
@@ -130,19 +172,16 @@ renderedWidget rw =
     RenderInline w -> w
     RenderBound _name w -> w
 
--- | This is a simple wrapper around a 'RenderWidget' to throw away a type
--- parameter so that we can store it in a 'MapF.MapF'.  We need a custom type
--- instead of just using 'Data.Functor.Const' because that type is too
--- polymorphic and causes some type inference problems.
-newtype ConstWidget sym (tp :: WT.BaseType) = ConstWidget (RenderWidget sym)
-
+-- | A Monad for building 'ValueViewer' sub-widgets
+--
+-- This is just a state monad over the cache
 newtype ViewerBuilder s sym a =
-  ViewerBuilder { unViewBuilder :: St.State (MapF.MapF (PN.Nonce s) (ConstWidget sym)) a
+  ViewerBuilder { unViewBuilder :: St.State (Cache s sym) a
                 }
   deriving ( Functor
            , Monad
            , Applicative
-           , St.MonadState (MapF.MapF (PN.Nonce s) (ConstWidget sym))
+           , St.MonadState (Cache s sym)
            )
 
 -- | Build a 'ValueViewer' by traversing the value and building brick widgets as
@@ -159,8 +198,15 @@ buildViewer tp re = do
   -- We'll use this same primitive for rendering later, but then we'll start it
   -- with a primed cache
   root <- buildTermWidget tp re
+  nonceEntries <- St.gets (^. cachedByNonce)
+  surrogateEntries <- St.gets (^. cachedBySurrogate)
   c <- St.get
-  let vals = DV.fromList ([ w | MapF.Pair _ (ConstWidget w) <- MapF.toList c ] ++ [root])
+  -- FIXME: It would be really nice to sort these in dependency order; being
+  -- split between two caches, entries could be interleaved oddly
+  let cachedVals = concat [ [ w | MapF.Pair _ (ConstWidget w) <- MapF.toList nonceEntries ]
+                          , [ w | (_, w) <- Map.toList surrogateEntries ]
+                          ]
+  let vals = DV.fromList (if null cachedVals then [root] else cachedVals)
   let vvs = ValueViewerState { regType = tp
                              , regValue = re
                              , cache = c
@@ -183,9 +229,16 @@ buildTermWidget tp re =
         CLM.LLVMPointerRepr _w ->
           case re of
             CLM.LLVMPointer base off -> do
-              base' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType base)) base
-              off' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType off)) off
-              inline (intersperse [B.txt "llvmPointer", base', off'])
+              let key = SymExpr (Some base) DLN.:| [SymExpr (Some off)]
+              surrogateCache <- St.gets (^. cachedBySurrogate)
+              case Map.lookup key surrogateCache of
+                Just rw -> return rw
+                Nothing -> do
+                  base' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType base)) base
+                  off' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType off)) off
+                  let rendering = intersperse [B.txt "llvmPointer", base', off']
+                  bindSurrogate key (LMCR.RegEntry tp re) rendering
+                  -- inline (intersperse [B.txt "llvmPointer", base', off'])
         _ -> inline (B.txt ("Unhandled crucible type " <> T.pack (show tp)))
     LCT.AsBaseType _btp ->
       case re of
@@ -202,7 +255,7 @@ buildTermWidget tp re =
           inlineLoc re (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv)))
         WEB.NonceAppExpr nae -> do
           let nonce = WEB.nonceExprId nae
-          m <- St.get
+          m <- St.gets (^. cachedByNonce)
           case MapF.lookup nonce m of
             Just (ConstWidget cached) -> return cached
             Nothing ->
@@ -252,7 +305,7 @@ buildTermWidget tp re =
                                             ])
         WEB.AppExpr ae -> do
           let nonce = WEB.appExprId ae
-          m <- St.get
+          m <- St.gets (^. cachedByNonce)
           case MapF.lookup nonce m of
             Just (ConstWidget cached) -> return cached
             Nothing ->
@@ -517,12 +570,26 @@ bindExpr ae w =
     re = getSymExpr ae
     regEntry = Some (LMCR.RegEntry (LCT.baseToType (WI.exprType re)) re)
 
+bindSurrogate :: DLN.NonEmpty (SymExpr s sym)
+              -> LMCR.RegEntry sym tp
+              -> B.Widget Names
+              -> ViewerBuilder s sym (RenderWidget sym)
+bindSurrogate key entry w = do
+  nextSurrogate <- St.gets (^. surrogateIdentifiers)
+  St.modify' $ \s -> s & surrogateIdentifiers %~ (+1)
+  -- We render these surrogates differently because the numbers come from a
+  -- different namespace
+  let binding = B.str (printf "%%%d" nextSurrogate)
+  let rw = RenderWidget (RenderBound binding w) Nothing (Just (Some entry))
+  St.modify' $ \s -> s & cachedBySurrogate %~ Map.insert key rw
+  return rw
+
 returnCached :: forall s sym (tp :: WT.BaseType)
               . PN.Nonce s tp
              -> RenderWidget sym
              -> ViewerBuilder s sym (RenderWidget sym)
 returnCached nonce res = do
-  St.modify' $ MapF.insert nonce (ConstWidget res)
+  St.modify' $ \s -> s & cachedByNonce %~ MapF.insert nonce (ConstWidget res)
   return res
 
 thisRef :: (HasNonce e) => e t tp -> B.Widget n
