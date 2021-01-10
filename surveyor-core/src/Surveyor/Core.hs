@@ -204,6 +204,7 @@ module Surveyor.Core (
   EA.setEchoAreaText,
   EA.resetEchoArea,
   -- * Handlers
+  module Surveyor.Core.HandlerMonad,
   HC.handleContextEvent,
   HI.handleInfoEvent,
   HL.handleLoggingEvent,
@@ -255,6 +256,7 @@ import qualified Surveyor.Core.Handlers.Info as HI
 import qualified Surveyor.Core.Handlers.Logging as HL
 import qualified Surveyor.Core.Handlers.Debugging as HD
 import qualified Surveyor.Core.Handlers.SymbolicExecution as HS
+import           Surveyor.Core.HandlerMonad
 import qualified Surveyor.Core.IRRepr as IR
 import qualified Surveyor.Core.Keymap as K
 import qualified Surveyor.Core.Loader as CL

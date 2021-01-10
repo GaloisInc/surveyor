@@ -149,7 +149,7 @@ handleCustomEvent s0 evt =
       s1 <- C.handleContextEvent s0 ce
       B.continue s1
     C.DebuggingEvent de -> do
-      s1 <- C.handleDebuggingEvent s0 de
+      s1 <- C.runHandlerT (C.State s0) (C.handleDebuggingEvent s0 de)
       B.continue s1
     C.ExtensionEvent ee -> handleExtensionEvent s0 ee
 
