@@ -48,6 +48,7 @@ library
                        Surveyor.Core.SymbolicExecution.State
                        Surveyor.Core.EchoArea
                        Surveyor.Core.Events
+                       Surveyor.Core.HandlerMonad
                        Surveyor.Core.IRRepr
                        Surveyor.Core.Keymap
                        Surveyor.Core.Loader

@@ -9,16 +9,36 @@ import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.IORef as IOR
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Sequence as Seq
+import qualified Data.Text as T
 import           GHC.Stack ( HasCallStack )
 import qualified Lang.Crucible.Simulator.ExecutionTree as LCSET
 import qualified Prettyprinter as PP
 
 import qualified Surveyor.Core.Architecture as SCA
 import qualified Surveyor.Core.Events as SCE
+import qualified Surveyor.Core.HandlerMonad as SCH
 import qualified Surveyor.Core.Logging as SCL
 import qualified Surveyor.Core.State as SCS
 import qualified Surveyor.Core.SymbolicExecution as SymEx
 import qualified Surveyor.Core.SymbolicExecution.ExecutionFeature as SCEF
+
+noSessionFor :: (MonadIO m) => SCS.S e u arch s -> SymEx.SessionID s -> m ()
+noSessionFor s0 sessionID = do
+  let msg = SCL.msgWithContext { SCL.logText = [ PP.pretty "No session for SessionID " <> PP.pretty sessionID
+                                               ]
+                               , SCL.logSource = SCL.EventHandler (T.pack "Debug")
+                               , SCL.logLevel = SCL.Warn
+                               }
+  liftIO $ SCS.logMessage s0 msg
+
+sessionStateUnexpected :: (MonadIO m) => SCS.S e u arch s -> SymEx.SessionID s -> String -> m ()
+sessionStateUnexpected s0 sessionID expectedState = do
+  let msg = SCL.msgWithContext { SCL.logText = [ PP.pretty "Symbolic execution session is not " <> PP.pretty expectedState <> PP.pretty ": " <> PP.pretty sessionID
+                                               ]
+                               , SCL.logSource = SCL.EventHandler (T.pack "Debug")
+                               , SCL.logLevel = SCL.Warn
+                               }
+  liftIO $ SCS.logMessage s0 msg
 
 handleDebuggingEvent :: ( SCA.Architecture arch s
                         , SCA.CrucibleExtension arch
@@ -27,95 +47,113 @@ handleDebuggingEvent :: ( SCA.Architecture arch s
                         )
                      => SCS.S e u arch s
                      -> SCE.DebuggingEvent s (SCS.S e u)
-                     -> m (SCS.State e u s)
+                     -> SCH.HandlerT (SCS.State e u s) m (SCS.State e u s)
 handleDebuggingEvent s0 evt =
   case evt of
-    SCE.StepExecution sessionID
-      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
-      , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          let msg = SCL.msgWith { SCL.logText = [ PP.pretty "Stepping session " <> PP.pretty sessionID
-                                                ]
-                                }
-          liftIO $ SCS.logMessage s0 msg
-          -- To single step, we set the debug execution feature into its
-          -- monitoring mode, which will cause it to stop at every state and
-          -- send it to surveyor.
-          --
-          -- We then resume execution to restart the process
-          let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
-          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Monitoring)
+    SCE.StepExecution sessionID -> do
+      symExSt <- SCH.expectValue (s0 ^? SCS.lArchState . _Just . SCS.symExStateL)
+      Some symEx <- SCH.expectValueWith (SymEx.lookupSessionState symExSt sessionID) $ do
+        noSessionFor s0 sessionID
 
-          liftIO $ SymEx.suspendedResumeUnmodified suspSt
+      SCH.withFailAction (sessionStateUnexpected s0 sessionID "Suspended") $ do
+        SymEx.Suspended _symNonce suspSt <- return symEx
+        let msg = SCL.msgWith { SCL.logText = [ PP.pretty "Stepping session " <> PP.pretty sessionID
+                                              ]
+                              }
+        liftIO $ SCS.logMessage s0 msg
+        -- To single step, we set the debug execution feature into its
+        -- monitoring mode, which will cause it to stop at every state and
+        -- send it to surveyor.
+        --
+        -- We then resume execution to restart the process
+        let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
+        liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Monitoring)
+        liftIO $ SymEx.suspendedResumeUnmodified suspSt
 
-          switchToExecutingState s0 symEx
+        -- Switch the symbolic execution UI to the executing state
+        switchToExecutingState s0 symEx
 
-          return $! SCS.State s0
-      | otherwise -> return $! SCS.State s0
+        return $! SCS.State s0
 
-    SCE.StepOutExecution sessionID
-      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
-      , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
-          stackDepthRef <- liftIO $ IOR.newIORef 0
-          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState (SCEF.InactiveUntil (stepOutP stackDepthRef)))
-          liftIO $ SymEx.suspendedResumeUnmodified suspSt
-          switchToExecutingState s0 symEx
+    SCE.StepOutExecution sessionID -> do
+      symExSt <- SCH.expectValue (s0 ^? SCS.lArchState . _Just . SCS.symExStateL)
+      Some symEx <- SCH.expectValueWith (SymEx.lookupSessionState symExSt sessionID) $ do
+        noSessionFor s0 sessionID
+      SCH.withFailAction (sessionStateUnexpected s0 sessionID "Suspended") $ do
+        SymEx.Suspended _symNonce suspSt <- return symEx
 
-          return $! SCS.State s0
-      | otherwise -> return $! SCS.State s0
+        let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
+        stackDepthRef <- liftIO $ IOR.newIORef 0
+        liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState (SCEF.InactiveUntil (stepOutP stackDepthRef)))
+        liftIO $ SymEx.suspendedResumeUnmodified suspSt
+        switchToExecutingState s0 symEx
 
-    SCE.ContinueExecution sessionID
-      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
-      , Just (Some symEx@(SymEx.Suspended _symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          let msg = SCL.msgWith { SCL.logText = [ PP.pretty "Stepping session " <> PP.pretty sessionID
-                                                ]
-                                }
-          liftIO $ SCS.logMessage s0 msg
+        return $! SCS.State s0
 
-          let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
-          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Inactive)
-          liftIO $ SymEx.suspendedResumeUnmodified suspSt
+    SCE.ContinueExecution sessionID -> do
+      symExSt <- SCH.expectValue (s0 ^? SCS.lArchState . _Just . SCS.symExStateL)
+      Some symEx <- SCH.expectValueWith (SymEx.lookupSessionState symExSt sessionID) $ do
+        noSessionFor s0 sessionID
+      SCH.withFailAction (sessionStateUnexpected s0 sessionID "Suspended") $ do
+        SymEx.Suspended _symNonce suspSt <- return symEx
+        let msg = SCL.msgWith { SCL.logText = [ PP.pretty "Stepping session " <> PP.pretty sessionID
+                                              ]
+                              }
+        liftIO $ SCS.logMessage s0 msg
 
-          switchToExecutingState s0 symEx
+        let execFeatureStateRef = SymEx.suspendedDebugFeatureConfig suspSt
+        liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Inactive)
+        liftIO $ SymEx.suspendedResumeUnmodified suspSt
 
-          return $! SCS.State s0
-      | otherwise -> return $! SCS.State s0
+        switchToExecutingState s0 symEx
 
-    SCE.InterruptExecution sessionID
-      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
-      , Just (Some (SymEx.Executing progress)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          -- Interrupt execution by switching the monitor on.  The monitor will
-          -- send an event at its next opportunity.  That event will trigger a
-          -- state change to the suspended execution viewer.
-          let execFeatureStateRef = SymEx.executionInterrupt progress
-          liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Monitoring)
+        return $! SCS.State s0
 
-          return $! SCS.State s0
-      | otherwise -> return $! SCS.State s0
 
-    SCE.EnableRecording sessionID
-      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
-      , Just (Some (SymEx.Suspended _ suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          traceRef <- liftIO $ IOR.newIORef mempty
-          _actualRef <- liftIO $ SCEF.modifyDebuggerState (SymEx.suspendedDebugFeatureConfig suspSt) (enableRecording traceRef)
-          return $! SCS.State s0
-      | otherwise -> return $! SCS.State s0
+    SCE.InterruptExecution sessionID -> do
+      symExSt <- SCH.expectValue (s0 ^? SCS.lArchState . _Just . SCS.symExStateL)
+      Some symEx <- SCH.expectValueWith (SymEx.lookupSessionState symExSt sessionID) $ do
+        noSessionFor s0 sessionID
+      SCH.withFailAction (sessionStateUnexpected s0 sessionID "Executing") $ do
+        SymEx.Executing progress <- return symEx
+        -- Interrupt execution by switching the monitor on.  The monitor will
+        -- send an event at its next opportunity.  That event will trigger a
+        -- state change to the suspended execution viewer.
+        let execFeatureStateRef = SymEx.executionInterrupt progress
+        liftIO $ SCEF.modifyDebuggerState execFeatureStateRef (setDebugState SCEF.Monitoring)
 
-    SCE.DisableRecording sessionID
-      | Just symExSt <- s0 ^? SCS.lArchState . _Just . SCS.symExStateL
-      , Just (Some (SymEx.Suspended symNonce suspSt)) <- SymEx.lookupSessionState symExSt sessionID -> do
-          let stateRef = SymEx.suspendedDebugFeatureConfig suspSt
-          liftIO $ SCEF.modifyDebuggerState stateRef disableRecording
-          -- If there are any states that have been recorded, save them into the
-          -- state for review
-          liftIO $ SCEF.withRecordedStates stateRef $ \mstates -> do
-            case mstates of
-              Nothing -> return ()
-              Just recordedStates -> do
-                let suspSt1 = suspSt { SymEx.suspendedHistory = Just (SymEx.RecordedStateLog 0 recordedStates) }
-                liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState (s0 ^. SCS.lNonce) (SymEx.Suspended symNonce suspSt1))
-          return $! SCS.State s0
-      | otherwise -> return $! SCS.State s0
+        return $! SCS.State s0
+
+
+    SCE.EnableRecording sessionID -> do
+      symExSt <- SCH.expectValue (s0 ^? SCS.lArchState . _Just . SCS.symExStateL)
+      Some symEx <- SCH.expectValueWith (SymEx.lookupSessionState symExSt sessionID) $ do
+        noSessionFor s0 sessionID
+      SCH.withFailAction (sessionStateUnexpected s0 sessionID "Suspended") $ do
+        SymEx.Suspended _ suspSt <- return symEx
+        traceRef <- liftIO $ IOR.newIORef mempty
+        _actualRef <- liftIO $ SCEF.modifyDebuggerState (SymEx.suspendedDebugFeatureConfig suspSt) (enableRecording traceRef)
+        return $! SCS.State s0
+
+
+    SCE.DisableRecording sessionID -> do
+      symExSt <- SCH.expectValue (s0 ^? SCS.lArchState . _Just . SCS.symExStateL)
+      Some symEx <- SCH.expectValueWith (SymEx.lookupSessionState symExSt sessionID) $ do
+        noSessionFor s0 sessionID
+      SCH.withFailAction (sessionStateUnexpected s0 sessionID "Suspended") $ do
+        SymEx.Suspended symNonce suspSt <- return symEx
+        let stateRef = SymEx.suspendedDebugFeatureConfig suspSt
+        liftIO $ SCEF.modifyDebuggerState stateRef disableRecording
+        -- If there are any states that have been recorded, save them into the
+        -- state for review
+        liftIO $ SCEF.withRecordedStates stateRef $ \mstates -> do
+          case mstates of
+            Nothing -> return ()
+            Just recordedStates -> do
+              let suspSt1 = suspSt { SymEx.suspendedHistory = Just (SymEx.RecordedStateLog 0 recordedStates) }
+              liftIO $ SCS.sEmitEvent s0 (SCE.UpdateSymbolicExecutionState (s0 ^. SCS.lNonce) (SymEx.Suspended symNonce suspSt1))
+        return $! SCS.State s0
+
 
 enableRecording :: IOR.IORef (Seq.Seq (Some (LCSET.ExecState p sym ext)))
                 -> Some (SCEF.DebuggerFeatureState p sym ext)
