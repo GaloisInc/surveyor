@@ -309,20 +309,12 @@ handleCallStackViewerEvent evt cs0 =
 -- currently-selected top-level value, the value from the ValueViewer is
 -- returned.  Otherwise, the top-level value in the value selector is returned
 -- (if any).
---
--- NOTE: This currently only returns the value selected from the stack frame,
--- and does not fully support picking sub-values out of the ValueViewer.  The
--- infrastructure is in place to support that, but it doesn't seem as useful.
--- With some UI work, it might be easier to surface that capability.
 selectedValue :: (sym ~ WEB.ExprBuilder s st fs) => CallStackViewer arch s sym e -> Maybe (Some (LMCR.RegEntry sym))
 selectedValue csv = do
-  (_, CallStackFrame _cse selForm _viewers _) <- csv ^. frameList . L.to BL.listSelectedElement
-  SBV.selectedValue selForm
-  {-
+  (_, CallStackFrame _cse selForm viewers _) <- csv ^. frameList . L.to BL.listSelectedElement
   Some selValIdx <- SBV.selectedIndex selForm
   case viewers Ctx.! selValIdx of
     WrappedViewer vv ->
       case WVV.selectedValue vv of
         Nothing -> SBV.selectedValue selForm
-        Just sre -> SBV.selectedValue selForm -- return sre
--}
+        Just sre -> return sre
