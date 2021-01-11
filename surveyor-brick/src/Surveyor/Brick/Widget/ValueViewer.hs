@@ -22,7 +22,7 @@ module Surveyor.Brick.Widget.ValueViewer (
 
 import qualified Brick as B
 import qualified Brick.Widgets.List as BL
-import           Control.Lens ( (^.), (&), (%~) )
+import           Control.Lens ( (^.), (&), (%~), (.~) )
 import qualified Control.Lens as L
 import qualified Control.Monad.State.Strict as St
 import qualified Data.BitVector.Sized as DBS
@@ -207,11 +207,12 @@ buildViewer tp re = do
                           , [ w | (_, w) <- Map.toList surrogateEntries ]
                           ]
   let vals = DV.fromList (if null cachedVals then [root] else cachedVals)
+  let l0 = BL.list ValueViewerList vals 1
   let vvs = ValueViewerState { regType = tp
                              , regValue = re
                              , cache = c
                              , rootWidget = renderedWidget root
-                             , valueList = BL.list ValueViewerList vals 1
+                             , valueList = l0 & BL.listSelectedL .~ Nothing
                              }
   return (ValueViewer vvs)
 
