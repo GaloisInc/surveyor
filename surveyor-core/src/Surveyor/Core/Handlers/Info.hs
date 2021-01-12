@@ -3,6 +3,8 @@ module Surveyor.Core.Handlers.Info (
   handleInfoEvent
   ) where
 
+import qualified Control.Concurrent.Async as CCA
+import qualified Control.Exception as X
 import           Control.Lens ( (&), (^.), (.~), (%~) )
 import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.GraphViz as DG
@@ -61,26 +63,46 @@ handleInfoEvent s0 evt =
       gvTest <- liftIO $ DG.isGraphvizInstalled
       case gvTest of
         True -> do
-          let dot = SCG.regEntryToGraphViz regEntry
-          let cmd = DG.Dot
-          case mPath of
-            Nothing -> liftIO $ DG.runGraphvizCanvas cmd dot DG.Gtk
-            Just path -> do
-              let msg = SCL.msgWith { SCL.logLevel = SCL.Info
-                                    , SCL.logSource = SCL.EventHandler (T.pack "VisualizeSymbolicTerm")
-                                    , SCL.logText = [ PP.pretty "Saving to SVG " <> PP.pretty path ]
-                                    }
-              liftIO $ SCS.logMessage s0 msg
-              _ <- liftIO $ DG.runGraphvizCommand cmd dot DG.Svg path
-              _ <- liftIO $ DG.runGraphvizCommand cmd dot (DG.XDot Nothing) (path <.> "dot")
-              return ()
+          -- Run the term rendering and graphviz process in another thread so
+          -- that we don't block the UI
+          _task <- liftIO $ CCA.async $ flip X.onException (reportGraphvizError s0) $ do
+            let dot = SCG.regEntryToGraphViz regEntry
+            let cmd = DG.Dot
+            case mPath of
+              Nothing -> DG.runGraphvizCanvas cmd dot DG.Gtk
+              Just path -> do
+                let msg = SCL.msgWith { SCL.logLevel = SCL.Info
+                                      , SCL.logSource = SCL.EventHandler (T.pack "VisualizeSymbolicTerm")
+                                      , SCL.logText = [ PP.pretty "Saving to SVG " <> PP.pretty path ]
+                                      }
+                SCS.logMessage s0 msg
+                _ <- DG.runGraphvizCommand cmd dot DG.Svg path
+                _ <- DG.runGraphvizCommand cmd dot (DG.XDot Nothing) (path <.> "dot")
+                let msg2 = SCL.msgWith { SCL.logLevel = SCL.Info
+                                       , SCL.logSource = SCL.EventHandler (T.pack "VisualizeSymbolicTerm")
+                                       , SCL.logText = [ PP.pretty "Finished rendering symbolic term to " <> PP.pretty path ]
+                                       }
+                SCS.logMessage s0 msg2
+                return ()
+          -- FIXME: Stash the task handle away so that we can monitor it from a
+          -- UI somewhere (and clean them up periodically, and on program
+          -- termination)
+          return ()
         False -> do
           let msg = SCL.msgWith { SCL.logLevel = SCL.Warn
                                 , SCL.logSource = SCL.EventHandler (T.pack "VisualizeSymbolicTerm")
-                                , SCL.logText = [PP.pretty "Graphviz is not installed"]
+                                , SCL.logText = [ PP.pretty "Graphviz is not installed" ]
                                 }
           liftIO $ SCS.logMessage s0 msg
       return $! SCS.State s0
+
+reportGraphvizError :: SCS.S e u arch s -> IO ()
+reportGraphvizError s0 = do
+  let msg = SCL.msgWith { SCL.logLevel = SCL.Error
+                        , SCL.logSource = SCL.EventHandler (T.pack "VisualizeSymbolicTerm")
+                        , SCL.logText = [ PP.pretty "Error while running graphviz" ]
+                        }
+  SCS.logMessage s0 msg
 
 -- | Get the current mode (looking through the minibuffer if necessary)
 withBaseMode :: SCM.SomeUIMode s -> (SCM.UIMode s SCM.NormalK -> a) -> a
