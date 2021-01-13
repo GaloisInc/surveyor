@@ -141,6 +141,13 @@ handleCustomEvent s0 evt =
       handleSymbolicExecutionEvent s1 se
     C.LoggingEvent le -> do
       s1 <- C.handleLoggingEvent s0 le
+      -- Take the first line of any logs (that are not debug spam) and reflect
+      -- them into the echo area
+      case le of
+        C.LogDiagnostic msg
+          | C.logLevel (C.logMsg msg) > C.Debug
+          , firstLine : _ <- C.logText (C.logMsg msg) -> liftIO $ C.sEmitEvent s0 (SBE.EchoText firstLine)
+        _ -> return ()
       B.continue s1
     C.InfoEvent ie -> do
       s1 <- C.handleInfoEvent s0 ie

@@ -40,6 +40,7 @@ import qualified Graphics.Vty as V
 
 import           Surveyor.Brick.Attributes
 import qualified Surveyor.Brick.Command as SBC
+import qualified Surveyor.Brick.EchoArea as SBEA
 import qualified Surveyor.Brick.Extension as SBE
 import qualified Surveyor.Brick.Handlers as BH
 import qualified Surveyor.Brick.Keymap as SBK
@@ -145,7 +146,7 @@ drawAppShell s w =
         C.SomeMiniBuffer (C.MiniBuffer _)
           | mb <- s ^. C.lUIExtension . BH.minibufferG ->
             MB.renderMinibuffer True mb
-        _ -> maybe B.emptyWidget B.txt (C.getEchoAreaText (C.sEchoArea s))
+        _ -> maybe B.emptyWidget B.txt (SBEA.getEchoAreaText (SBE.sEchoArea (C.sUIExtension s)))
 
 drawKeyBindings :: (C.Architecture arch s) => C.S BH.BrickUIExtension BH.BrickUIState arch s -> B.Widget Names
 drawKeyBindings s = B.hBox (mapMaybe toKeyHint keys)
@@ -237,10 +238,6 @@ appAttrMap _ = B.attrMap V.defAttr [ (focusedListAttr, V.blue `B.on` V.white)
 appStartEvent :: C.State BH.BrickUIExtension BH.BrickUIState s -> B.EventM Names (C.State BH.BrickUIExtension BH.BrickUIState s)
 appStartEvent s0 = return s0
 
-resetEchoArea :: C.Chan (C.Events s (C.S BH.BrickUIExtension BH.BrickUIState)) -> IO ()
-resetEchoArea customEventChan =
-  C.emitEvent customEventChan C.ResetEchoArea
-
 surveyor :: Maybe FilePath -> IO ()
 surveyor mExePath = PN.withIONonceGenerator $ \ng -> do
   customEventChan <- B.newBChan 100
@@ -297,7 +294,6 @@ emptyState mfp mloader ng customEventChan = do
                                                 , C.sFileLogger = Just fileLogger
                                                 }
              , C.sDiagnosticLevel = C.Debug
-             , C.sEchoArea = C.echoArea 10 (resetEchoArea customEventChan)
              , C.sUIMode = C.SomeUIMode C.Diags
              , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
              , C.sEventChannel = customEventChan
@@ -347,7 +343,6 @@ emptyArchState mfp ng n0 mkAnalysisResult chan = do
                                                 , C.sFileLogger = Just fileLogger
                                                 }
              , C.sDiagnosticLevel = C.Debug
-             , C.sEchoArea = C.echoArea 10 (resetEchoArea chan)
              , C.sUIMode = C.SomeUIMode C.Diags
              , C.sAppState = maybe C.AwaitingFile (const C.Loading) mfp
              , C.sEventChannel = chan

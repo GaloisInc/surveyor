@@ -17,6 +17,7 @@ module Surveyor.Brick.Extension (
   -- * Lenses
   minibufferL,
   minibufferG,
+  echoAreaL,
   functionSelectorL,
   functionSelectorG,
   blockSelectorL,
@@ -39,10 +40,12 @@ import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
 import qualified Data.Vector as V
 import           GHC.Generics ( Generic )
+import qualified Prettyprinter as PP
 import qualified Surveyor.Core as C
 
 import qualified Brick.Widget.Minibuffer as MBW
 
+import qualified Surveyor.Brick.EchoArea as SBEA
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.BlockViewer as BV
@@ -60,6 +63,7 @@ import qualified Surveyor.Brick.Widget.SymbolicExecution as SEM
 data BrickUIExtension s =
   BrickUIExtension { sMinibuffer :: !(MB.Minibuffer (C.SurveyorCommand s (C.S BrickUIExtension BrickUIState)) T.Text Names)
                    -- ^ The persistent state of the minibuffer
+                   , sEchoArea :: SBEA.EchoArea
                    }
   deriving (Generic)
 
@@ -77,7 +81,9 @@ data BrickUIState arch s =
   deriving (Generic)
 
 L.makeLensesFor
-  [("sMinibuffer", "minibufferL")]
+  [ ("sMinibuffer", "minibufferL")
+  , ("sEchoArea", "echoAreaL")
+  ]
   ''BrickUIExtension
 
 L.makeLensesFor
@@ -100,6 +106,12 @@ data BrickUIEvent s (st :: Type -> Type -> Type) where
   ShowDiagnostics :: BrickUIEvent s st
   OpenMinibuffer :: BrickUIEvent s st
   ShowSymbolicExecution :: BrickUIEvent s st
+
+  -- | Display a transient message to the user
+  EchoText :: !(PP.Doc ()) -> BrickUIEvent s st
+  -- | A message sent by the system (after a time delay) to reset the transient
+  -- message area
+  ResetEchoArea :: BrickUIEvent s st
 
   ListBlocks :: PN.Nonce s arch -> [C.Block arch s] -> BrickUIEvent s st
   ListFunctions :: PN.Nonce s arch -> [C.FunctionHandle arch s] -> BrickUIEvent s st

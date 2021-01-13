@@ -34,7 +34,6 @@ module Surveyor.Core.State (
   lLoader,
   lLogStore,
   diagnosticLevelL,
-  lEchoArea,
   lUIMode,
   lAppState,
   lEventChannel,
@@ -70,7 +69,6 @@ import qualified Surveyor.Core.Architecture as A
 import qualified Surveyor.Core.Arguments as AR
 import qualified Surveyor.Core.Chan as C
 import qualified Surveyor.Core.Context as CC
-import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.IRRepr as IR
 import           Surveyor.Core.Keymap ( Keymap )
@@ -180,8 +178,6 @@ data S e u (arch :: Type) s =
     , sLoader :: Maybe AsyncLoader
     , sDiagnosticLevel :: !SCL.Severity
     -- ^ The level of log to display
-    , sEchoArea :: !EA.EchoArea
-    -- ^ An area where one-line messages can be displayed
     , sUIMode :: !(SomeUIMode s)
     -- ^ The current UI mode, which drives rendering and keybindings available
     , sAppState :: AppState
@@ -221,7 +217,6 @@ L.makeLensesFor
   , ("sInputFile", "lInputFile")
   , ("sLogStore", "lLogStore")
   , ("sDiagnosticLevel", "diagnosticLevelL")
-  , ("sEchoArea", "lEchoArea")
   , ("sUIMode", "lUIMode")
   , ("sEventChannel", "lEventChannel")
   , ("sAppState", "lAppState")

@@ -31,6 +31,7 @@ import qualified Data.Parameterized.List as PL
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Text as T
 
+import qualified Surveyor.Brick.EchoArea as SBEA
 import qualified Surveyor.Brick.Extension as SBE
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Brick.Widget.Minibuffer as MB
@@ -48,6 +49,7 @@ mkExtension :: forall (arch :: Type) s
             -> (String -> Maybe (C.SomeAddress s)) -> T.Text -> SBE.BrickUIExtension s
 mkExtension emitEvent archNonce addrParser prompt =
   SBE.BrickUIExtension { SBE.sMinibuffer = MB.minibuffer addrParser updater MinibufferEditor MinibufferCompletionList prompt (C.allCommands ++ extraCommands)
+                       , SBE.sEchoArea = SBEA.echoArea 10 (emitEvent (C.toEvent SBE.ResetEchoArea))
                        }
   where
     updater = SBE.updateMinibufferCompletions emitEvent archNonce
