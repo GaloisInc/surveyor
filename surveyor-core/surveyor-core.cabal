@@ -46,7 +46,6 @@ library
                        Surveyor.Core.SymbolicExecution.Override
                        Surveyor.Core.SymbolicExecution.Session
                        Surveyor.Core.SymbolicExecution.State
-                       Surveyor.Core.EchoArea
                        Surveyor.Core.Events
                        Surveyor.Core.HandlerMonad
                        Surveyor.Core.IRRepr

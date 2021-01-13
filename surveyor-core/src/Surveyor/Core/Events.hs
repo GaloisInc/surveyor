@@ -33,7 +33,6 @@ import qualified Lang.Crucible.Backend as CB
 import qualified Lang.Crucible.CFG.Core as CCC
 import qualified Lang.Crucible.Simulator.Profiling as CSP
 import qualified Lang.Crucible.Simulator.RegMap as LMCR
-import qualified Prettyprinter as PP
 import qualified What4.BaseTypes as WT
 import qualified What4.Expr.Builder as WEB
 
@@ -83,11 +82,6 @@ data InfoEvent s st where
   -- | Show a description (help text and expected arguments) of a command in a
   -- manner suitable for the UI
   DescribeCommand :: (C.CommandLike cmd) => C.SomeCommand cmd -> InfoEvent s st
-  -- | Display a transient message to the user
-  EchoText :: !(PP.Doc ()) -> InfoEvent s st
-  -- | A message sent by the system (after a time delay) to reset the transient
-  -- message area
-  ResetEchoArea :: InfoEvent s st
   -- | Display a description of the keybindings active in the current context in
   -- a manner suitable for the UI
   DescribeKeys :: InfoEvent s st

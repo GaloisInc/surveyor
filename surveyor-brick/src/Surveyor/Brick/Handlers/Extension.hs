@@ -2,14 +2,16 @@
 module Surveyor.Brick.Handlers.Extension ( handleExtensionEvent ) where
 
 import qualified Brick as B
-import           Control.Lens ( (&), (.~), (^.), _Just )
+import           Control.Lens ( (&), (.~), (^.), (%~), _Just )
 import           Control.Monad.IO.Class ( liftIO )
 import qualified Data.Parameterized.Classes as PC
 import qualified Data.Text as T
 import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PPT
 import qualified Surveyor.Core as C
 
 import           Surveyor.Brick.Attributes ( focusedListAttr )
+import qualified Surveyor.Brick.EchoArea as SBEA
 import qualified Surveyor.Brick.Extension as SBE
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
 import qualified Surveyor.Brick.Widget.FunctionSelector as FS
@@ -115,3 +117,7 @@ handleExtensionEvent s0 evt =
               let s1 = s0 & C.lUIExtension . SBE.minibufferL .~ mb'
               B.continue $! C.State s1
       | otherwise -> B.continue (C.State s0)
+    SBE.EchoText txt -> do
+      ea' <- liftIO (SBEA.setEchoAreaText (SBE.sEchoArea (C.sUIExtension s0)) (PPT.renderStrict (PP.layoutCompact txt)))
+      B.continue $! C.State (s0 & C.lUIExtension . SBE.echoAreaL .~ ea')
+    SBE.ResetEchoArea -> B.continue $! C.State (s0 & C.lUIExtension . SBE.echoAreaL %~ SBEA.resetEchoArea)

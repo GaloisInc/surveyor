@@ -15,6 +15,7 @@ cabal-version:       >=1.10
 library
   exposed-modules:     Surveyor.Brick
                        Surveyor.Brick.Attributes
+                       Surveyor.Brick.EchoArea
                        Surveyor.Brick.Extension
                        Surveyor.Brick.Handlers
                        Surveyor.Brick.Names

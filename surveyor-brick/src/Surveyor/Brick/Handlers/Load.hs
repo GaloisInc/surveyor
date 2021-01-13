@@ -23,6 +23,7 @@ import qualified Surveyor.Core as C
 
 import           Surveyor.Brick.Attributes ( focusedListAttr )
 import qualified Surveyor.Brick.Command as BC
+import qualified Surveyor.Brick.EchoArea as SBEA
 import qualified Surveyor.Brick.Extension as SBE
 import qualified Surveyor.Brick.Keymap as SBK
 import qualified Surveyor.Brick.Widget.BlockSelector as BS
@@ -139,6 +140,9 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
         return (C.appendLog msg ls)
   nextLogStore <- F.foldlM appendTextLog (C.sLogStore s0) (fmap PP.pretty newDiags)
   sem <- SEM.symbolicExecutionManager (C.sNonceGenerator s0) (Some (C.Configuring ses))
+  let uiExt = SBE.BrickUIExtension { SBE.sMinibuffer = MB.minibuffer addrParser (SBE.updateMinibufferCompletions (C.sEmitEvent s0) (C.archNonce ares)) MinibufferEditor MinibufferCompletionList (T.pack "M-x") (C.allCommands ++ BC.extraCommands)
+                                   , SBE.sEchoArea = SBEA.echoArea 10 (C.emitEvent (C.sEventChannel s0) (C.toEvent SBE.ResetEchoArea))
+                                   }
   return C.S { C.sLogStore = nextLogStore
              , C.sDiagnosticLevel = C.sDiagnosticLevel s0
              , C.sLogActions = C.LoggingActions { C.sStateLogger = C.logToState (C.sEventChannel s0)
@@ -148,7 +152,6 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              , C.sAppState = state
              , C.sEventChannel = C.sEventChannel s0
              , C.sNonceGenerator = C.sNonceGenerator s0
-             , C.sEchoArea = C.sEchoArea s0
              , C.sInputFile = C.sInputFile s0
              , C.sLoader = C.sLoader s0
              , C.sKeymap = keymap
@@ -194,7 +197,4 @@ stateFromAnalysisResult s0 ares newDiags state uiMode = do
              }
   where
     addrParser s = C.SomeAddress (C.archNonce ares) <$> C.parseAddress s
-    uiExt = SBE.BrickUIExtension { SBE.sMinibuffer = MB.minibuffer addrParser (SBE.updateMinibufferCompletions (C.sEmitEvent s0) (C.archNonce ares)) MinibufferEditor MinibufferCompletionList (T.pack "M-x") (C.allCommands ++ BC.extraCommands)
-                                 }
-
     keymap = SBK.defaultKeymap (Just (C.archNonce ares))

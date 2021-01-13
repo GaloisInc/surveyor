@@ -197,12 +197,6 @@ module Surveyor.Core (
   -- * Translation Cache
   TC.TranslationCache,
   TC.newTranslationCache,
-  -- * The EchoArea abstraction
-  EA.EchoArea,
-  EA.echoArea,
-  EA.getEchoAreaText,
-  EA.setEchoAreaText,
-  EA.resetEchoArea,
   -- * Handlers
   module Surveyor.Core.HandlerMonad,
   HC.handleContextEvent,
@@ -249,7 +243,6 @@ import qualified Surveyor.Core.Chan as CS
 import qualified Surveyor.Core.Command as CC
 import           Surveyor.Core.Commands
 import qualified Surveyor.Core.Context as CCX
-import qualified Surveyor.Core.EchoArea as EA
 import qualified Surveyor.Core.Events as CE
 import qualified Surveyor.Core.Handlers.Context as HC
 import qualified Surveyor.Core.Handlers.Info as HI

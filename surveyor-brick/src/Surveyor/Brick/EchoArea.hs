@@ -1,7 +1,7 @@
 -- | A data abstraction around a text value that can timeout
 --
 -- This could probably be generalized beyond just the echo area
-module Surveyor.Core.EchoArea (
+module Surveyor.Brick.EchoArea (
   EchoArea,
   echoArea,
   resetEchoArea,

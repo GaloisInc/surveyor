@@ -5,17 +5,15 @@ module Surveyor.Core.Handlers.Info (
 
 import qualified Control.Concurrent.Async as CCA
 import qualified Control.Exception as X
-import           Control.Lens ( (&), (^.), (.~), (%~) )
+import           Control.Lens ( (&), (^.), (.~) )
 import           Control.Monad.IO.Class ( MonadIO, liftIO )
 import qualified Data.GraphViz as DG
 import qualified Data.Text as T
 import qualified Data.Text.Prettyprint.Doc as PP
-import qualified Prettyprinter.Render.Text as PPT
 import           System.FilePath ( (<.>) )
 
 import qualified Surveyor.Core.Architecture as SCA
 import qualified Surveyor.Core.Command as SCC
-import qualified Surveyor.Core.EchoArea as SCEA
 import qualified Surveyor.Core.Events as SCE
 import qualified Surveyor.Core.GraphViz as SCG
 import qualified Surveyor.Core.Keymap as SCK
@@ -33,18 +31,12 @@ handleInfoEvent :: ( SCA.Architecture arch s
 handleInfoEvent s0 evt =
   case evt of
     SCE.DescribeCommand (SCC.SomeCommand cmd) -> do
-      let msg = PP.pretty (SCC.cmdName cmd) <> PP.pretty ": " <> SCC.cmdDocstring cmd
-      liftIO (SCS.sEmitEvent s0 (SCE.EchoText msg))
+      let msg = SCL.msgWith { SCL.logLevel = SCL.Requested
+                            , SCL.logSource = SCL.EventHandler (T.pack "DescribeCommand")
+                            , SCL.logText = [PP.pretty (SCC.cmdName cmd) <> PP.pretty ": " <> SCC.cmdDocstring cmd]
+                            }
+      liftIO $ SCS.logMessage s0 msg
       return $! SCS.State s0
-    SCE.EchoText txt -> do
-      -- All echo area text is mirrored into the log
-      liftIO $ SCS.logMessage s0 (SCL.msgWith { SCL.logLevel = SCL.Requested
-                                              , SCL.logSource = SCL.EchoAreaUpdate
-                                              , SCL.logText = [txt]
-                                              })
-      ea' <- liftIO (SCEA.setEchoAreaText (SCS.sEchoArea s0) (PPT.renderStrict (PP.layoutCompact txt)))
-      return $! SCS.State (s0 & SCS.lEchoArea .~ ea')
-    SCE.ResetEchoArea -> return $! SCS.State (s0 & SCS.lEchoArea %~ SCEA.resetEchoArea)
     SCE.DescribeKeys -> do
       withBaseMode (s0 ^. SCS.lUIMode) $ \normalMode -> do
         let keys = SCK.modeKeybindings (s0 ^. SCS.lKeymap) (SCM.SomeUIMode normalMode)
