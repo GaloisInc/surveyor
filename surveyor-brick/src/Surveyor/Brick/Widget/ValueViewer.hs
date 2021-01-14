@@ -27,10 +27,7 @@ import qualified Control.Lens as L
 import qualified Control.Monad.State.Strict as St
 import qualified Data.BitVector.Sized as DBS
 import qualified Data.List as L
-import qualified Data.List.NonEmpty as DLN
-import qualified Data.Map.Strict as Map
 import           Data.Maybe ( fromMaybe )
-import qualified Data.Parameterized.Map as MapF
 import qualified Data.Parameterized.Nonce as PN
 import           Data.Parameterized.Some ( Some(..) )
 import qualified Data.Parameterized.TraversableFC as FC
@@ -55,6 +52,7 @@ import qualified What4.Utils.StringLiteral as WUS
 
 import           Surveyor.Brick.Names ( Names(..) )
 import qualified Surveyor.Core as C
+import qualified Surveyor.Core.ExprMap as SCEM
 
 -- | Mark widgets as either being rendered inline in operand positions or as
 -- generating a binding that will be referred to by a number in an operand
@@ -77,23 +75,6 @@ data RenderWidget sym =
                , rwValue :: Maybe (Some (LMCR.RegEntry sym))
                }
 
--- | This is a simple wrapper around a 'RenderWidget' to throw away a type
--- parameter so that we can store it in a 'MapF.MapF'.  We need a custom type
--- instead of just using 'Data.Functor.Const' because that type is too
--- polymorphic and causes some type inference problems.
-newtype ConstWidget sym (tp :: WT.BaseType) = ConstWidget (RenderWidget sym)
-
--- This is a very simple wrapper around the 'WEB.Expr' type arranged so that we
--- can use them as surrogate keys in the cache.  The challenge is that we can't
--- expose the ExprBuilder in the type (without propagating it everywhere), but
--- we need it in order to get an Ord instance in scope.  Instead, we capture
--- that equality in an existential, which is enough to let us derive Eq/Ord.
-data SymExpr s sym where
-  SymExpr :: (sym ~ WEB.ExprBuilder s st fs) => Some (WEB.Expr s) -> SymExpr s sym
-
-deriving instance Eq (SymExpr s sym)
-deriving instance Ord (SymExpr s sym)
-
 -- | A cache of pre-rendered widgets
 --
 -- Re-rendering some widgets is costly (and we need to avoid it to preserve
@@ -104,13 +85,12 @@ deriving instance Ord (SymExpr s sym)
 -- caches could be unified on a sum type for keys, but keeping them separate is
 -- more efficient for the common case (of nonce lookups)
 data Cache s sym =
-  Cache { _cachedByNonce :: !(MapF.MapF (PN.Nonce s) (ConstWidget sym))
-        , _cachedBySurrogate :: !(Map.Map (DLN.NonEmpty (SymExpr s sym)) (RenderWidget sym))
+  Cache { _cachedWidgets :: !(SCEM.ExprMap s sym (RenderWidget sym))
         , _surrogateIdentifiers :: !Int
         }
 
 emptyCache :: Cache s sym
-emptyCache = Cache MapF.empty mempty 0
+emptyCache = Cache SCEM.emptyExprMap 0
 
 L.makeLenses ''Cache
 
@@ -198,14 +178,11 @@ buildViewer tp re = do
   -- We'll use this same primitive for rendering later, but then we'll start it
   -- with a primed cache
   root <- buildTermWidget tp re
-  nonceEntries <- St.gets (^. cachedByNonce)
-  surrogateEntries <- St.gets (^. cachedBySurrogate)
+  cached <- St.gets (^. cachedWidgets)
   c <- St.get
   -- FIXME: It would be really nice to sort these in dependency order; being
   -- split between two caches, entries could be interleaved oddly
-  let cachedVals = concat [ [ w | MapF.Pair _ (ConstWidget w) <- MapF.toList nonceEntries ]
-                          , [ w | (_, w) <- Map.toList surrogateEntries ]
-                          ]
+  let cachedVals = SCEM.elems cached
   let vals = DV.fromList (if null cachedVals then [root] else cachedVals)
   let l0 = BL.list ValueViewerList vals 1
   let vvs = ValueViewerState { regType = tp
@@ -227,19 +204,19 @@ buildTermWidget tp re =
         LCT.UnitRepr ->
           -- We don't update the cache here because we don't have a nonce for these
           inline (B.txt "()")
-        CLM.LLVMPointerRepr _w ->
-          case re of
-            CLM.LLVMPointer base off -> do
-              let key = SymExpr (Some base) DLN.:| [SymExpr (Some off)]
-              surrogateCache <- St.gets (^. cachedBySurrogate)
-              case Map.lookup key surrogateCache of
-                Just rw -> return rw
-                Nothing -> do
+        CLM.LLVMPointerRepr _w -> do
+          let key = SCEM.llvmPointerKey (LMCR.RegEntry tp re)
+          cached <- St.gets (^. cachedWidgets)
+          case SCEM.lookupExprValue key cached of
+            Just rw -> return rw
+            Nothing -> do
+              case re of
+                CLM.LLVMPointer base off -> do
                   base' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType base)) base
                   off' <- argRef <$> buildTermWidget (LCT.baseToType (WI.exprType off)) off
                   let rendering = intersperse [B.txt "llvmPointer", base', off']
                   bindSurrogate key (LMCR.RegEntry tp re) rendering
-                  -- inline (intersperse [B.txt "llvmPointer", base', off'])
+
         _ -> inline (B.txt ("Unhandled crucible type " <> T.pack (show tp)))
     LCT.AsBaseType _btp ->
       case re of
@@ -256,9 +233,10 @@ buildTermWidget tp re =
           inlineLoc re (B.txt "$" B.<+> B.txt (WS.solverSymbolAsText (WEB.bvarName bv)))
         WEB.NonceAppExpr nae -> do
           let nonce = WEB.nonceExprId nae
-          m <- St.gets (^. cachedByNonce)
-          case MapF.lookup nonce m of
-            Just (ConstWidget cached) -> return cached
+          let key = SCEM.nonceValueKey nonce
+          cached <- St.gets (^. cachedWidgets)
+          case SCEM.lookupExprValue key cached of
+            Just cachedRendering -> return cachedRendering
             Nothing ->
               case WEB.nonceExprApp nae of
                 WEB.Annotation bt annotNonce e -> do
@@ -306,9 +284,10 @@ buildTermWidget tp re =
                                             ])
         WEB.AppExpr ae -> do
           let nonce = WEB.appExprId ae
-          m <- St.gets (^. cachedByNonce)
-          case MapF.lookup nonce m of
-            Just (ConstWidget cached) -> return cached
+          let key = SCEM.nonceValueKey nonce
+          cached <- St.gets (^. cachedWidgets)
+          case SCEM.lookupExprValue key cached of
+            Just cachedRendering -> return cachedRendering
             Nothing ->
               case WEB.appExprApp ae of
                 WEB.BaseEq _tp e1 e2 -> bindBinExpr ae e1 e2 "eq"
@@ -566,12 +545,13 @@ bindExpr :: (HasNonce e, sym ~ WEB.ExprBuilder t st fs)
          -> B.Widget Names
          -> ViewerBuilder t sym (RenderWidget sym)
 bindExpr ae w =
-  returnCached (getNonce ae) $! RenderWidget (RenderBound (thisRef ae) w) (Just (getLoc ae)) (Just regEntry)
+  returnCached key $! RenderWidget (RenderBound (thisRef ae) w) (Just (getLoc ae)) (Just regEntry)
   where
+    key = SCEM.nonceValueKey (getNonce ae)
     re = getSymExpr ae
     regEntry = Some (LMCR.RegEntry (LCT.baseToType (WI.exprType re)) re)
 
-bindSurrogate :: DLN.NonEmpty (SymExpr s sym)
+bindSurrogate :: SCEM.ExprMapKey s sym tp
               -> LMCR.RegEntry sym tp
               -> B.Widget Names
               -> ViewerBuilder s sym (RenderWidget sym)
@@ -582,15 +562,15 @@ bindSurrogate key entry w = do
   -- different namespace
   let binding = B.str (printf "%%%d" nextSurrogate)
   let rw = RenderWidget (RenderBound binding w) Nothing (Just (Some entry))
-  St.modify' $ \s -> s & cachedBySurrogate %~ Map.insert key rw
+  St.modify' $ \s -> s & cachedWidgets %~ SCEM.addExprValue key rw
   return rw
 
-returnCached :: forall s sym (tp :: WT.BaseType)
-              . PN.Nonce s tp
+returnCached :: forall s sym tp
+              . SCEM.ExprMapKey s sym tp
              -> RenderWidget sym
              -> ViewerBuilder s sym (RenderWidget sym)
-returnCached nonce res = do
-  St.modify' $ \s -> s & cachedByNonce %~ MapF.insert nonce (ConstWidget res)
+returnCached key res = do
+  St.modify' $ \s -> s & cachedWidgets %~ SCEM.addExprValue key res
   return res
 
 thisRef :: (HasNonce e) => e t tp -> B.Widget n
