@@ -15,8 +15,7 @@ import qualified Data.BitVector.Sized as DBS
 import qualified Data.Foldable as F
 import qualified Data.GraphViz as DG
 import qualified Data.Map.Strict as Map
-import           Data.Maybe ( fromMaybe, isJust )
-import qualified Data.Parameterized.Classes as PC
+import           Data.Maybe ( fromMaybe )
 import qualified Data.Parameterized.Context as Ctx
 import qualified Data.Parameterized.Nonce as PN
 import qualified Data.Parameterized.TraversableFC as FC
@@ -34,6 +33,8 @@ import qualified What4.SemiRing as SR
 import qualified What4.Symbol as WS
 import qualified What4.Utils.Complex as WUC
 import qualified What4.Utils.StringLiteral as WUS
+
+import qualified Surveyor.Core.ExprMap as SCEM
 
 -- | How a sub-term should be rendered in its host term
 --
@@ -88,26 +89,17 @@ data FormulaEdgeLabel where
 deriving instance Eq FormulaEdgeLabel
 deriving instance Ord FormulaEdgeLabel
 
-data CrucibleNonce s where
-  CrucibleNonce :: forall s (tp :: LCT.BaseType) . PN.Nonce s tp -> CrucibleNonce s
-
-instance Eq (CrucibleNonce s) where
-  CrucibleNonce n1 == CrucibleNonce n2 = isJust (PC.testEquality n1 n2)
-
-instance Ord (CrucibleNonce s) where
-  compare (CrucibleNonce n1) (CrucibleNonce n2) = PC.toOrdering (PC.compareF n1 n2)
-
 data RegEntryBuilderState s sym =
   RegEntryBuilderState { builderEdges :: Map.Map (FormulaNode s sym) (Set.Set (FormulaNode s sym, FormulaEdgeLabel))
                        , builderNodes :: Map.Map (FormulaNode s sym) FormulaNodeLabel
-                       , renderCache :: Map.Map (CrucibleNonce s) Rendering
+                       , renderCache :: SCEM.ExprMap s sym Rendering
                        }
 
 emptyRegEntryBuilderState :: RegEntryBuilderState s sym
 emptyRegEntryBuilderState =
   RegEntryBuilderState { builderEdges = Map.empty
                        , builderNodes = Map.empty
-                       , renderCache = Map.empty
+                       , renderCache = SCEM.emptyExprMap
                        }
 
 newtype RegEntryBuilder s sym a =
@@ -167,7 +159,7 @@ traverseFormulaStructure predEntry entry =
           let regVal = LMCR.regValue entry
           addEdge predEntry n
           cache <- MS.gets renderCache
-          case Map.lookup (CrucibleNonce nonce) cache of
+          case SCEM.lookupExprValue (SCEM.nonceValueKey nonce) cache of
             Just r -> return r
             Nothing ->
               case WEB.nonceExprApp nae of
@@ -223,7 +215,7 @@ traverseFormulaStructure predEntry entry =
           let regVal = LMCR.regValue entry
           addEdge predEntry n
           cache <- MS.gets renderCache
-          case Map.lookup (CrucibleNonce nonce) cache of
+          case SCEM.lookupExprValue (SCEM.nonceValueKey nonce) cache of
             Just r -> return r
             Nothing ->
               case WEB.appExprApp ae of
@@ -466,16 +458,18 @@ ensureNode n nl = MS.modify' $ \g -> g { builderEdges = Map.insertWith Set.union
                                        , builderNodes = Map.insert n nl (builderNodes g)
                                        }
 
-bind :: forall sym s st fs (tp :: LCT.BaseType)
-      . (sym ~ WEB.ExprBuilder s st fs)
-     => PN.Nonce s tp
-     -> WEB.Expr s tp
+bind :: forall sym s st fs (bt :: LCT.BaseType) tp
+      . ( sym ~ WEB.ExprBuilder s st fs
+        , tp ~ LCT.BaseToType bt
+        )
+     => PN.Nonce s bt
+     -> WEB.Expr s bt
      -> PP.Doc ()
      -> RegEntryBuilder s sym Rendering
 bind nonce e doc = do
   MS.modify' $ \g -> g { builderEdges = Map.insertWith Set.union n Set.empty (builderEdges g)
                        , builderNodes = Map.insert n nl (builderNodes g)
-                       , renderCache = Map.insert (CrucibleNonce nonce) ref (renderCache g)
+                       , renderCache = SCEM.addExprValue (SCEM.nonceValueKey nonce) ref (renderCache g)
                        }
   return ref
   where
